@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChitFund Production — Architecture</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3250;
+      --accent: #6c8aff;
+      --accent2: #a78bfa;
+      --accent3: #34d399;
+      --accent4: #fb923c;
+      --accent5: #f472b6;
+      --text: #e2e8f0;
+      --muted: #8892b0;
+      --code-bg: #13151f;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    /* ── Layout ── */
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: 220px;
+      height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 24px 0;
+      z-index: 100;
+    }
+
+    .sidebar-logo {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .sidebar-logo .logo-icon {
+      font-size: 22px;
+      margin-bottom: 4px;
+    }
+
+    .sidebar-logo h2 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .sidebar-logo p {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .nav-group {
+      padding: 8px 0;
+    }
+
+    .nav-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 6px 20px 4px;
+    }
+
+    .nav-link {
+      display: block;
+      padding: 6px 20px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      border-left: 2px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .nav-link:hover {
+      color: var(--text);
+      background: var(--surface2);
+      border-left-color: var(--accent);
+    }
+
+    .main {
+      margin-left: 220px;
+      padding: 48px 56px;
+      max-width: 1100px;
+    }
+
+    /* ── Header ── */
+    .page-header {
+      margin-bottom: 48px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .badge {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .page-header h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .page-header h1 span { color: var(--accent); }
+
+    .page-header p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 640px;
+    }
+
+    .meta-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .pill.blue { border-color: #3b4fd8; color: var(--accent); }
+    .pill.purple { border-color: #6d46c4; color: var(--accent2); }
+    .pill.green { border-color: #0d7a58; color: var(--accent3); }
+    .pill.orange { border-color: #a0521a; color: var(--accent4); }
+
+    /* ── Section ── */
+    section {
+      margin-bottom: 64px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .section-num {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 12px;
+      margin-top: 28px;
+    }
+
+    p {
+      color: var(--muted);
+      margin-bottom: 12px;
+      max-width: 720px;
+    }
+
+    /* ── Cards ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+    }
+
+    .card-icon {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .card h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .card p {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0;
+      max-width: none;
+    }
+
+    .card .tag {
+      display: inline-block;
+      margin-top: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* ── Diagram ── */
+    .diagram {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 24px;
+      margin: 20px 0;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre;
+      color: #cdd6f4;
+    }
+
+    /* ── Table ── */
+    .tbl-wrap {
+      overflow-x: auto;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      margin: 16px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    thead {
+      background: var(--surface2);
+    }
+
+    th {
+      text-align: left;
+      padding: 10px 16px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td { background: var(--surface2); }
+
+    td code, th code {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: monospace;
+      font-size: 11.5px;
+      color: var(--accent);
+    }
+
+    /* ── Chips ── */
+    .chip {
+      display: inline-block;
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .chip.blue   { background: #1a2866; color: #93c5fd; }
+    .chip.green  { background: #0d3d2c; color: #6ee7b7; }
+    .chip.red    { background: #3d0d16; color: #fca5a5; }
+    .chip.orange { background: #3d200d; color: #fdba74; }
+    .chip.purple { background: #2a1a4a; color: #c4b5fd; }
+    .chip.teal   { background: #0d2e3d; color: #67e8f9; }
+    .chip.gray   { background: #1e2333; color: #94a3b8; }
+
+    /* ── Route group ── */
+    .route-group {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .route-group-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 18px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .method {
+      font-family: monospace;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 4px;
+      min-width: 46px;
+      text-align: center;
+    }
+
+    .method.GET    { background: #0d3d2c; color: #6ee7b7; }
+    .method.POST   { background: #1a2866; color: #93c5fd; }
+    .method.PATCH  { background: #3d200d; color: #fdba74; }
+    .method.DELETE { background: #3d0d16; color: #fca5a5; }
+    .method.PUT    { background: #2a1a4a; color: #c4b5fd; }
+
+    .route-path {
+      font-family: monospace;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .route-desc {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .route-list { padding: 8px 0; }
+
+    .route-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .route-item:last-child { border-bottom: none; }
+
+    .route-item .route-path { font-size: 12.5px; }
+
+    /* ── Flow ── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin: 20px 0;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+    }
+
+    .flow-left {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 48px;
+      flex-shrink: 0;
+    }
+
+    .flow-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: 18px;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 1;
+    }
+
+    .flow-line {
+      width: 2px;
+      background: var(--border);
+      flex: 1;
+      margin: 0 auto;
+    }
+
+    .flow-step:last-child .flow-line { display: none; }
+
+    .flow-box {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 6px 0;
+    }
+
+    .flow-box h5 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .flow-box p {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0;
+      max-width: none;
+    }
+
+    /* ── Schema block ── */
+    .schema-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .schema-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .schema-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .schema-card-header .table-name {
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .schema-card-body {
+      padding: 10px 14px;
+    }
+
+    .schema-field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .schema-field:last-child { border-bottom: none; }
+
+    .field-name {
+      font-family: monospace;
+      color: var(--text);
+    }
+
+    .field-type {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: monospace;
+    }
+
+    /* ── Callout ── */
+    .callout {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .callout strong { color: var(--text); }
+
+    /* ── Pattern list ── */
+    .pattern-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+
+    .pattern-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .pattern-item h5 {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .pattern-item p {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0;
+      max-width: none;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 40px 0;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ════════ SIDEBAR ════════ -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">🏦</div>
+    <h2>ChitFund</h2>
+    <p>Architecture Doc</p>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Overview</div>
+    <a class="nav-link" href="#overview">Project Overview</a>
+    <a class="nav-link" href="#stack">Tech Stack</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Backend</div>
+    <a class="nav-link" href="#layers">Layered Architecture</a>
+    <a class="nav-link" href="#directory">Directory Structure</a>
+    <a class="nav-link" href="#middleware">Middleware Pipeline</a>
+    <a class="nav-link" href="#auth">Auth Flow</a>
+    <a class="nav-link" href="#api">API Routes</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Data</div>
+    <a class="nav-link" href="#schema">Database Schema</a>
+    <a class="nav-link" href="#money">Money & Ledger</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Frontend</div>
+    <a class="nav-link" href="#frontend">Frontend Architecture</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Patterns</div>
+    <a class="nav-link" href="#patterns">Key Patterns</a>
+    <a class="nav-link" href="#env">Environment</a>
+  </div>
+</nav>
+
+<!-- ════════ MAIN ════════ -->
+<main class="main">
+
+  <!-- PAGE HEADER -->
+  <div class="page-header" id="overview">
+    <div class="badge">Architecture Document · v1.0 · 2026-05</div>
+    <h1>ChitFund <span>Production</span></h1>
+    <p>A full-stack chit fund management system — handling group formation, monthly auction cycles, payment tracking, basket loans, and analytics for digital-first chit fund operators.</p>
+    <div class="meta-pills">
+      <span class="pill blue">TypeScript</span>
+      <span class="pill blue">Express 4</span>
+      <span class="pill blue">Drizzle ORM</span>
+      <span class="pill green">PostgreSQL</span>
+      <span class="pill purple">React 19</span>
+      <span class="pill purple">Vite 6</span>
+      <span class="pill orange">JWT Auth</span>
+      <span class="pill orange">Zod Validation</span>
+    </div>
+  </div>
+
+  <!-- ═══ 1. TECH STACK ═══ -->
+  <section id="stack">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <h2>Tech Stack</h2>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon">⚙️</div>
+        <h4>Runtime</h4>
+        <p>Node.js + TypeScript 5.6</p>
+        <span class="tag" style="color:var(--accent3)">ES2020 / CommonJS</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🌐</div>
+        <h4>HTTP Framework</h4>
+        <p>Express 4.21</p>
+        <span class="tag" style="color:var(--accent)">REST API</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🗃️</div>
+        <h4>Database</h4>
+        <p>PostgreSQL via Drizzle ORM 0.45</p>
+        <span class="tag" style="color:var(--accent3)">Type-safe queries</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔐</div>
+        <h4>Auth</h4>
+        <p>JWT (access + refresh) + bcryptjs + OTP</p>
+        <span class="tag" style="color:var(--accent4)">Stateless</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">✅</div>
+        <h4>Validation</h4>
+        <p>Zod 3.23 on all inputs</p>
+        <span class="tag" style="color:var(--accent2)">Schema-first</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🖥️</div>
+        <h4>Frontend</h4>
+        <p>React 19 + Vite 6 + Tailwind CSS 4</p>
+        <span class="tag" style="color:var(--accent2)">SPA</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🧪</div>
+        <h4>Testing</h4>
+        <p>Vitest 2.1 + Supertest</p>
+        <span class="tag" style="color:var(--accent3)">Integration tests</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">⏰</div>
+        <h4>Scheduler</h4>
+        <p>node-cron 4 for interest accrual jobs</p>
+        <span class="tag" style="color:var(--accent4)">Cron</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 2. LAYERED ARCHITECTURE ═══ -->
+  <section id="layers">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <h2>Layered Architecture</h2>
+    </div>
+
+    <p>The backend follows a strict 4-layer architecture. Each layer has a single responsibility and only talks to the layer directly below it.</p>
+
+    <div class="diagram">
+┌─────────────────────────────────────────────────────────────┐
+│                         CLIENT                              │
+│              React SPA  (port 5173 / Vite)                  │
+│                 Proxies /v1 → localhost:3000                 │
+└────────────────────────┬────────────────────────────────────┘
+                         │ HTTP / REST
+┌────────────────────────▼────────────────────────────────────┐
+│                  MIDDLEWARE PIPELINE                         │
+│  express.json → rateLimiter → authenticate → requireMember  │
+│             → requireAdmin → validate(zod)                  │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                    ROUTE LAYER   src/routes/                 │
+│  Declares HTTP verbs + paths, attaches middleware & handler  │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                 CONTROLLER LAYER  src/controllers/           │
+│  Reads req, calls service(s), formats and sends response     │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                  SERVICE LAYER   src/services/               │
+│  Business logic, orchestration, throws AppError on failure   │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│               DATABASE LAYER   src/db/schema/ + config/db   │
+│         Drizzle ORM queries against PostgreSQL               │
+└─────────────────────────────────────────────────────────────┘</div>
+
+    <div class="callout">
+      <strong>Rule:</strong> Routes never touch the database. Controllers never write SQL. Services never format HTTP responses. This keeps the layers independently testable and replaceable.
+    </div>
+  </section>
+
+  <!-- ═══ 3. DIRECTORY STRUCTURE ═══ -->
+  <section id="directory">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <h2>Directory Structure</h2>
+    </div>
+
+    <div class="diagram">ChitFund_Production/
+├── src/                          # Backend source
+│   ├── index.ts                  # Server entrypoint — binds port, starts cron jobs
+│   ├── app.ts                    # Express app factory — mounts middleware & routes
+│   │
+│   ├── config/
+│   │   ├── env.ts                # Zod-validated env variables
+│   │   └── db.ts                 # Drizzle ORM + postgres client
+│   │
+│   ├── routes/
+│   │   ├── index.ts              # Aggregates all sub-routers under /v1
+│   │   ├── auth.routes.ts
+│   │   ├── users.routes.ts
+│   │   ├── groups.routes.ts
+│   │   ├── memberships.routes.ts
+│   │   ├── cycles.routes.ts
+│   │   ├── payments.routes.ts
+│   │   ├── basket.routes.ts
+│   │   ├── analytics.routes.ts
+│   │   └── reports.routes.ts
+│   │
+│   ├── controllers/              # One file per resource domain
+│   ├── services/                 # Business logic per domain
+│   ├── validators/               # Zod input schemas per domain
+│   │
+│   ├── db/
+│   │   └── schema/
+│   │       ├── index.ts          # Re-exports all tables (used by Drizzle config)
+│   │       ├── users.ts          # users, otp_verifications, refresh_tokens, push_subscriptions
+│   │       ├── groups.ts         # chit_groups
+│   │       ├── memberships.ts    # memberships, pending_admin_transfers
+│   │       ├── cycles.ts         # monthly_cycles
+│   │       ├── payments.ts       # payments, audit_logs
+│   │       ├── basket.ts         # baskets, basket_transactions
+│   │       ├── loans.ts          # loans, loan_transactions
+│   │       └── notifications.ts  # notifications, notification_preferences, sms_logs
+│   │
+│   ├── middleware/
+│   │   ├── authenticate.ts       # JWT Bearer verification → populates req.user
+│   │   ├── requireMember.ts      # Checks req.user is a member of :groupId
+│   │   ├── requireAdmin.ts       # Checks req.membership.role === 'Admin'
+│   │   ├── validate.ts           # Zod schema factory for req.body/params/query
+│   │   ├── errorHandler.ts       # Global catch-all (AppError, ZodError, unknown)
+│   │   └── rateLimiter.ts        # 100 req/15 min (API), 5 req/hr (OTP)
+│   │
+│   ├── jobs/
+│   │   └── interestAccrual.job.ts # Cron: accrues interest on active loans
+│   │
+│   ├── utils/
+│   │   ├── AppError.ts           # Custom error class with statusCode + code
+│   │   ├── money.ts              # paise ↔ INR formatting helpers
+│   │   ├── pagination.ts         # Cursor-based pagination helpers
+│   │   └── response.ts           # Standardised { data } / { error } envelope
+│   │
+│   └── types/
+│       ├── express.d.ts          # Augments Request: req.user, req.membership
+│       └── index.ts              # Shared domain types
+│
+├── client/                       # React frontend (Vite)
+│   └── src/
+│       ├── App.tsx               # React Router v7 route declarations
+│       ├── pages/                # 11 route-level page components
+│       ├── lib/
+│       │   ├── api.ts            # Fetch wrapper (ApiError, generic typed requests)
+│       │   └── format.ts         # formatPaise(), initials()
+│       └── types/api.ts          # TypeScript mirrors of all API response shapes
+│
+├── drizzle/                      # Generated SQL migrations + journal
+├── docs/                         # Project documentation
+└── tests/                        # Vitest integration tests</div>
+  </section>
+
+  <!-- ═══ 4. MIDDLEWARE PIPELINE ═══ -->
+  <section id="middleware">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <h2>Middleware Pipeline</h2>
+    </div>
+
+    <p>Every incoming request passes through these layers in order before reaching a controller.</p>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#6c8aff"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>express.json()</h5>
+          <p>Parses JSON request bodies. Applied globally to all routes.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#a78bfa"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>rateLimiter</h5>
+          <p>General API: 100 requests / 15 min per IP. OTP endpoints: 5 requests / hour — prevents SMS/brute-force abuse.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#fb923c"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>authenticate</h5>
+          <p>Verifies the <code>Authorization: Bearer &lt;token&gt;</code> header. On success, attaches the decoded user to <code>req.user</code>. Skipped on public auth routes.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#34d399"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>requireMember</h5>
+          <p>Queries memberships table for <code>req.params.groupId</code> + <code>req.user.id</code>. Attaches <code>req.membership</code> or throws 403. Applied to all <code>/groups/:id/*</code> routes.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#f472b6"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>requireAdmin</h5>
+          <p>Checks <code>req.membership.role === 'Admin'</code>. Applied only to admin-only endpoints (group management, member CRUD, cycle operations).</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#67e8f9"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>validate(schema)</h5>
+          <p>Zod parse on <code>req.body</code>, <code>req.params</code>, or <code>req.query</code>. Throws a structured 422 error on failure — controllers always receive clean, typed data.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#6c8aff"></div><div class="flow-line"></div></div>
+        <div class="flow-box">
+          <h5>→ Controller Handler</h5>
+          <p>Route handler executes. Calls service layer, sends <code>{ data }</code> response.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot" style="background:#fca5a5"></div></div>
+        <div class="flow-box">
+          <h5>errorHandler (global, last)</h5>
+          <p>Catches anything thrown. Maps <code>AppError</code> → HTTP status + code. Maps <code>ZodError</code> → 422. All unknown errors → 500. Sends <code>{ error: { code, message, details } }</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 5. AUTH FLOW ═══ -->
+  <section id="auth">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <h2>Authentication Flow</h2>
+    </div>
+
+    <h3>Signup / Login (OTP-based mobile verification)</h3>
+    <div class="diagram">
+Client                              Server                            DB
+  │                                    │                              │
+  ├── POST /auth/signup ──────────────►│                              │
+  │   { mobile, username, password }   │── INSERT user (unverified) ─►│
+  │                                    │── INSERT otp_verifications ──►│
+  │                                    │── SMS via MSG91 ──────────►  │
+  │◄── 200 { message: "OTP sent" } ────┤                              │
+  │                                    │                              │
+  ├── POST /auth/verify-otp ──────────►│                              │
+  │   { mobile, otp }                  │── SELECT otp, check hash ───►│
+  │                                    │── UPDATE user.mobile_verified│
+  │◄── 200 { accessToken, refreshToken}│◄─ INSERT refresh_token ──────┤
+  │                                    │                              │
+
+Access Token:  15 min JWT   (in-memory on client)
+Refresh Token: 30 days JWT  (stored in refresh_tokens table, HttpOnly cookie)</div>
+
+    <h3>Token Refresh</h3>
+    <div class="diagram">
+Client                              Server
+  │                                    │
+  ├── POST /auth/refresh ─────────────►│
+  │   { refreshToken }                 │── Verify JWT signature
+  │                                    │── Check refresh_tokens table (not revoked)
+  │◄── 200 { accessToken } ────────────┤── Issue new 15 min access token</div>
+
+    <h3>Protected Request</h3>
+    <div class="diagram">
+Client                              Server
+  │                                    │
+  ├── GET /v1/groups ─────────────────►│
+  │   Authorization: Bearer &lt;token&gt;    │── authenticate middleware
+  │                                    │   ↳ jwt.verify(token, ACCESS_SECRET)
+  │                                    │   ↳ req.user = { id, username, ... }
+  │◄── 200 { data: [...] } ────────────┤── Controller runs</div>
+  </section>
+
+  <!-- ═══ 6. API ROUTES ═══ -->
+  <section id="api">
+    <div class="section-header">
+      <div class="section-num">6</div>
+      <h2>API Routes   <span style="color:var(--muted);font-size:14px;font-weight:400">Base: /v1</span></h2>
+    </div>
+
+    <!-- Auth -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip purple">PUBLIC</span>
+        <span class="route-path">/auth</span>
+        <span class="route-desc">Authentication — no JWT required</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/auth/signup</span><span class="route-desc">Register — creates user + sends OTP</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/auth/verify-otp</span><span class="route-desc">Verify OTP → returns access + refresh tokens</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/auth/login</span><span class="route-desc">Password login → returns tokens</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/auth/refresh</span><span class="route-desc">Exchange refresh token for new access token</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/auth/logout</span><span class="route-desc">Revoke refresh token</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/auth/reset-password</span><span class="route-desc">OTP-based password reset</span></div>
+      </div>
+    </div>
+
+    <!-- Me -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip blue">AUTHED</span>
+        <span class="route-path">/me</span>
+        <span class="route-desc">Logged-in user's profile & settings</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/me/profile</span><span class="route-desc">Get own profile</span></div>
+        <div class="route-item"><span class="method PATCH">PATCH</span><span class="route-path">/me/profile</span><span class="route-desc">Update username / display info</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/me/sessions</span><span class="route-desc">List active refresh token sessions</span></div>
+        <div class="route-item"><span class="method DELETE">DELETE</span><span class="route-path">/me/sessions/:tokenId</span><span class="route-desc">Revoke a specific session</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/me/notifications</span><span class="route-desc">Paginated notification inbox</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/me/push-subscriptions</span><span class="route-desc">Register Web Push endpoint</span></div>
+      </div>
+    </div>
+
+    <!-- Groups -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip blue">AUTHED</span>
+        <span class="route-path">/groups</span>
+        <span class="route-desc">Chit group lifecycle</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/groups</span><span class="route-desc">List groups the user belongs to</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/groups</span><span class="route-desc">Create new group (creator becomes Admin)</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/groups/:id</span><span class="route-desc">Group detail with membership info</span></div>
+        <div class="route-item"><span class="method PATCH">PATCH</span><span class="route-path">/groups/:id</span><span class="route-desc">Update group settings [Admin]</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/groups/join</span><span class="route-desc">Join group using invitation code</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/groups/:id/start</span><span class="route-desc">Transition group to Active [Admin]</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/groups/:id/close</span><span class="route-desc">Close a completed group [Admin]</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/groups/:id/rotate-invitation-code</span><span class="route-desc">Generate new join code [Admin]</span></div>
+      </div>
+    </div>
+
+    <!-- Members -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip orange">ADMIN</span>
+        <span class="route-path">/groups/:id/members</span>
+        <span class="route-desc">Membership management</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/members</span><span class="route-desc">List all members + share counts</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/members</span><span class="route-desc">Add member directly (no join code)</span></div>
+        <div class="route-item"><span class="method PATCH">PATCH</span><span class="route-path">/members/:userId</span><span class="route-desc">Update share_count or role</span></div>
+        <div class="route-item"><span class="method DELETE">DELETE</span><span class="route-path">/members/:userId</span><span class="route-desc">Remove member from group</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/members/transfer-admin</span><span class="route-desc">Initiate admin role transfer</span></div>
+      </div>
+    </div>
+
+    <!-- Cycles -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip orange">ADMIN</span>
+        <span class="route-path">/groups/:id/cycles</span>
+        <span class="route-desc">Monthly auction cycle operations</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/cycles</span><span class="route-desc">List all cycles with winner & payment status</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/cycles/record-winner</span><span class="route-desc">Record auction winner + bid amount</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/cycles/declare-skip-month</span><span class="route-desc">Mark month as skipped (no auction)</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/cycles/:cycleId/close</span><span class="route-desc">Close a cycle after all payments collected</span></div>
+      </div>
+    </div>
+
+    <!-- Payments -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip blue">MEMBER</span>
+        <span class="route-path">/groups/:id/payments</span>
+        <span class="route-desc">Monthly contribution tracking</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/payments</span><span class="route-desc">List payments for a cycle (paginated)</span></div>
+        <div class="route-item"><span class="method PATCH">PATCH</span><span class="route-path">/payments/:paymentId</span><span class="route-desc">Update single payment status [Admin]</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/payments/bulk-mark</span><span class="route-desc">Bulk mark multiple payments [Admin]</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/payments/remind-defaulters</span><span class="route-desc">Trigger SMS to unpaid members [Admin]</span></div>
+      </div>
+    </div>
+
+    <!-- Basket & Loans -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip teal">BASKET</span>
+        <span class="route-path">/groups/:id/basket  &amp;  /loans</span>
+        <span class="route-desc">Basket balance + loan disbursement</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/basket</span><span class="route-desc">Basket overview (balance, transactions)</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/basket/transactions</span><span class="route-desc">Paginated basket ledger</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/loans/disburse</span><span class="route-desc">Disburse loan from basket [Admin]</span></div>
+        <div class="route-item"><span class="method POST">POST</span><span class="route-path">/loans/:loanId/repay</span><span class="route-desc">Record repayment (principal + interest)</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/loans</span><span class="route-desc">List all loans for group</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/loans/:loanId</span><span class="route-desc">Loan detail with transaction history</span></div>
+      </div>
+    </div>
+
+    <!-- Analytics -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip blue">MEMBER</span>
+        <span class="route-path">/groups/:id/analytics</span>
+        <span class="route-desc">Dashboards and reporting views</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/analytics/overview</span><span class="route-desc">Group health summary (collected, pending, winners)</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/analytics/winners-ledger</span><span class="route-desc">All-time winner payouts + discounts</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/analytics/balance-sheet</span><span class="route-desc">Credits vs debits breakdown</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/analytics/trends</span><span class="route-desc">Month-over-month collection trends</span></div>
+      </div>
+    </div>
+
+    <!-- Reports -->
+    <div class="route-group">
+      <div class="route-group-header">
+        <span class="chip orange">ADMIN</span>
+        <span class="route-path">/groups/:id/reports</span>
+        <span class="route-desc">Downloadable report generation</span>
+      </div>
+      <div class="route-list">
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/reports/ledger.pdf</span><span class="route-desc">Full payment ledger as PDF</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/reports/closure.pdf</span><span class="route-desc">Group closure summary PDF</span></div>
+        <div class="route-item"><span class="method GET">GET</span><span class="route-path">/reports/loans.xlsx</span><span class="route-desc">Loan ledger as Excel spreadsheet</span></div>
+      </div>
+    </div>
+
+    <h3>Unified Response Envelope</h3>
+    <div class="diagram">// Success
+{ "data": { ... } }
+
+// Error
+{
+  "error": {
+    "code": "GROUP_NOT_FOUND",       // machine-readable code
+    "message": "Group not found.",   // human-readable message
+    "details": { ... }               // optional Zod field errors
+  }
+}</div>
+  </section>
+
+  <!-- ═══ 7. DATABASE SCHEMA ═══ -->
+  <section id="schema">
+    <div class="section-header">
+      <div class="section-num">7</div>
+      <h2>Database Schema</h2>
+    </div>
+
+    <p>17 tables across 8 schema files. All primary keys are UUIDs. All monetary values are stored as <code>BIGINT paise</code> (1 INR = 100 paise) — no floating-point arithmetic.</p>
+
+    <div class="schema-grid">
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">users</span>
+          <span class="chip green">Core</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">mobile</span><span class="field-type">varchar UNIQUE</span></div>
+          <div class="schema-field"><span class="field-name">username</span><span class="field-type">varchar UNIQUE</span></div>
+          <div class="schema-field"><span class="field-name">password_hash</span><span class="field-type">text</span></div>
+          <div class="schema-field"><span class="field-name">mobile_verified</span><span class="field-type">boolean</span></div>
+          <div class="schema-field"><span class="field-name">created_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">otp_verifications</span>
+          <span class="chip purple">Auth</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">mobile</span><span class="field-type">varchar</span></div>
+          <div class="schema-field"><span class="field-name">otp_hash</span><span class="field-type">text</span></div>
+          <div class="schema-field"><span class="field-name">purpose</span><span class="field-type">enum</span></div>
+          <div class="schema-field"><span class="field-name">attempts</span><span class="field-type">integer</span></div>
+          <div class="schema-field"><span class="field-name">expires_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">refresh_tokens</span>
+          <span class="chip purple">Auth</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">user_id</span><span class="field-type">uuid FK → users</span></div>
+          <div class="schema-field"><span class="field-name">token_hash</span><span class="field-type">text UNIQUE</span></div>
+          <div class="schema-field"><span class="field-name">device_info</span><span class="field-type">text</span></div>
+          <div class="schema-field"><span class="field-name">is_revoked</span><span class="field-type">boolean</span></div>
+          <div class="schema-field"><span class="field-name">expires_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">chit_groups</span>
+          <span class="chip green">Core</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">name</span><span class="field-type">varchar</span></div>
+          <div class="schema-field"><span class="field-name">pool_amount</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">monthly_contribution</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">total_shares</span><span class="field-type">integer</span></div>
+          <div class="schema-field"><span class="field-name">duration_months</span><span class="field-type">integer</span></div>
+          <div class="schema-field"><span class="field-name">interest_rate</span><span class="field-type">numeric(5,2)</span></div>
+          <div class="schema-field"><span class="field-name">payment_due_day</span><span class="field-type">integer (1–28)</span></div>
+          <div class="schema-field"><span class="field-name">status</span><span class="field-type">enum: Draft/Active/Closed</span></div>
+          <div class="schema-field"><span class="field-name">invitation_code</span><span class="field-type">varchar UNIQUE</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">memberships</span>
+          <span class="chip green">Core</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">group_id</span><span class="field-type">uuid FK → chit_groups</span></div>
+          <div class="schema-field"><span class="field-name">user_id</span><span class="field-type">uuid FK → users</span></div>
+          <div class="schema-field"><span class="field-name">role</span><span class="field-type">enum: Admin/Member</span></div>
+          <div class="schema-field"><span class="field-name">share_count</span><span class="field-type">integer</span></div>
+          <div class="schema-field"><span class="field-name">wins_count</span><span class="field-type">integer</span></div>
+          <div class="schema-field"><span class="field-name">joined_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">monthly_cycles</span>
+          <span class="chip blue">Cycle</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">group_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">month_number</span><span class="field-type">integer</span></div>
+          <div class="schema-field"><span class="field-name">due_date</span><span class="field-type">date</span></div>
+          <div class="schema-field"><span class="field-name">is_skip_month</span><span class="field-type">boolean</span></div>
+          <div class="schema-field"><span class="field-name">winner_user_id</span><span class="field-type">uuid FK? → users</span></div>
+          <div class="schema-field"><span class="field-name">bid_amount</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">winner_takeaway</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">status</span><span class="field-type">enum: Open/Closed</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">payments</span>
+          <span class="chip blue">Cycle</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">cycle_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">user_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">expected_amount</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">paid_amount</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">status</span><span class="field-type">enum: Paid/Unpaid/Waived</span></div>
+          <div class="schema-field"><span class="field-name">paid_at</span><span class="field-type">timestamptz?</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">baskets</span>
+          <span class="chip orange">Basket</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">group_id</span><span class="field-type">uuid FK UNIQUE</span></div>
+          <div class="schema-field"><span class="field-name">current_balance</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">total_credited</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">total_debited</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">total_lent_out</span><span class="field-type">bigint (paise)</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">basket_transactions</span>
+          <span class="chip orange">Basket</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">basket_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">txn_type</span><span class="field-type">enum (see below)</span></div>
+          <div class="schema-field"><span class="field-name">amount</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">balance_after</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">reference_id</span><span class="field-type">uuid (polymorphic)</span></div>
+          <div class="schema-field"><span class="field-name">created_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">loans</span>
+          <span class="chip teal">Loan</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">group_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">borrower_user_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">principal</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">monthly_interest_rate</span><span class="field-type">numeric(5,2)</span></div>
+          <div class="schema-field"><span class="field-name">total_interest_paid</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">status</span><span class="field-type">enum: Active/Repaid</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">loan_transactions</span>
+          <span class="chip teal">Loan</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">loan_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">txn_type</span><span class="field-type">PRINCIPAL_REPAID</span></div>
+          <div class="schema-field"><span class="field-name"></span><span class="field-type">INTEREST_PAID</span></div>
+          <div class="schema-field"><span class="field-name"></span><span class="field-type">ACCRUAL</span></div>
+          <div class="schema-field"><span class="field-name">amount</span><span class="field-type">bigint (paise)</span></div>
+          <div class="schema-field"><span class="field-name">created_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-card-header">
+          <span class="table-name">audit_logs</span>
+          <span class="chip gray">Meta</span>
+        </div>
+        <div class="schema-card-body">
+          <div class="schema-field"><span class="field-name">id</span><span class="field-type">uuid PK</span></div>
+          <div class="schema-field"><span class="field-name">actor_user_id</span><span class="field-type">uuid FK</span></div>
+          <div class="schema-field"><span class="field-name">entity_type</span><span class="field-type">varchar (polymorphic)</span></div>
+          <div class="schema-field"><span class="field-name">entity_id</span><span class="field-type">uuid</span></div>
+          <div class="schema-field"><span class="field-name">action</span><span class="field-type">varchar</span></div>
+          <div class="schema-field"><span class="field-name">changes</span><span class="field-type">jsonb</span></div>
+          <div class="schema-field"><span class="field-name">created_at</span><span class="field-type">timestamptz</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <h3>Entity Relationships</h3>
+    <div class="diagram">
+users ──────────────────────────────────────┐
+  │                                         │
+  │ (1:N via memberships)                   │ borrower
+  ▼                                         ▼
+chit_groups ◄── memberships             loans
+  │                                      │  (PRINCIPAL_REPAID,
+  │ (1:N)                                │   INTEREST_PAID,
+  ▼                                      │   ACCRUAL)
+monthly_cycles ──────────────────────   loan_transactions
+  │               winner_user_id → users
+  │ (1:N per member per cycle)
+  ▼
+payments
+
+chit_groups
+  └── baskets (1:1)
+        └── basket_transactions (1:N, append-only)
+              txn_type: CREDIT_DISCOUNT | LOAN_DISBURSED
+                      | LOAN_REPAID    | INTEREST_ACCRUED</div>
+  </section>
+
+  <!-- ═══ 8. MONEY & LEDGER ═══ -->
+  <section id="money">
+    <div class="section-header">
+      <div class="section-num">8</div>
+      <h2>Money &amp; Ledger Design</h2>
+    </div>
+
+    <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+      <div class="card">
+        <div class="card-icon">💰</div>
+        <h4>Integer Paise</h4>
+        <p>All monetary values stored as <code>BIGINT</code> in paise. ₹1 = 100 paise. Eliminates floating-point rounding errors entirely. UI layer uses <code>formatPaise()</code> to convert for display.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">📒</div>
+        <h4>Append-Only Ledgers</h4>
+        <p><code>basket_transactions</code> and <code>loan_transactions</code> are never updated or deleted. Every balance change creates a new row with <code>balance_after</code> — fully auditable history.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🗄️</div>
+        <h4>Balance Cache</h4>
+        <p><code>baskets.current_balance</code> is a pre-computed cache for fast reads. It is updated atomically whenever a basket transaction is written — no full-table sum on every request.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">⏱️</div>
+        <h4>Interest Accrual</h4>
+        <p>A <code>node-cron</code> job runs on schedule, writes <code>ACCRUAL</code> rows to <code>loan_transactions</code>, and updates <code>loans.total_interest_paid</code>. Never touches principal rows.</p>
+      </div>
+    </div>
+
+    <h3>Basket Transaction Types</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>txn_type</th><th>Triggered by</th><th>Effect on balance</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>CREDIT_DISCOUNT</code></td><td>Cycle winner bid below pool → discount credited to basket</td><td>+</td></tr>
+          <tr><td><code>LOAN_DISBURSED</code></td><td>Admin disburses loan to member</td><td>−</td></tr>
+          <tr><td><code>LOAN_REPAID</code></td><td>Member repays principal</td><td>+</td></tr>
+          <tr><td><code>INTEREST_ACCRUED</code></td><td>Cron job monthly accrual</td><td>+</td></tr>
+          <tr><td><code>ADJUSTMENT</code></td><td>Admin manual correction</td><td>±</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ 9. FRONTEND ═══ -->
+  <section id="frontend">
+    <div class="section-header">
+      <div class="section-num">9</div>
+      <h2>Frontend Architecture</h2>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h4>Vite 6 + React 19</h4>
+        <p>Fast HMR in development. Production build output served statically.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🎨</div>
+        <h4>Tailwind CSS v4</h4>
+        <p>Utility-first styling. Zero config — Vite plugin auto-detects classes.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔀</div>
+        <h4>React Router v7</h4>
+        <p>Client-side routing. <code>PrivateRoute</code> wrapper guards authenticated pages.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔌</div>
+        <h4>API Client (lib/api.ts)</h4>
+        <p>Typed fetch wrapper. Throws <code>ApiError</code> on non-2xx. All requests go through single function.</p>
+      </div>
+    </div>
+
+    <h3>Route Map (App.tsx)</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Path</th><th>Page Component</th><th>Guard</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>/login</code></td><td>LoginPage</td><td>Public</td></tr>
+          <tr><td><code>/signup</code></td><td>SignupPage</td><td>Public</td></tr>
+          <tr><td><code>/otp</code></td><td>OtpPage</td><td>Public</td></tr>
+          <tr><td><code>/</code></td><td>HomePage (dashboard)</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/create-group</code></td><td>CreateGroupPage</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/groups/:id/admin</code></td><td>AdminDashboardPage</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/groups/:id/members</code></td><td>MembersPage</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/groups/:id/member</code></td><td>MemberDashboardPage</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/groups/:id/payments</code></td><td>MarkPaymentsPage</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/groups/:id/basket</code></td><td>BasketPage</td><td><span class="chip blue">Private</span></td></tr>
+          <tr><td><code>/groups/:id/record-winner</code></td><td>RecordWinnerPage</td><td><span class="chip blue">Private</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Dev Proxy (vite.config.ts)</h3>
+    <div class="diagram">// All /v1/* requests in dev are proxied to the backend
+server: {
+  proxy: {
+    '/v1': 'http://localhost:3000'
+  }
+}
+// In production, configure Nginx / reverse proxy identically.</div>
+  </section>
+
+  <!-- ═══ 10. KEY PATTERNS ═══ -->
+  <section id="patterns">
+    <div class="section-header">
+      <div class="section-num">10</div>
+      <h2>Key Architectural Patterns</h2>
+    </div>
+
+    <div class="pattern-list">
+      <div class="pattern-item">
+        <h5>Schema-First Validation</h5>
+        <p>Every API input is validated by a Zod schema before reaching the controller. Invalid payloads never enter the service layer.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Centralized Error Handling</h5>
+        <p><code>AppError</code> carries an HTTP status + machine code. The global <code>errorHandler</code> middleware maps all thrown errors to a uniform JSON envelope.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Authorization Middleware Chain</h5>
+        <p>authenticate → requireMember → requireAdmin forms a composable guard chain. Each middleware enriches <code>req</code> for the next layer.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Integer Money (Paise)</h5>
+        <p>All monetary arithmetic uses integer paise. No floats touch financial data. Display conversion happens only at the UI boundary.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Append-Only Ledger</h5>
+        <p>Basket and loan balances are built from immutable transaction rows. Historical state is always recoverable. No UPDATE/DELETE on financial records.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Balance Cache + Recomputation</h5>
+        <p><code>baskets.current_balance</code> is a denormalized cache updated atomically per transaction. Falls back to ledger recomputation if ever diverged.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Cursor-Based Pagination</h5>
+        <p>Lists use cursor pagination (not offset) for consistent performance on large datasets and to avoid skipped/duplicate rows on concurrent writes.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Polymorphic Audit Log</h5>
+        <p><code>audit_logs(entity_type, entity_id)</code> tracks changes across payments, cycles, memberships, and loans in a single table without foreign key coupling.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Type-Safe DB Layer</h5>
+        <p>Drizzle ORM provides full TypeScript inference from schema. No raw SQL strings in controllers or services — type errors catch schema mismatches at compile time.</p>
+      </div>
+      <div class="pattern-item">
+        <h5>Env Validation on Boot</h5>
+        <p><code>config/env.ts</code> uses Zod to parse all environment variables at startup. Missing or malformed config crashes fast with a clear error — never silently at runtime.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 11. ENVIRONMENT ═══ -->
+  <section id="env">
+    <div class="section-header">
+      <div class="section-num">11</div>
+      <h2>Environment Variables</h2>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>DATABASE_URL</code></td><td>—</td><td>PostgreSQL connection string</td></tr>
+          <tr><td><code>JWT_ACCESS_SECRET</code></td><td>—</td><td>Signs 15-min access tokens</td></tr>
+          <tr><td><code>JWT_REFRESH_SECRET</code></td><td>—</td><td>Signs 30-day refresh tokens</td></tr>
+          <tr><td><code>JWT_ACCESS_EXPIRES_IN</code></td><td><code>15m</code></td><td>Access token TTL</td></tr>
+          <tr><td><code>JWT_REFRESH_EXPIRES_DAYS</code></td><td><code>30</code></td><td>Refresh token TTL (days)</td></tr>
+          <tr><td><code>PORT</code></td><td><code>3000</code></td><td>HTTP server port</td></tr>
+          <tr><td><code>NODE_ENV</code></td><td><code>development</code></td><td>Controls logging verbosity, error detail</td></tr>
+          <tr><td><code>MSG91_AUTH_KEY</code></td><td>—</td><td>SMS provider API key (OTP delivery)</td></tr>
+          <tr><td><code>MSG91_TEMPLATE_ID</code></td><td>—</td><td>MSG91 OTP message template</td></tr>
+          <tr><td><code>OTP_EXPIRY_MINUTES</code></td><td><code>10</code></td><td>OTP validity window</td></tr>
+          <tr><td><code>OTP_MAX_ATTEMPTS</code></td><td><code>5</code></td><td>Max failed OTP verifications before lockout</td></tr>
+          <tr><td><code>VAPID_PUBLIC_KEY</code></td><td>—</td><td>Web Push VAPID public key</td></tr>
+          <tr><td><code>VAPID_PRIVATE_KEY</code></td><td>—</td><td>Web Push VAPID private key</td></tr>
+          <tr><td><code>VAPID_CONTACT_EMAIL</code></td><td>—</td><td>Web Push contact email</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>Boot validation:</strong> All variables are parsed by <code>src/config/env.ts</code> using Zod at process startup. The server will not start if any required variable is missing or invalid — fail-fast by design.
+    </div>
+  </section>
+
+  <hr class="divider" />
+  <p style="font-size: 12px; color: var(--muted); padding-bottom: 40px;">
+    ChitFund Production · Architecture Document · Generated 2026-05-07
+  </p>
+
+</main>
+</body>
+</html>
