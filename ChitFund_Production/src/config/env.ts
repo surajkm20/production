@@ -23,13 +23,13 @@ const envSchema = z.object({
   OTP_EXPIRY_MINUTES:       z.coerce.number().default(10),
   OTP_MAX_ATTEMPTS:         z.coerce.number().default(5),
 
-  MSG91_AUTH_KEY:           z.string().min(1, 'MSG91_AUTH_KEY is required'),
+  MSG91_AUTH_KEY:           z.string().default(''),
   MSG91_SENDER_ID:          z.string().default('CHITFD'),
-  MSG91_TEMPLATE_ID:        z.string().min(1, 'MSG91_TEMPLATE_ID is required'),
+  MSG91_TEMPLATE_ID:        z.string().default(''),
 
-  VAPID_PUBLIC_KEY:         z.string().min(1, 'VAPID_PUBLIC_KEY is required'),
-  VAPID_PRIVATE_KEY:        z.string().min(1, 'VAPID_PRIVATE_KEY is required'),
-  VAPID_CONTACT_EMAIL:      z.string().email('VAPID_CONTACT_EMAIL must be a valid email'),
+  VAPID_PUBLIC_KEY:         z.string().default(''),
+  VAPID_PRIVATE_KEY:        z.string().default(''),
+  VAPID_CONTACT_EMAIL:      z.string().default(''),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
