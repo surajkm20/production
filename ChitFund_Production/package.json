@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "ChitFund management backend API — TypeScript + Express + Drizzle ORM + PostgreSQL",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
