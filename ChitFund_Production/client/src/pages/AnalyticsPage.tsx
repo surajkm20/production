@@ -124,7 +124,6 @@ export default function AnalyticsPage() {
     )
   }
 
-  const isAdmin = group.my_membership.role === 'Admin'
   // Completed bids: months where a bid was actually placed (not skip months, not pending)
   const completedBids = bidTrend.filter(b => b.bid_amount !== null && !b.is_skip_month)
   // maxBid is used to calculate bar widths in the bid trend chart (highest bid = 100% width)

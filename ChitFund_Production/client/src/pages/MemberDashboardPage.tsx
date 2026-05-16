@@ -25,7 +25,7 @@ export default function MemberDashboardPage() {
   const navigate = useNavigate()
 
   const [group, setGroup] = useState<GroupDetail | null>(null)
-  const [myUser, setMyUser] = useState<User | null>(null)
+  const [_myUser, setMyUser] = useState<User | null>(null)
   const [myPayment, setMyPayment] = useState<Payment | null>(null)
   const [adminName, setAdminName] = useState<string>('')
   const [winnerName, setWinnerName] = useState<string | null>(null)

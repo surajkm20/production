@@ -45,7 +45,7 @@ function txnLabel(txn_type: string): string {
 
 // ─── New loan modal ───────────────────────────────────────────────────────────
 
-function NewLoanModal({ groupId, members, interestRate, monthlyContribution, totalMonths, basketBalance, activeLoans, onClose, onSaved }: {
+function NewLoanModal({ groupId, members, interestRate, monthlyContribution, totalMonths, basketBalance: _basketBalance, activeLoans, onClose, onSaved }: {
   groupId: string
   members: Member[]
   interestRate: string

@@ -144,7 +144,6 @@ export default function CycleDetailPage() {
 
   const winnerName     = cycle.winner?.name ?? ''
   const hasWinner      = !!cycle.winner
-  const isPending      = !hasWinner && cycle.status === 'Open'
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length
