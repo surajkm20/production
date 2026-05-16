@@ -13,6 +13,9 @@ export const app = express();
 // so req.protocol correctly reflects 'https' instead of always returning 'http'.
 app.set('trust proxy', 1);
 
+// Health check before HTTPS redirect so Railway's internal HTTP probe always reaches it.
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 // Redirect HTTP → HTTPS in production.
 app.use((req, res, next) => {
   if (env.NODE_ENV === 'production' && req.protocol !== 'https') {
@@ -45,8 +48,6 @@ app.use(
 
 app.use(express.json());
 app.use(apiLimiter);
-
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/v1', v1Router);
 
