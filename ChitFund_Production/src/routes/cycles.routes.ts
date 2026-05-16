@@ -11,7 +11,7 @@ import { authenticate } from '../middleware/authenticate';
 import { requireMember } from '../middleware/requireMember';
 import { requireAdmin } from '../middleware/requireAdmin';
 import { validate } from '../middleware/validate';
-import { recordWinnerSchema, declareSkipMonthSchema, updateCycleSchema } from '../validators/cycles.validators';
+import { recordWinnerSchema, declareSkipMonthSchema, updateCycleSchema, correctCycleSchema } from '../validators/cycles.validators';
 import * as cycles from '../controllers/cycles.controller';
 
 export const cyclesRouter = Router();
@@ -24,3 +24,4 @@ cyclesRouter.post('/:group_id/cycles/:cycle_id/record-winner',     requireAdmin,
 cyclesRouter.post('/:group_id/cycles/:cycle_id/declare-skip-month', requireAdmin, validate(declareSkipMonthSchema), cycles.declareSkipMonth);
 cyclesRouter.patch('/:group_id/cycles/:cycle_id',                   requireAdmin, validate(updateCycleSchema),      cycles.updateCycle);
 cyclesRouter.post('/:group_id/cycles/:cycle_id/close',              requireAdmin,                                   cycles.closeCycle);
+cyclesRouter.post('/:group_id/cycles/:cycle_id/correct',            requireAdmin, validate(correctCycleSchema),      cycles.correctClosedCycle);

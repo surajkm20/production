@@ -32,6 +32,7 @@ export interface GroupDetail {
   group_id: string
   name: string
   invitation_code: string
+  invitation_code_expires_at: string | null
   pool_amount: number
   monthly_contribution: number
   total_shares: number
@@ -84,7 +85,31 @@ export interface PaginatedResponse<T> {
   has_more: boolean
 }
 
-export interface NotificationListResponse extends PaginatedResponse<unknown> {
+export type NotificationType =
+  | 'PAYMENT_DUE'
+  | 'PAYMENT_RECEIVED'
+  | 'WINNER_ANNOUNCED'
+  | 'LOAN_DISBURSED'
+  | 'SKIP_MONTH_DECLARED'
+  | 'DEFAULTER_REMINDER'
+  | 'BASKET_ADJUSTED'
+
+export interface Notification {
+  id: string
+  type: NotificationType
+  title: string
+  body: string
+  group_id: string | null
+  group_name: string | null
+  data: Record<string, unknown> | null
+  read_at: string | null
+  created_at: string
+}
+
+export interface NotificationListResponse {
+  items: Notification[]
+  next_cursor: string | null
+  has_more: boolean
   unread_count: number
 }
 

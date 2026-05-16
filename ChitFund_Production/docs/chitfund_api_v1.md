@@ -1,10 +1,10 @@
 # ChitFund App — API Specification (v1)
 
-**Status:** Draft v7 (loan interest model changed to cumulative — total_interest_accrued + outstanding_interest added to loan responses; /repay validates against outstanding_interest, not a fixed monthly amount)
+**Status:** Draft v8 (notifications section expanded — types table, LOAN_DISBURSED type added, group_name in notification item, cron-triggered PAYMENT_DUE documented)
 **Style:** REST over HTTPS
 **Base URL:** `https://api.chitfund.app/v1`
 **Auth:** JWT (access token in `Authorization: Bearer <token>` header)
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-16
 
 ---
 
@@ -1291,14 +1291,19 @@ List the user's notifications inbox.
       "type": "WINNER_ANNOUNCED",
       "title": "Sandeep took the chit",
       "body": "Won bid ₹52,000 in Apr 2026",
-      "data": { "group_id": "uuid", "cycle_id": "uuid" },
+      "group_id": "uuid",
+      "group_name": "Sunrise Chits 2026",
+      "data": { "cycle_id": "uuid", "bid_amount": 5200000 },
       "read_at": null,
-      "created_at": "..."
+      "created_at": "2026-04-30T18:00:00Z"
     }
   ],
   "unread_count": 4
 }
 ```
+- `group_id` and `group_name` are top-level on every notification that belongs to a group (null for platform-level notifications, not used in v1).
+- `data` carries type-specific payload (see notification types table below).
+- `read_at` is null for unread notifications.
 
 ---
 
@@ -1364,6 +1369,25 @@ Register a Web Push endpoint for the current device.
 
 ### DELETE `/me/push-subscriptions/:id`
 **Response 204**
+
+---
+
+### Notification types reference
+
+| `type` | Trigger | Who receives | Standard `data` payload |
+|---|---|---|---|
+| `PAYMENT_DUE` | Daily cron — fires when `due_date = today + 3 days` for an open cycle that has unpaid payments | Members with `Unpaid` payment in that cycle | `{ cycle_id, month_number, due_date }` |
+| `PAYMENT_RECEIVED` | Admin marks a payment as `Paid` via PATCH `/payments/:id` | The member whose payment was marked | `{ cycle_id, month_number, paid_amount }` |
+| `WINNER_ANNOUNCED` | Admin records a winner via POST `…/record-winner` | All active members of the group | `{ cycle_id, month_number, winner_user_id, winner_name, bid_amount, basket_credit }` |
+| `LOAN_DISBURSED` | Admin disburses a loan via POST `…/loans` | The borrower (member receiving the loan) | `{ loan_id, principal, amount_disbursed_to_borrower }` |
+| `SKIP_MONTH_DECLARED` | Admin declares a skip month via POST `…/declare-skip-month` | All active members of the group | `{ cycle_id, month_number }` |
+| `DEFAULTER_REMINDER` | Admin triggers via POST `…/remind-defaulters` (manual) | Members with `Unpaid` status this cycle | `{ cycle_id, month_number, due_date }` |
+| `BASKET_ADJUSTED` | Admin records a basket adjustment via POST `…/basket/adjustments` | All active members of the group | `{ txn_id, direction, amount, notes }` |
+
+**Notes:**
+- `PAYMENT_DUE` is sent by a **scheduled daily cron job** (runs at 09:00 IST). It is not triggered at cycle creation or cycle close. Skip-month cycles are excluded.
+- `LOAN_DISBURSED` is a new type added in v8 (not in the original schema enum comment — the schema varchar(40) field accepts any string; add `LOAN_DISBURSED` alongside existing values).
+- Mute preferences (`notification_preferences` table) are checked before each delivery — a muted user receives no notification regardless of type.
 
 ---
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { initials } from '../lib/format'
 import type { GroupDetail } from '../types/api'
+import GroupNavBar from '../components/GroupNavBar'
 
 interface Member {
   membership_id: string
@@ -27,6 +28,8 @@ interface JoinRequest {
 
 // ─── Add member modal ─────────────────────────────────────────────────────────
 
+// Self-contained modal: its own local state for the form; calls onAdded with the new member on success.
+// This avoids having to re-fetch the full member list after adding — parent just appends the new member.
 function AddMemberModal({
   groupId,
   onClose,
@@ -47,10 +50,13 @@ function AddMemberModal({
     setError(null)
     setLoading(true)
     try {
+      // API call: POST /v1/groups/:groupId/members
       const result = await api.post<{ membership_id: string; user_id: string }>(
         `/groups/${groupId}/members`,
         { name: name.trim(), mobile_number: mobile.replace(/\s+/g, ''), share_count: shareCount },
       )
+      // Build a local Member object from the response + the form values.
+      // We don't re-fetch the list — the parent just appends this object to its state.
       onAdded({
         membership_id: result.membership_id,
         user_id: result.user_id,
@@ -123,6 +129,8 @@ function AddMemberModal({
 
 // ─── Member row ───────────────────────────────────────────────────────────────
 
+// MemberRow handles its own busy state for the +/− share stepper.
+// onShareChange is called by the parent; the row disables the buttons while waiting.
 function MemberRow({
   member,
   currentUserId,
@@ -136,6 +144,7 @@ function MemberRow({
 }) {
   const [busy, setBusy] = useState(false)
 
+  // Calls the parent's optimistic handler, shows busy while in-flight
   async function adjust(delta: number) {
     const next = member.share_count + delta
     if (next < 1) return
@@ -166,7 +175,7 @@ function MemberRow({
         </p>
       </div>
 
-      {/* Share stepper — disabled after group locks */}
+      {/* Share stepper — hidden once cycle starts (groupLocked), replaced by a read-only count */}
       {!groupLocked && (
         <div className="flex items-center gap-1.5 shrink-0">
           <button onClick={() => adjust(-1)} disabled={busy || member.share_count <= 1}
@@ -191,6 +200,16 @@ function MemberRow({
 
 // ─── MembersPage ──────────────────────────────────────────────────────────────
 
+function codeExpiry(iso: string | null): { label: string; cls: string } | null {
+  if (!iso) return null
+  const diff = new Date(iso).getTime() - Date.now()
+  if (diff <= 0) return { label: 'Code expired — rotate to renew', cls: 'text-red-300' }
+  const hours = Math.floor(diff / 3_600_000)
+  const mins  = Math.floor((diff % 3_600_000) / 60_000)
+  if (hours < 1) return { label: `Expires in ${mins}m`, cls: 'text-amber-300' }
+  return { label: `Expires in ${hours}h ${mins}m`, cls: 'text-maroon-200' }
+}
+
 export default function MembersPage() {
   const { groupId } = useParams<{ groupId: string }>()
   const navigate = useNavigate()
@@ -206,6 +225,7 @@ export default function MembersPage() {
   const [startError, setStartError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([])
+  // expandedReqId + expandMode: which join request row is expanded and in which mode (approve/reject)
   const [expandedReqId, setExpandedReqId] = useState<string | null>(null)
   const [expandMode, setExpandMode] = useState<'approve' | 'reject' | null>(null)
   const [reqShareCount, setReqShareCount] = useState(1)
@@ -218,10 +238,12 @@ export default function MembersPage() {
     setLoading(true)
     setError(null)
     try {
+      // All four fetched in parallel — none depends on the others
       const [g, memberList, me, reqs] = await Promise.all([
         api.get<GroupDetail>(`/groups/${groupId}`),
         api.get<Member[]>(`/groups/${groupId}/members`),
         api.get<{ user_id: string }>('/me'),
+        // .catch() makes this non-fatal: if join-requests fails, use empty array
         api.get<JoinRequest[]>(`/groups/${groupId}/join-requests`).catch((err) => {
           console.error('[join-requests] fetch failed:', err)
           return [] as JoinRequest[]
@@ -239,21 +261,29 @@ export default function MembersPage() {
     }
   }
 
+  // Optimistic share count update:
+  // 1. Update local state immediately (user sees the change at once, no spinner)
+  // 2. Call the API in the background
+  // 3. If the API fails, revert to the previous value
   async function handleShareChange(membershipId: string, newCount: number) {
     const prev = members.find(m => m.membership_id === membershipId)?.share_count
+    // Immediately reflect the new count in the UI
     setMembers(ms => ms.map(m => m.membership_id === membershipId ? { ...m, share_count: newCount } : m))
     try {
+      // API call: PATCH /v1/groups/:groupId/members/:membershipId  Body: { share_count }
       await api.patch(`/groups/${groupId}/members/${membershipId}`, { share_count: newCount })
     } catch (err) {
-      // revert on failure
+      // Revert to previous share count on failure
       setMembers(ms => ms.map(m => m.membership_id === membershipId ? { ...m, share_count: prev ?? m.share_count } : m))
     }
   }
 
+  // Start the first cycle — only enabled when all shares are filled
   async function handleStartCycle() {
     setStartError(null)
     setStarting(true)
     try {
+      // API call: POST /v1/groups/:groupId/start
       await api.post(`/groups/${groupId}/start`, {})
       navigate(`/groups/${groupId}`)
     } catch (err) {
@@ -263,6 +293,7 @@ export default function MembersPage() {
     }
   }
 
+  // Copy invite code to clipboard, show "Copied!" for 2s then revert
   async function copyCode() {
     if (!group) return
     await navigator.clipboard.writeText(group.invitation_code)
@@ -270,6 +301,8 @@ export default function MembersPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // navigator.share: native mobile share sheet (WhatsApp, SMS, etc.)
+  // Falls back to clipboard copy on desktop where navigator.share is not available
   async function handleShare() {
     if (!group) return
     const text = `Join ${group.name} with code ${group.invitation_code}`
@@ -280,12 +313,15 @@ export default function MembersPage() {
     }
   }
 
+  // Approve a join request: confirm share count with admin, then call API
   async function handleApprove(membershipId: string) {
     const req = joinRequests.find(r => r.membership_id === membershipId)!
     setReqBusy(true)
     setReqError(null)
     try {
+      // API call: POST /v1/groups/:groupId/join-requests/:membershipId/approve  Body: { share_count }
       await api.post(`/groups/${groupId}/join-requests/${membershipId}/approve`, { share_count: reqShareCount })
+      // Build a Member from the request data, add to the members list
       const newMember: Member = {
         membership_id: membershipId,
         user_id: req.user_id,
@@ -308,10 +344,12 @@ export default function MembersPage() {
     }
   }
 
+  // Reject a join request: remove from the pending list after API confirms
   async function handleReject(membershipId: string) {
     setReqBusy(true)
     setReqError(null)
     try {
+      // API call: POST /v1/groups/:groupId/join-requests/:membershipId/reject
       await api.post(`/groups/${groupId}/join-requests/${membershipId}/reject`, {})
       setJoinRequests(rs => rs.filter(r => r.membership_id !== membershipId))
       setExpandedReqId(null)
@@ -323,12 +361,15 @@ export default function MembersPage() {
     }
   }
 
-  // ── derived ────────────────────────────────────────────────────────────────
+  // ── derived values — calculated from state, no extra useState needed ────────
 
   const sharesFilled      = members.reduce((s, m) => s + m.share_count, 0)
+  // groupLocked: once a cycle has started, share counts are frozen
   const groupLocked       = !!group?.current_cycle
   const remainingCapacity = group ? group.total_shares - sharesFilled : 0
+  // canStart: all shares must be filled and no cycle running yet
   const canStart          = group ? sharesFilled === group.total_shares && !groupLocked : false
+  // Client-side filter — no API call, just array.filter on the already-loaded members
   const filtered     = search.trim()
     ? members.filter(m => m.name.toLowerCase().includes(search.toLowerCase()))
     : members
@@ -373,7 +414,7 @@ export default function MembersPage() {
 
       <div className="flex-1 overflow-y-auto pb-32">
 
-        {/* Shares filled panel */}
+        {/* Shares filled progress bar */}
         <div className="bg-maroon-600 mx-3 mt-3 rounded-2xl p-4 text-white">
           <p className="text-sm font-bold mb-0.5">
             Shares filled — {sharesFilled} of {group.total_shares}
@@ -389,7 +430,7 @@ export default function MembersPage() {
           </p>
         </div>
 
-        {/* Search */}
+        {/* Client-side search — filters already-loaded members, no new API call */}
         <div className="px-3 mt-3">
           <div className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -420,7 +461,9 @@ export default function MembersPage() {
           ))}
         </div>
 
-        {/* Pending join requests */}
+        {/* Pending join requests — inline expand pattern:
+            clicking Approve expands a share-count picker inside the same row.
+            expandedReqId + expandMode control which row is expanded and what variant to show. */}
         {joinRequests.length > 0 && (
           <div className="mt-3 bg-white border-y border-gray-100">
             <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-widest">
@@ -476,6 +519,7 @@ export default function MembersPage() {
                         </div>
                       )}
                     </div>
+                    {/* Approve expand panel — shown below the row when mode = 'approve' */}
                     {mode === 'approve' && (
                       <div className="px-4 pb-4 pt-3 bg-amber-50 border-t border-amber-100">
                         {reqError && <p className="text-xs text-red-600 mb-2">{reqError}</p>}
@@ -521,7 +565,7 @@ export default function MembersPage() {
           </div>
         )}
 
-        {/* Add a new person */}
+        {/* Add new person section — hidden once cycle starts */}
         {!groupLocked && (
           <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-100 p-4">
             <p className="text-sm font-semibold text-gray-700 mb-3">Add a new person</p>
@@ -548,7 +592,7 @@ export default function MembersPage() {
           </div>
         )}
 
-        {/* Invitation code panel */}
+        {/* Invite code — always visible so admin can copy and share manually */}
         <div className="mx-3 mt-3 bg-maroon-600 rounded-2xl p-4 text-white">
           <p className="text-xs text-maroon-200 mb-2 font-medium">INVITE CODE</p>
           <div className="flex items-center justify-between gap-3">
@@ -560,6 +604,12 @@ export default function MembersPage() {
               {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
+          {(() => {
+            const exp = codeExpiry(group.invitation_code_expires_at)
+            return exp ? (
+              <p className={`text-xs mt-2 font-medium ${exp.cls}`}>{exp.label}</p>
+            ) : null
+          })()}
         </div>
 
         {startError && (
@@ -567,8 +617,8 @@ export default function MembersPage() {
         )}
       </div>
 
-      {/* Action bar */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 px-4 py-3 flex gap-3">
+      {/* Action bar — sits above the GroupNavBar */}
+      <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 px-4 py-3 flex gap-3 z-10">
         <button
           onClick={() => navigate(`/groups/${groupId}`)}
           className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
@@ -585,6 +635,7 @@ export default function MembersPage() {
         </button>
       </div>
 
+      {/* Add member modal — mounts when showAddModal is true */}
       {showAddModal && (
         <AddMemberModal
           groupId={groupId!}
@@ -592,6 +643,8 @@ export default function MembersPage() {
           onAdded={m => { setMembers(ms => [...ms, m]); setShowAddModal(false) }}
         />
       )}
+
+      <GroupNavBar groupId={groupId!} role={group.my_membership.role} />
     </div>
   )
 }

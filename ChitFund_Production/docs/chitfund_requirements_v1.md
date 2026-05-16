@@ -1,8 +1,8 @@
 # ChitFund Management App — Requirements (v1)
 
-**Status:** Draft v9 (interest payment model changed to cumulative — no hard monthly enforcement)
+**Status:** Draft v10 (notifications section updated — F-26 cron trigger clarified, F-30a Loan Disbursed added, F-32 updated to global-mute only for v1)
 **Owner:** Suraj
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-16
 
 ---
 
@@ -214,14 +214,15 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **F-25** From the defaulters screen, admin can trigger a reminder notification (push + optionally SMS) to a single member or all defaulters.
 
 ### 5.6 Notifications (priority feature)
-- **F-26** Auto-reminder to all members 3 days before due date (skipped for skip-month cycles).
+- **F-26** Auto-reminder (`type=PAYMENT_DUE`) to members with unpaid payments **3 days before the cycle's `due_date`**. Implemented as a **scheduled daily cron job** (runs at 09:00 IST) — NOT sent immediately when a cycle opens or closes. Skip-month cycles are excluded (no payment needed, nothing to remind about).
 - **F-27** Auto-reminder to defaulters on due date and +3 days, +7 days after.
-- **F-28** Notification to all members when admin records the month's winner (with bid and discount info).
-- **F-29** Notification to all members when a skip-month is declared.
-- **F-30** Notification to a member when admin marks their payment as received.
-- **F-31** Reminder to borrowers sent 3 days before the cycle's `due_date` (same trigger as F-26) and again on the due date itself if they have any `outstanding_interest > 0`. The notification shows the **cumulative outstanding interest** (not just that cycle's accrual) so the borrower knows exactly how much they owe in total. No hard block — this is informational.
-- **F-31a** Notification to all members when admin records a basket `ADJUSTMENT` (per F-18a). Includes amount, direction, and reason.
-- **F-32** User can mute notifications per group in settings.
+- **F-28** Notification (`type=WINNER_ANNOUNCED`) to all active members when admin records the month's winner. Includes winner name, bid amount, and basket credit.
+- **F-29** Notification (`type=SKIP_MONTH_DECLARED`) to all active members when a skip-month is declared.
+- **F-30** Notification (`type=PAYMENT_RECEIVED`) to a member when admin marks their payment as Paid.
+- **F-30a** Notification (`type=LOAN_DISBURSED`) to a member when admin disburses a loan to them. Includes principal and actual amount disbursed (after first-month interest deduction).
+- **F-31** Reminder to borrowers sent 3 days before the cycle's `due_date` (same cron as F-26) and again on the due date itself if they have any `outstanding_interest > 0`. The notification shows the **cumulative outstanding interest** (not just that cycle's accrual) so the borrower knows exactly how much they owe in total. No hard block — this is informational.
+- **F-31a** Notification (`type=BASKET_ADJUSTED`) to all active members when admin records a basket `ADJUSTMENT` (per F-18a). Includes amount, direction (credit/debit), and reason (notes field).
+- **F-32** User can mute all notifications globally from their profile settings. **Per-group mute is deferred to v2.** The global mute preference is checked before every notification delivery.
 
 ### 5.7 Reports & exports (priority feature)
 - **F-33** Export a group's full payment ledger as PDF and Excel (admin only).

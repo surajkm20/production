@@ -12,7 +12,9 @@ import {
   payments, baskets, basket_transactions, users, loans, loan_transactions,
 } from '../db/schema';
 import { AppError } from '../utils/AppError';
+import { paiseToRupeeDisplay } from '../utils/money';
 import { assertActiveMember } from './memberships.service';
+import { notify } from './notifications.service';
 import { insertActivity } from './activity.service';
 
 // ─── listCycles ──────────────────────────────────────────────────────────────
@@ -296,6 +298,29 @@ export async function recordWinner(
     },
   });
 
+  const [activeMembers, [winnerRow]] = await Promise.all([
+    db.select({ user_id: memberships.user_id })
+      .from(memberships)
+      .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active'))),
+    db.select({ name: users.name })
+      .from(users).where(eq(users.id, winner_user_id)).limit(1),
+  ]);
+
+  const winnerName = winnerRow?.name ?? 'A member';
+  const title      = `Winner announced — ${cycle.month_label}`;
+  const body       = `${winnerName} won with a bid of ${paiseToRupeeDisplay(bid_amount)}.`;
+
+  Promise.all(
+    activeMembers.map(m => notify({
+      user_id:  m.user_id,
+      group_id,
+      type:     'WINNER_ANNOUNCED',
+      title,
+      body,
+      data:     { cycle_id, month_label: cycle.month_label, winner_user_id, winner_name: winnerName, bid_amount, basket_credit },
+    })),
+  ).catch(() => {});
+
   return {
     cycle_id,
     winner_user_id,
@@ -486,6 +511,167 @@ export async function updateCycle(
   });
 
   return { cycle_id, bid_amount: new_bid, admin_commission: new_commission, basket_credit: new_basket_credit, winner_takeaway: new_takeaway, winner_user_id: cycle.winner_user_id, basket_balance_after: balance_after };
+}
+
+// ─── correctClosedCycle ───────────────────────────────────────────────────────
+// Allows an admin to fix a wrong winner or wrong bid amount on a closed cycle.
+// Atomically rolls back the old basket transaction + wins_count adjustment, then
+// applies the corrected values. Works for both regular and skip-month cycles.
+export async function correctClosedCycle(
+  userId:   string,
+  group_id: string,
+  cycle_id: string,
+  data:     { winner_user_id: string; bid_amount?: number; notes?: string },
+) {
+  const caller = await assertActiveMember(group_id, userId);
+  if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+
+  const { winner_user_id: new_winner_id, bid_amount: new_bid, notes } = data;
+
+  const [cycleRows, basketRows, oldTxnRows] = await Promise.all([
+    db.select({
+      id: monthly_cycles.id, status: monthly_cycles.status,
+      is_skip_month: monthly_cycles.is_skip_month,
+      winner_user_id: monthly_cycles.winner_user_id,
+      bid_amount: monthly_cycles.bid_amount,
+      basket_credit: monthly_cycles.basket_credit,
+      month_label: monthly_cycles.month_label,
+      pool_amount: chit_groups.pool_amount,
+      admin_commission_rate: chit_groups.admin_commission_rate,
+    })
+    .from(monthly_cycles)
+    .innerJoin(chit_groups, eq(chit_groups.id, monthly_cycles.group_id))
+    .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
+    .limit(1),
+
+    db.select({ id: baskets.id, current_balance: baskets.current_balance })
+      .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
+
+    db.select({ id: basket_transactions.id, amount: basket_transactions.amount, txn_type: basket_transactions.txn_type })
+      .from(basket_transactions)
+      .innerJoin(baskets, eq(baskets.id, basket_transactions.basket_id))
+      .where(and(
+        eq(baskets.group_id, group_id),
+        eq(basket_transactions.cycle_id, cycle_id),
+        inArray(basket_transactions.txn_type, ['CREDIT_DISCOUNT', 'DEBIT_SKIP_MONTH']),
+      ))
+      .orderBy(desc(basket_transactions.created_at))
+      .limit(1),
+  ]);
+
+  const cycle  = cycleRows[0];
+  const basket = basketRows[0];
+  const oldTxn = oldTxnRows[0];
+
+  if (!cycle)                    throw new AppError(404, 'CYCLE_NOT_FOUND',  'Cycle not found in this group.');
+  if (cycle.status !== 'Closed') throw new AppError(409, 'CYCLE_NOT_CLOSED', 'Only closed cycles can be corrected via this endpoint.');
+  if (!oldTxn)                   throw new AppError(409, 'INVALID_STATE',    'No original basket transaction found for this cycle.');
+
+  const old_winner_id  = cycle.winner_user_id!;
+  const winner_changed = old_winner_id !== new_winner_id;
+
+  if (winner_changed) {
+    const [newMember] = await db.select({ share_count: memberships.share_count, wins_count: memberships.wins_count })
+      .from(memberships)
+      .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, new_winner_id), eq(memberships.status, 'Active')))
+      .limit(1);
+
+    if (!newMember) throw new AppError(404, 'MEMBER_NOT_FOUND', 'New winner is not an active member of this group.');
+    if (Number(newMember.wins_count) >= Number(newMember.share_count)) {
+      throw new AppError(409, 'WINNER_INELIGIBLE', 'New winner has already used all their share allocations.');
+    }
+  }
+
+  // ── Regular month ────────────────────────────────────────────────────────────
+  if (!cycle.is_skip_month) {
+    if (!new_bid || new_bid <= 0)               throw new AppError(400, 'BID_REQUIRED',     'bid_amount is required for a non-skip-month correction.');
+    if (new_bid > Number(cycle.pool_amount))    throw new AppError(400, 'BID_EXCEEDS_POOL', 'bid_amount cannot exceed the group pool amount.');
+
+    const commission_rate    = parseFloat(String(cycle.admin_commission_rate));
+    const new_commission     = Math.round(new_bid * commission_rate / 100);
+    const new_basket_credit  = new_bid - new_commission;
+    const new_winner_takeaway = Number(cycle.pool_amount) - new_bid;
+    const old_basket_credit  = Number(cycle.basket_credit);
+    const credit_delta       = new_basket_credit - old_basket_credit;
+    const new_balance        = Number(basket.current_balance) + credit_delta;
+
+    await db.transaction(async (tx) => {
+      await tx.update(monthly_cycles)
+        .set({ winner_user_id: new_winner_id, bid_amount: new_bid, admin_commission: new_commission, basket_credit: new_basket_credit, winner_takeaway: new_winner_takeaway, ...(notes != null ? { notes } : {}) })
+        .where(eq(monthly_cycles.id, cycle_id));
+
+      if (credit_delta !== 0) {
+        await tx.update(baskets).set({ current_balance: new_balance }).where(eq(baskets.id, basket.id));
+        await tx.insert(basket_transactions).values({
+          basket_id:  basket.id, cycle_id,
+          txn_type:   'ADJUSTMENT',
+          amount:     Math.abs(credit_delta),
+          direction:  credit_delta > 0 ? 'C' : 'D',
+          notes:      `Correction: basket_credit ${old_basket_credit} → ${new_basket_credit}`,
+          created_by: userId,
+        });
+      }
+
+      if (winner_changed) {
+        const [[oldMember], [newMember]] = await Promise.all([
+          tx.select({ wins_count: memberships.wins_count }).from(memberships)
+            .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, old_winner_id))).limit(1),
+          tx.select({ wins_count: memberships.wins_count }).from(memberships)
+            .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, new_winner_id))).limit(1),
+        ]);
+        await tx.update(memberships)
+          .set({ wins_count: Math.max(0, Number(oldMember.wins_count) - 1) })
+          .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, old_winner_id)));
+        await tx.update(memberships)
+          .set({ wins_count: Number(newMember.wins_count) + 1 })
+          .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, new_winner_id)));
+      }
+    });
+
+    await insertActivity({
+      group_id, event_type: 'CYCLE_CORRECTED', actor_id: userId,
+      data: { month_label: cycle.month_label, old_winner_id, new_winner_id, old_bid_amount: cycle.bid_amount, new_bid_amount: new_bid },
+    });
+
+    return { cycle_id, winner_user_id: new_winner_id, bid_amount: new_bid, admin_commission: new_commission, basket_credit: new_basket_credit, winner_takeaway: new_winner_takeaway, basket_balance_after: credit_delta !== 0 ? new_balance : Number(basket.current_balance) };
+  }
+
+  // ── Skip month (winner change only — basket net change is zero) ───────────────
+  const pool_amount = Number(cycle.pool_amount);
+
+  await db.transaction(async (tx) => {
+    await tx.update(monthly_cycles)
+      .set({ winner_user_id: new_winner_id, ...(notes != null ? { notes } : {}) })
+      .where(eq(monthly_cycles.id, cycle_id));
+
+    if (winner_changed) {
+      // Reverse the old DEBIT_SKIP_MONTH then re-apply for the new winner (audit trail only; net = 0)
+      await tx.insert(basket_transactions).values([
+        { basket_id: basket.id, cycle_id, txn_type: 'ADJUSTMENT', amount: pool_amount, direction: 'C', counterparty_user_id: old_winner_id, notes: 'Skip month correction: reversing old debit', created_by: userId },
+        { basket_id: basket.id, cycle_id, txn_type: 'ADJUSTMENT', amount: pool_amount, direction: 'D', counterparty_user_id: new_winner_id, notes: 'Skip month correction: re-applying debit for corrected winner', created_by: userId },
+      ]);
+
+      const [[oldMember], [newMember]] = await Promise.all([
+        tx.select({ wins_count: memberships.wins_count }).from(memberships)
+          .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, old_winner_id))).limit(1),
+        tx.select({ wins_count: memberships.wins_count }).from(memberships)
+          .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, new_winner_id))).limit(1),
+      ]);
+      await tx.update(memberships)
+        .set({ wins_count: Math.max(0, Number(oldMember.wins_count) - 1) })
+        .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, old_winner_id)));
+      await tx.update(memberships)
+        .set({ wins_count: Number(newMember.wins_count) + 1 })
+        .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, new_winner_id)));
+    }
+  });
+
+  await insertActivity({
+    group_id, event_type: 'CYCLE_CORRECTED', actor_id: userId,
+    data: { month_label: cycle.month_label, is_skip_month: true, old_winner_id, new_winner_id },
+  });
+
+  return { cycle_id, is_skip_month: true, winner_user_id: new_winner_id, winner_takeaway: pool_amount, basket_balance_after: Number(basket.current_balance) };
 }
 
 // ─── closeCycle ──────────────────────────────────────────────────────────────

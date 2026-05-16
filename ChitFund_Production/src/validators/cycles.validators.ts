@@ -26,3 +26,13 @@ export const updateCycleSchema = z.object({
   bid_amount: z.number().int().positive(),
   notes:      z.string().optional(),
 });
+
+// ─── POST /cycles/:cycle_id/correct ──────────────────────────────────────────
+// Admin-only correction of a closed cycle. Allows changing winner and/or bid
+// amount after the cycle is closed, with full basket and wins_count rollback.
+// bid_amount is optional for skip months (ignored); required for regular months.
+export const correctCycleSchema = z.object({
+  winner_user_id: z.string().uuid(),
+  bid_amount:     z.number().int().positive().optional(),
+  notes:          z.string().optional(),
+});

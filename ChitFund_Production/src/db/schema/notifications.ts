@@ -13,7 +13,7 @@ export const notifications = pgTable('notifications', {
   id:            uuid('id').primaryKey().defaultRandom(),
   user_id:       uuid('user_id').notNull().references(() => users.id),
   group_id:      uuid('group_id').references(() => chit_groups.id),
-  type:          varchar('type', { length: 40 }).notNull(), // 'PAYMENT_DUE' | 'WINNER_ANNOUNCED' | 'PAYMENT_RECEIVED' | 'LOAN_INTEREST_DUE' | 'SKIP_MONTH_DECLARED' | 'DEFAULTER_REMINDER' | 'BASKET_ADJUSTED'
+  type:          varchar('type', { length: 40 }).notNull(), // 'PAYMENT_DUE' | 'PAYMENT_RECEIVED' | 'WINNER_ANNOUNCED' | 'LOAN_DISBURSED' | 'LOAN_INTEREST_DUE' | 'SKIP_MONTH_DECLARED' | 'DEFAULTER_REMINDER' | 'BASKET_ADJUSTED'
   title:         varchar('title', { length: 200 }).notNull(),
   body:          text('body').notNull(),
   data:          jsonb('data'),

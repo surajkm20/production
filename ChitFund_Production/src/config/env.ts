@@ -18,6 +18,7 @@ const envSchema = z.object({
 
   PORT:                     z.coerce.number().default(3000),
   NODE_ENV:                 z.enum(['development', 'production', 'test']).default('development'),
+  ALLOWED_ORIGINS:          z.string().default('http://localhost:5173'),
 
   OTP_EXPIRY_MINUTES:       z.coerce.number().default(10),
   OTP_MAX_ATTEMPTS:         z.coerce.number().default(5),

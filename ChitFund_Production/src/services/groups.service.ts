@@ -23,10 +23,11 @@ function generateInvitationCode(): string {
 async function fetchGroupDetail(userId: string, group_id: string) {
   const [row] = await db
     .select({
-      id:                   chit_groups.id,
-      name:                 chit_groups.name,
-      invitation_code:      chit_groups.invitation_code,
-      pool_amount:          chit_groups.pool_amount,
+      id:                           chit_groups.id,
+      name:                         chit_groups.name,
+      invitation_code:              chit_groups.invitation_code,
+      invitation_code_expires_at:   chit_groups.invitation_code_expires_at,
+      pool_amount:                  chit_groups.pool_amount,
       monthly_contribution: chit_groups.monthly_contribution,
       total_shares:         chit_groups.total_shares,
       total_months:         chit_groups.total_months,
@@ -102,10 +103,11 @@ async function fetchGroupDetail(userId: string, group_id: string) {
   const { shares_filled, people_count } = aggRows[0];
 
   return {
-    group_id:             row.id,
-    name:                 row.name,
-    invitation_code:      row.invitation_code,
-    pool_amount:          row.pool_amount,
+    group_id:                     row.id,
+    name:                         row.name,
+    invitation_code:              row.invitation_code,
+    invitation_code_expires_at:   row.invitation_code_expires_at?.toISOString() ?? null,
+    pool_amount:                  row.pool_amount,
     monthly_contribution: row.monthly_contribution,
     total_shares:         row.total_shares,
     total_months:         row.total_months,
@@ -170,8 +172,9 @@ export async function createGroup(
   const group = await db.transaction(async (tx) => {
     const [newGroup] = await tx.insert(chit_groups).values({
       name,
-      created_by:      userId,
-      invitation_code: generateInvitationCode(),
+      created_by:                 userId,
+      invitation_code:            generateInvitationCode(),
+      invitation_code_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
       pool_amount,
       monthly_contribution,
       total_months,
@@ -276,7 +279,10 @@ export async function joinGroup(userId: string, invitation_code: string, request
     .where(eq(chit_groups.invitation_code, invitation_code))
     .limit(1);
 
-  if (!group)                    throw new AppError(409, 'INVITATION_INVALID', 'Invalid or expired invitation code.');
+  if (!group)                    throw new AppError(409, 'INVITATION_INVALID', 'Invalid invitation code.');
+  if (group.invitation_code_expires_at && group.invitation_code_expires_at < new Date()) {
+    throw new AppError(409, 'INVITATION_EXPIRED', 'This invite code has expired. Ask the admin to generate a new one.');
+  }
   if (group.status === 'Closed') throw new AppError(409, 'GROUP_CLOSED',       'This group is closed.');
 
   // Block once cycle 1 has started (any payments exist = group is live)
@@ -592,10 +598,11 @@ export async function rotateInvitationCode(userId: string, group_id: string) {
     throw new AppError(403, 'FORBIDDEN', 'Only the group admin can rotate the invitation code.');
   }
 
-  const newCode = generateInvitationCode();
+  const newCode   = generateInvitationCode();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   await db.update(chit_groups)
-    .set({ invitation_code: newCode, updated_at: new Date() })
+    .set({ invitation_code: newCode, invitation_code_expires_at: expiresAt, updated_at: new Date() })
     .where(eq(chit_groups.id, group_id));
 
-  return { invitation_code: newCode };
+  return { invitation_code: newCode, invitation_code_expires_at: expiresAt.toISOString() };
 }

@@ -3,7 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
 import type { GroupDetail } from '../types/api'
+import GroupNavBar from '../components/GroupNavBar'
 
+// Response types for analytics-specific endpoints
 interface Overview {
   total_collected: number
   total_disbursed_to_winners: number
@@ -12,6 +14,9 @@ interface Overview {
   total_interest_earned: number
   active_loans_count: number
   defaulters_this_month: number
+  total_admin_commission: number
+  total_outstanding_interest: number
+  active_loans_principal: number
 }
 
 interface WinnerRow {
@@ -41,6 +46,7 @@ interface BidPoint {
   is_skip_month: boolean
 }
 
+// Reusable tile used in the overview grid
 function StatTile({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: 'green' | 'red' | 'blue' }) {
   const valueColor = highlight === 'green' ? 'text-green-600' : highlight === 'red' ? 'text-red-600' : highlight === 'blue' ? 'text-maroon-600' : 'text-gray-900'
   return (
@@ -70,26 +76,25 @@ export default function AnalyticsPage() {
     setLoading(true)
     setError(null)
     try {
+      // Step 1: fetch group first — need isAdmin flag and the group data before building the second round
       const g = await api.get<GroupDetail>(`/groups/${groupId}`)
       setGroup(g)
 
-      const isAdmin = g.my_membership.role === 'Admin'
+      // Step 2: also need myUserId for the balance sheet URL — fetch /me inline, no state needed
       const myUserId = (await api.get<{ user_id: string }>('/me')).user_id
 
-      const promises: Promise<unknown>[] = [
+      // Step 3: fire all four analytics API calls in parallel
+      const [winnersRes, bidTrendRes, balanceSheetRes, overviewRes] = await Promise.all([
         api.get<WinnerRow[]>(`/groups/${groupId}/analytics/winners-ledger`),
         api.get<BidPoint[]>(`/groups/${groupId}/analytics/bid-trend`),
+        // My own balance sheet — uses my user ID as part of the URL
         api.get<BalanceSheet>(`/groups/${groupId}/analytics/member-balance-sheet/${myUserId}`),
-      ]
-      if (isAdmin) {
-        promises.push(api.get<Overview>(`/groups/${groupId}/analytics/overview`))
-      }
-
-      const results = await Promise.all(promises)
-      setWinners(results[0] as WinnerRow[])
-      setBidTrend(results[1] as BidPoint[])
-      setMySheet(results[2] as BalanceSheet)
-      if (isAdmin) setOverview(results[3] as Overview)
+        api.get<Overview>(`/groups/${groupId}/analytics/overview`),
+      ])
+      setWinners(winnersRes)
+      setBidTrend(bidTrendRes)
+      setMySheet(balanceSheetRes)
+      setOverview(overviewRes)
 
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) navigate('/login', { replace: true })
@@ -120,7 +125,9 @@ export default function AnalyticsPage() {
   }
 
   const isAdmin = group.my_membership.role === 'Admin'
+  // Completed bids: months where a bid was actually placed (not skip months, not pending)
   const completedBids = bidTrend.filter(b => b.bid_amount !== null && !b.is_skip_month)
+  // maxBid is used to calculate bar widths in the bid trend chart (highest bid = 100% width)
   const maxBid = completedBids.length > 0 ? Math.max(...completedBids.map(b => b.bid_amount!)) : 0
 
   return (
@@ -139,49 +146,89 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-8 space-y-4 pt-4">
+      <div className="flex-1 overflow-y-auto pb-20 space-y-4 pt-4">
 
-        {/* Overview — admin only */}
-        {isAdmin && overview && (
-          <div className="mx-3">
-            <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">GROUP OVERVIEW</p>
-            <div className="grid grid-cols-2 gap-2">
-              <StatTile label="Total collected" value={formatPaise(overview.total_collected)} highlight="green" />
-              <StatTile label="Disbursed to winners" value={formatPaise(overview.total_disbursed_to_winners)} />
-              <StatTile label="Basket balance" value={formatPaise(overview.current_basket_balance)} highlight="blue" />
-              <StatTile label="Interest earned" value={formatPaise(overview.total_interest_earned)} highlight="green" />
-              <StatTile label="Total lent out" value={formatPaise(overview.total_lent_out)} />
-              <StatTile
-                label="Active loans"
-                value={String(overview.active_loans_count)}
-                sub={overview.defaulters_this_month > 0 ? `${overview.defaulters_this_month} defaulter${overview.defaulters_this_month !== 1 ? 's' : ''} this month` : 'No defaulters'}
-                highlight={overview.active_loans_count > 0 ? 'red' : undefined}
-              />
+        {/* Group overview stats grid */}
+        {overview && (() => {
+          // IIFE (immediately-invoked function expression): used here to compute local variables
+          // inside JSX without needing separate state or a wrapper function
+          const perCycle = group.monthly_contribution * group.total_shares
+          const cycleCount = completedBids.length
+          const cycleSubLabel = cycleCount > 0
+            ? `${cycleCount} cycle${cycleCount !== 1 ? 's' : ''} × ${formatPaise(perCycle)}`
+            : undefined
+          return (
+            <div className="mx-3">
+              <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">GROUP OVERVIEW</p>
+              <div className="grid grid-cols-2 gap-2">
+                <StatTile label="Total Contributions" value={formatPaise(overview.total_collected)} sub={cycleSubLabel} highlight="green" />
+                <StatTile label="Disbursed to winners" value={formatPaise(overview.total_disbursed_to_winners)} />
+
+                {/* Visual divider between contribution stats and bid-split stats */}
+                <div className="col-span-2 flex items-center gap-2 py-0.5">
+                  <div className="flex-1 h-px bg-gray-100" />
+                  <span className="text-[10px] text-gray-400 uppercase tracking-wider">Auction bid split</span>
+                  <div className="flex-1 h-px bg-gray-100" />
+                </div>
+
+                <StatTile label="Basket Balance" value={formatPaise(overview.current_basket_balance)} highlight="blue" />
+                <StatTile label="Commission to Admin" value={formatPaise(overview.total_admin_commission)} />
+
+                <StatTile label="Interest earned" value={formatPaise(overview.total_interest_earned)} highlight="green" />
+                <StatTile label="Total lent out" value={formatPaise(overview.total_lent_out)} />
+                <StatTile
+                  label="Active loans"
+                  value={String(overview.active_loans_count)}
+                  sub={overview.defaulters_this_month > 0 ? `${overview.defaulters_this_month} defaulter${overview.defaulters_this_month !== 1 ? 's' : ''} this month` : 'No defaulters'}
+                  highlight={overview.active_loans_count > 0 ? 'red' : undefined}
+                />
+              </div>
+
+              {/* Basket value breakdown: realized (cash) vs unrealized (outstanding loans) */}
+              {(() => {
+                const realized   = overview.current_basket_balance
+                const unrealized = overview.active_loans_principal + overview.total_outstanding_interest
+                const total      = realized + unrealized
+                return (
+                  <div className="mt-3 bg-gray-50 rounded-xl p-3 space-y-2">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Basket Value</p>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-500">Realized <span className="text-[10px] text-gray-400">(liquid cash)</span></span>
+                      <span className="text-xs font-semibold text-gray-800">{formatPaise(realized)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-500">Unrealized <span className="text-[10px] text-gray-400">(loans + accrued interest)</span></span>
+                      <span className="text-xs font-semibold text-gray-800">{formatPaise(unrealized)}</span>
+                    </div>
+                    <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
+                      <span className="text-xs font-semibold text-gray-700">Total Value</span>
+                      <span className="text-sm font-bold text-maroon-600">{formatPaise(total)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
-          </div>
-        )}
+          )
+        })()}
 
-        {/* My position */}
+        {/* My personal position in this group */}
         {mySheet && (
           <div className="mx-3">
             <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">MY POSITION</p>
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">{mySheet.name}</p>
-                  <p className="text-xs text-gray-400">{mySheet.share_count} share{mySheet.share_count !== 1 ? 's' : ''} · {mySheet.wins_count} win{mySheet.wins_count !== 1 ? 's' : ''}</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-base font-bold ${mySheet.net_position >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {mySheet.net_position >= 0 ? '+' : ''}{formatPaise(mySheet.net_position)}
-                  </p>
-                  <p className="text-[11px] text-gray-400">net position</p>
-                </div>
+              <div className="mb-3">
+                <p className="text-sm font-semibold text-gray-900">{mySheet.name}</p>
+                <p className="text-xs text-gray-400">{mySheet.share_count} share{mySheet.share_count !== 1 ? 's' : ''} · {mySheet.wins_count} win{mySheet.wins_count !== 1 ? 's' : ''}</p>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="bg-gray-50 rounded-lg p-2">
                   <p className="text-gray-400 mb-0.5">Contributed</p>
                   <p className="font-semibold text-gray-800">{formatPaise(mySheet.total_contributed)}</p>
+                  {completedBids.length > 0 && (
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {mySheet.share_count} share{mySheet.share_count !== 1 ? 's' : ''} × {completedBids.length} cycle{completedBids.length !== 1 ? 's' : ''}
+                    </p>
+                  )}
                 </div>
                 <div className="bg-gray-50 rounded-lg p-2">
                   <p className="text-gray-400 mb-0.5">Received as winner</p>
@@ -202,7 +249,7 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* Bid trend */}
+        {/* Bid trend — CSS bar chart: each bar width = (bid / maxBid) × 100% */}
         {completedBids.length > 0 && (
           <div className="mx-3">
             <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">BID TREND</p>
@@ -215,6 +262,7 @@ export default function AnalyticsPage() {
                       <span className="text-[11px] text-amber-500 italic flex-1">Skip month</span>
                     ) : (
                       <>
+                        {/* Bar width: bid expressed as percentage of the highest bid */}
                         <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                           <div
                             className="h-full bg-maroon-500 rounded-full transition-all"
@@ -233,7 +281,7 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* Winners ledger */}
+        {/* Winners ledger — every month's outcome in one list */}
         {winners.length > 0 && (
           <div className="mx-3">
             <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">WINNERS</p>
@@ -263,7 +311,7 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty state — shown before the first cycle closes */}
         {!overview && winners.length === 0 && completedBids.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 px-8">
             <p className="text-sm text-gray-500 text-center">No analytics yet. Data appears once the first cycle is closed.</p>
@@ -271,6 +319,7 @@ export default function AnalyticsPage() {
         )}
 
       </div>
+      <GroupNavBar groupId={groupId!} role={group.my_membership.role} />
     </div>
   )
 }

@@ -58,6 +58,7 @@ CREATE TABLE "chit_groups" (
 	"total_shares" smallint NOT NULL,
 	"start_month" date NOT NULL,
 	"payment_due_day" smallint DEFAULT 10 NOT NULL,
+	"admin_commission_rate" numeric(4, 2) DEFAULT '0.00' NOT NULL,
 	"monthly_interest_rate" numeric(4, 2) DEFAULT '5.00' NOT NULL,
 	"currency" char(3) DEFAULT 'INR' NOT NULL,
 	"status" varchar(20) DEFAULT 'Active' NOT NULL,
@@ -65,9 +66,11 @@ CREATE TABLE "chit_groups" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"closed_at" timestamp with time zone,
+	"invitation_code_expires_at" timestamp with time zone,
 	CONSTRAINT "chit_groups_invitation_code_unique" UNIQUE("invitation_code"),
 	CONSTRAINT "chk_pool_matches" CHECK ("chit_groups"."pool_amount" = "chit_groups"."monthly_contribution" * "chit_groups"."total_shares"),
 	CONSTRAINT "chk_months_shares" CHECK ("chit_groups"."total_months" > 0 AND "chit_groups"."total_shares" > 0 AND "chit_groups"."total_months" = "chit_groups"."total_shares"),
+	CONSTRAINT "chk_commission_rate" CHECK ("chit_groups"."admin_commission_rate" >= 0 AND "chit_groups"."admin_commission_rate" <= 100),
 	CONSTRAINT "chk_interest_rate" CHECK ("chit_groups"."monthly_interest_rate" >= 0 AND "chit_groups"."monthly_interest_rate" <= 100),
 	CONSTRAINT "chk_payment_due_day" CHECK ("chit_groups"."payment_due_day" >= 1 AND "chit_groups"."payment_due_day" <= 28)
 );
@@ -101,6 +104,8 @@ CREATE TABLE "monthly_cycles" (
 	"is_skip_month" boolean DEFAULT false NOT NULL,
 	"winner_user_id" uuid,
 	"bid_amount" bigint,
+	"admin_commission" bigint,
+	"basket_credit" bigint,
 	"winner_takeaway" bigint,
 	"status" varchar(20) DEFAULT 'Open' NOT NULL,
 	"opened_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -109,9 +114,9 @@ CREATE TABLE "monthly_cycles" (
 	CONSTRAINT "uniq_group_month" UNIQUE("group_id","month_number"),
 	CONSTRAINT "chk_cycle_status" CHECK ("monthly_cycles"."status" IN ('Open', 'Closed')),
 	CONSTRAINT "chk_bid_consistency" CHECK (
-    ("monthly_cycles"."winner_user_id" IS NULL AND "monthly_cycles"."bid_amount" IS NULL AND "monthly_cycles"."winner_takeaway" IS NULL)
+    ("monthly_cycles"."winner_user_id" IS NULL AND "monthly_cycles"."bid_amount" IS NULL AND "monthly_cycles"."admin_commission" IS NULL AND "monthly_cycles"."basket_credit" IS NULL AND "monthly_cycles"."winner_takeaway" IS NULL)
     OR
-    ("monthly_cycles"."winner_user_id" IS NOT NULL AND "monthly_cycles"."bid_amount" IS NOT NULL AND "monthly_cycles"."winner_takeaway" IS NOT NULL)
+    ("monthly_cycles"."winner_user_id" IS NOT NULL AND "monthly_cycles"."bid_amount" IS NOT NULL AND "monthly_cycles"."admin_commission" IS NOT NULL AND "monthly_cycles"."basket_credit" IS NOT NULL AND "monthly_cycles"."winner_takeaway" IS NOT NULL)
   )
 );
 --> statement-breakpoint
@@ -124,7 +129,7 @@ CREATE TABLE "loan_transactions" (
 	"notes" text,
 	"created_by" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "chk_loan_txn_type" CHECK ("loan_transactions"."txn_type" IN ('PRINCIPAL_REPAID', 'INTEREST_PAID', 'ACCRUAL')),
+	CONSTRAINT "chk_loan_txn_type" CHECK ("loan_transactions"."txn_type" IN ('PRINCIPAL_REPAID', 'INTEREST_PAID')),
 	CONSTRAINT "chk_loan_txn_amount" CHECK ("loan_transactions"."amount" > 0)
 );
 --> statement-breakpoint
@@ -134,6 +139,7 @@ CREATE TABLE "loans" (
 	"borrower_user_id" uuid NOT NULL,
 	"principal" bigint NOT NULL,
 	"monthly_interest_rate" numeric(4, 2) NOT NULL,
+	"disbursement_month_number" smallint DEFAULT 1 NOT NULL,
 	"total_interest_paid" bigint DEFAULT 0 NOT NULL,
 	"disbursed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"expected_close_date" date,
@@ -267,6 +273,15 @@ CREATE TABLE "pending_admin_transfers" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "group_activity" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"group_id" uuid NOT NULL,
+	"event_type" varchar(40) NOT NULL,
+	"actor_id" uuid,
+	"data" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "push_subscriptions" ADD CONSTRAINT "push_subscriptions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chit_groups" ADD CONSTRAINT "chit_groups_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -295,6 +310,8 @@ ALTER TABLE "pending_admin_transfers" ADD CONSTRAINT "pending_admin_transfers_gr
 ALTER TABLE "pending_admin_transfers" ADD CONSTRAINT "pending_admin_transfers_from_user_id_users_id_fk" FOREIGN KEY ("from_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pending_admin_transfers" ADD CONSTRAINT "pending_admin_transfers_to_user_id_users_id_fk" FOREIGN KEY ("to_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pending_admin_transfers" ADD CONSTRAINT "pending_admin_transfers_to_membership_id_memberships_id_fk" FOREIGN KEY ("to_membership_id") REFERENCES "public"."memberships"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "group_activity" ADD CONSTRAINT "group_activity_group_id_chit_groups_id_fk" FOREIGN KEY ("group_id") REFERENCES "public"."chit_groups"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "group_activity" ADD CONSTRAINT "group_activity_actor_id_users_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_push_user" ON "push_subscriptions" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_refresh_user" ON "refresh_tokens" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_users_mobile" ON "users" USING btree ("mobile_number");--> statement-breakpoint
@@ -325,4 +342,5 @@ CREATE INDEX "idx_txns_loan" ON "basket_transactions" USING btree ("related_loan
 CREATE INDEX "idx_txns_user" ON "basket_transactions" USING btree ("counterparty_user_id");--> statement-breakpoint
 CREATE INDEX "idx_transfers_group" ON "pending_admin_transfers" USING btree ("group_id");--> statement-breakpoint
 CREATE INDEX "idx_transfers_from" ON "pending_admin_transfers" USING btree ("from_user_id");--> statement-breakpoint
-CREATE INDEX "idx_transfers_to" ON "pending_admin_transfers" USING btree ("to_user_id");
+CREATE INDEX "idx_transfers_to" ON "pending_admin_transfers" USING btree ("to_user_id");--> statement-breakpoint
+CREATE INDEX "idx_activity_group" ON "group_activity" USING btree ("group_id","created_at");

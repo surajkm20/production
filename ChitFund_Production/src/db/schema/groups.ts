@@ -26,7 +26,8 @@ export const chit_groups = pgTable('chit_groups', {
   created_by:           uuid('created_by').notNull().references(() => users.id),
   created_at:           timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updated_at:           timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  closed_at:            timestamp('closed_at', { withTimezone: true }),
+  closed_at:                    timestamp('closed_at', { withTimezone: true }),
+  invitation_code_expires_at:   timestamp('invitation_code_expires_at', { withTimezone: true }),
 }, (table) => [
   index('idx_groups_creator').on(table.created_by),
   index('idx_groups_status').on(table.status),

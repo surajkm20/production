@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1778315850757,
-      "tag": "0000_initial_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1778336777570,
-      "tag": "0001_next_tattoo",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1778518255191,
-      "tag": "0002_small_la_nuit",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1778519663351,
-      "tag": "0003_fast_meteorite",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1778527190309,
-      "tag": "0004_heavy_the_hand",
+      "when": 1778947025982,
+      "tag": "0000_milky_madelyne_pryor",
       "breakpoints": true
     }
   ]

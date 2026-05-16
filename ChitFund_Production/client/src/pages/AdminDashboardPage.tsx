@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
 import type { GroupDetail, CycleSummary, ActivityItem } from '../types/api'
+import GroupNavBar from '../components/GroupNavBar'
 
 // ─── Activity helpers ─────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ function formatActivityTime(iso: string): string {
 
 // ─── Three-dot menu ───────────────────────────────────────────────────────────
 
-function ThreeDotMenu({ onRename, onRotateCode }: { onRename: () => void; onRotateCode: () => void }) {
+function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup }: { onRename: () => void; onRotateCode: () => void; onCloseGroup: () => void }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -54,10 +55,9 @@ function ThreeDotMenu({ onRename, onRotateCode }: { onRename: () => void; onRota
       {open && (
         <div className="absolute right-0 top-9 w-48 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden">
           {[
-            { label: 'Rename group', action: () => { onRename(); setOpen(false) } },
+            { label: 'Rename group',     action: () => { onRename();       setOpen(false) } },
             { label: 'Rotate invite code', action: () => { onRotateCode(); setOpen(false) } },
-            { label: 'Transfer admin', action: () => setOpen(false) },
-            { label: 'Close group', action: () => setOpen(false), danger: true },
+            { label: 'Close group',      action: () => { onCloseGroup();   setOpen(false) }, danger: true },
           ].map(item => (
             <button
               key={item.label}
@@ -73,8 +73,79 @@ function ThreeDotMenu({ onRename, onRotateCode }: { onRename: () => void; onRota
   )
 }
 
+// ─── Close group confirmation modal ──────────────────────────────────────────
+
+interface ClosureSplitRow { user_id: string; name: string; share_count: number; amount: number }
+
+function CloseGroupModal({ groupId, groupName, onClose, onClosed }: {
+  groupId: string; groupName: string; onClose: () => void; onClosed: () => void
+}) {
+  const [loading, setLoading]   = useState(false)
+  const [error,   setError]     = useState<string | null>(null)
+  const [split,   setSplit]     = useState<ClosureSplitRow[] | null>(null)
+
+  async function handleClose() {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.post<{ status: string; closure_split: ClosureSplitRow[]; total_distributed: number }>(
+        `/groups/${groupId}/close`, {},
+      )
+      setSplit(res.closure_split)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to close group.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // After showing the split summary, a second "Done" tap exits the modal and reloads the page
+  if (split) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+        <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+          <p className="text-base font-bold text-gray-900 mb-1">Group closed</p>
+          <p className="text-xs text-gray-500 mb-4">Basket balance distributed proportionally to shares.</p>
+          <div className="space-y-2 mb-5 max-h-52 overflow-y-auto">
+            {split.map(row => (
+              <div key={row.user_id} className="flex items-center justify-between text-sm">
+                <span className="text-gray-800">{row.name}</span>
+                <span className="font-semibold text-gray-900">{formatPaise(row.amount)}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={onClosed} className="w-full py-2.5 rounded-xl bg-maroon-600 text-sm font-semibold text-white">Done</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+        <p className="text-base font-bold text-gray-900 mb-2">Close "{groupName}"?</p>
+        <p className="text-xs text-gray-500 mb-1">Before closing, make sure:</p>
+        <ul className="text-xs text-gray-500 list-disc list-inside space-y-0.5 mb-4">
+          <li>All cycles are closed</li>
+          <li>All loans are repaid</li>
+        </ul>
+        <p className="text-xs text-red-600 mb-4">This action is permanent and cannot be undone.</p>
+        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>
+          <button onClick={handleClose} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-sm font-semibold text-white transition">
+            {loading ? 'Closing…' : 'Yes, close group'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Rename modal ─────────────────────────────────────────────────────────────
 
+// RenameModal is a self-contained modal — its own state, form, and API call.
+// Props: current group name (pre-fills the input); callbacks to close and notify parent.
 function RenameModal({ groupId, current, onClose, onSaved }: { groupId: string; current: string; onClose: () => void; onSaved: (name: string) => void }) {
   const [name, setName] = useState(current)
   const [loading, setLoading] = useState(false)
@@ -82,11 +153,12 @@ function RenameModal({ groupId, current, onClose, onSaved }: { groupId: string; 
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    if (name.trim() === current) { onClose(); return }
+    if (name.trim() === current) { onClose(); return }  // no change, nothing to save
     setLoading(true)
     try {
+      // API call: PATCH /v1/groups/:groupId  Body: { name }
       await api.patch(`/groups/${groupId}`, { name: name.trim() })
-      onSaved(name.trim())
+      onSaved(name.trim())  // tell parent to update the group name in its own state
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.')
     } finally {
@@ -122,6 +194,7 @@ function RenameModal({ groupId, current, onClose, onSaved }: { groupId: string; 
 
 // ─── Metric tile ──────────────────────────────────────────────────────────────
 
+// Reusable tile for the 2x2 metrics grid. Optional onTap makes it a button (e.g., "Record winner ↗").
 function MetricTile({ label, value, sub, danger, onTap }: { label: string; value: string; sub: string; danger?: boolean; onTap?: () => void }) {
   return (
     <button
@@ -154,6 +227,7 @@ function ActionButton({ icon, label, onClick, loading: busy }: { icon: string; l
 // ─── AdminDashboardPage ───────────────────────────────────────────────────────
 
 export default function AdminDashboardPage() {
+  // useParams reads the :groupId segment from the URL (e.g., /groups/abc123 → groupId = "abc123")
   const { groupId } = useParams<{ groupId: string }>()
   const navigate = useNavigate()
 
@@ -169,31 +243,38 @@ export default function AdminDashboardPage() {
   const [closingCycle, setClosingCycle] = useState(false)
   const [closeCycleError, setCloseCycleError] = useState<string | null>(null)
   const [activity, setActivity] = useState<ActivityItem[]>([])
+  const [showCloseGroup, setShowCloseGroup] = useState(false)
 
+  // load() runs when the component mounts or when groupId changes (e.g., navigating between groups)
   useEffect(() => { load() }, [groupId])
 
   async function load() {
     setLoading(true)
     setError(null)
     try {
+      // Sequential then parallel:
+      // Step 1 — fetch group first because we need g.current_cycle to know what payments to fetch
       const g = await api.get<GroupDetail>(`/groups/${groupId}`)
       setGroup(g)
 
+      // Step 2 — now fire payments + activity in parallel (Promise.all)
+      // Payments only fetched if a current cycle exists; otherwise resolves to null immediately
       const [paymentsRes, acts] = await Promise.all([
         g.current_cycle
           ? api.get<{ data: unknown[]; summary: CycleSummary }>(
               `/groups/${groupId}/cycles/${g.current_cycle.cycle_id}/payments`
             )
           : Promise.resolve(null),
+        // .catch(() => []) — activity feed is non-critical; silently use empty array on failure
         api.get<ActivityItem[]>(`/groups/${groupId}/activity?limit=5`).catch(() => [] as ActivityItem[]),
       ])
       if (paymentsRes) setSummary(paymentsRes.summary)
       setActivity(acts)
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        navigate('/login', { replace: true })
+        navigate('/login', { replace: true })     // token expired
       } else if (err instanceof ApiError && err.status === 403) {
-        navigate('/dashboard', { replace: true })
+        navigate('/dashboard', { replace: true }) // not the admin of this group
       } else {
         setError('Could not load group. Tap to retry.')
       }
@@ -202,6 +283,7 @@ export default function AdminDashboardPage() {
     }
   }
 
+  // POST /v1/groups/:groupId/cycles/:cycleId/remind-defaulters — sends WhatsApp/SMS to unpaid members
   async function handleRemindDefaulters() {
     if (!group?.current_cycle) return
     setReminding(true)
@@ -213,17 +295,18 @@ export default function AdminDashboardPage() {
       setRemindMsg(err instanceof ApiError ? err.message : 'Failed to send reminders.')
     } finally {
       setReminding(false)
-      setTimeout(() => setRemindMsg(null), 3000)
+      setTimeout(() => setRemindMsg(null), 3000)  // auto-clear the feedback message after 3s
     }
   }
 
+  // POST /v1/groups/:groupId/rotate-invitation-code — generates a new invite code, invalidates old one
   async function handleRotateCode() {
     setRotatingCode(true)
     setNewInviteCode(null)
     try {
-      const res = await api.post<{ invitation_code: string }>(`/groups/${groupId}/rotate-invitation-code`, {})
+      const res = await api.post<{ invitation_code: string; invitation_code_expires_at: string }>(`/groups/${groupId}/rotate-invitation-code`, {})
       setNewInviteCode(res.invitation_code)
-      setGroup(g => g ? { ...g, invitation_code: res.invitation_code } : g)
+      setGroup(g => g ? { ...g, invitation_code: res.invitation_code, invitation_code_expires_at: res.invitation_code_expires_at } : g)
     } catch (err) {
       setRemindMsg(err instanceof ApiError ? err.message : 'Failed to rotate invite code.')
       setTimeout(() => setRemindMsg(null), 3000)
@@ -232,13 +315,14 @@ export default function AdminDashboardPage() {
     }
   }
 
+  // POST /v1/groups/:groupId/cycles/:cycleId/close — marks the cycle closed, then reloads all data
   async function handleCloseCycle() {
     if (!group?.current_cycle) return
     setClosingCycle(true)
     setCloseCycleError(null)
     try {
       await api.post(`/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/close`, {})
-      await load()
+      await load()  // refresh everything — the cycle status and group state have changed
     } catch (err) {
       setCloseCycleError(err instanceof ApiError ? err.message : 'Failed to close cycle.')
     } finally {
@@ -269,6 +353,7 @@ export default function AdminDashboardPage() {
   }
 
   const cycle = group.current_cycle
+  // pending = how much is still owed this month (null if no payments data yet)
   const pending = summary ? summary.total_expected - summary.total_paid : null
 
   return (
@@ -287,7 +372,7 @@ export default function AdminDashboardPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </button>
-        <ThreeDotMenu onRename={() => setShowRename(true)} onRotateCode={handleRotateCode} />
+        <ThreeDotMenu onRename={() => setShowRename(true)} onRotateCode={handleRotateCode} onCloseGroup={() => setShowCloseGroup(true)} />
       </div>
 
       <div className="flex-1 overflow-y-auto pb-20">
@@ -323,7 +408,7 @@ export default function AdminDashboardPage() {
             {group.people_count} people · {group.total_shares} shares · {formatPaise(group.monthly_contribution)}/share · Pool {formatPaise(group.pool_amount)}
           </p>
 
-          {/* Progress bar */}
+          {/* Progress bar — inline style drives width percentage */}
           {cycle && (
             <div>
               <div className="flex justify-between text-xs text-gray-400 mb-1">
@@ -354,6 +439,7 @@ export default function AdminDashboardPage() {
               }
             </div>
 
+            {/* 2×2 metric tiles */}
             <div className="grid grid-cols-2 gap-2">
               <MetricTile
                 label="COLLECTED"
@@ -366,6 +452,7 @@ export default function AdminDashboardPage() {
                 sub={summary ? `${summary.unpaid_count} defaulter${summary.unpaid_count !== 1 ? 's' : ''}` : ''}
                 danger={!!summary && summary.unpaid_count > 0}
               />
+              {/* onTap makes this tile clickable → navigate to record-winner page */}
               <MetricTile
                 label="WINNER"
                 value={cycle.winner_user_id ? 'Recorded' : 'Not recorded'}
@@ -396,7 +483,7 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* Quick actions */}
+        {/* Quick actions grid */}
         <div className="mx-3 mt-3">
           <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">QUICK ACTIONS</p>
           <div className="grid grid-cols-2 gap-2">
@@ -410,7 +497,7 @@ export default function AdminDashboardPage() {
           )}
         </div>
 
-        {/* Recent activity */}
+        {/* Recent activity feed */}
         <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-100 p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-semibold text-gray-700">Recent activity</p>
@@ -437,23 +524,7 @@ export default function AdminDashboardPage() {
 
       </div>
 
-      {/* Bottom strip */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 flex">
-        {[
-          { label: 'Members',   path: `/groups/${groupId}/members` },
-          { label: 'History',   path: `/groups/${groupId}/history` },
-          { label: 'Analytics', path: `/groups/${groupId}/analytics` },
-          { label: 'Reports',   path: undefined },
-        ].map(tab => (
-          <button
-            key={tab.label}
-            onClick={() => tab.path && navigate(tab.path)}
-            className={`flex-1 py-3 text-[11px] font-medium transition ${tab.path ? 'text-gray-600 hover:text-maroon-600' : 'text-gray-400 cursor-default'}`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <GroupNavBar groupId={groupId!} role="Admin" />
 
       {showRename && (
         <RenameModal
@@ -461,6 +532,15 @@ export default function AdminDashboardPage() {
           current={group.name}
           onClose={() => setShowRename(false)}
           onSaved={name => { setGroup(g => g ? { ...g, name } : g); setShowRename(false) }}
+        />
+      )}
+
+      {showCloseGroup && (
+        <CloseGroupModal
+          groupId={group.group_id}
+          groupName={group.name}
+          onClose={() => setShowCloseGroup(false)}
+          onClosed={() => navigate('/dashboard', { replace: true })}
         />
       )}
     </div>

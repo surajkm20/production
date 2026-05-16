@@ -5,7 +5,7 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { eq, and, isNull, ne, gt, lt, desc, inArray, count } from 'drizzle-orm';
 import { db } from '../config/db';
-import { users, refresh_tokens, notifications, notification_preferences, push_subscriptions } from '../db/schema';
+import { users, refresh_tokens, notifications, notification_preferences, push_subscriptions, chit_groups } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { encodeCursor, decodeCursor } from '../utils/pagination';
@@ -257,10 +257,12 @@ export async function listNotifications(req: Request, res: Response, next: NextF
         body:       notifications.body,
         data:       notifications.data,
         group_id:   notifications.group_id,
+        group_name: chit_groups.name,
         read_at:    notifications.read_at,
         created_at: notifications.created_at,
       })
       .from(notifications)
+      .leftJoin(chit_groups, eq(chit_groups.id, notifications.group_id))
       .where(and(...conditions))
       .orderBy(desc(notifications.created_at))
       .limit(limit + 1);
@@ -317,6 +319,22 @@ export async function markNotificationsRead(req: Request, res: Response, next: N
       .returning({ id: notifications.id });
 
     sendSuccess(res, { marked_count: updated.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── DELETE /me/notifications ────────────────────────────────────────────────
+// Hard-deletes all notification rows for the caller. Notifications are not
+// audit-critical, so a real delete is fine here.
+export async function clearNotifications(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const deleted = await db
+      .delete(notifications)
+      .where(eq(notifications.user_id, userId))
+      .returning({ id: notifications.id });
+    sendSuccess(res, { cleared_count: deleted.length });
   } catch (err) {
     next(err);
   }

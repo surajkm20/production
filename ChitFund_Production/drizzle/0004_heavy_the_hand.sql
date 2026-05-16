@@ -1,1 +1,0 @@
-ALTER TABLE "loans" ADD COLUMN "disbursement_month_number" smallint DEFAULT 1 NOT NULL;

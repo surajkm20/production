@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 
+// Maps backend error codes to user-friendly messages
 const ERROR_MESSAGES: Record<string, string> = {
   MOBILE_TAKEN: 'This mobile number is already registered.',
   USERNAME_TAKEN: 'This username is already taken.',
@@ -9,6 +10,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_MOBILE: 'Enter a valid Indian mobile number (+91XXXXXXXXXX).',
 }
 
+// Shape of the backend's response on successful signup.
+// Backend triggers OTP send and returns when it expires.
 interface SignupResponse {
   user_id: string
   otp_sent: boolean
@@ -17,6 +20,9 @@ interface SignupResponse {
 
 export default function SignupPage() {
   const navigate = useNavigate()
+
+  // Single object for all form fields — cleaner than 4 separate useState calls.
+  // set() helper updates one key at a time: set('name', 'Suraj') → { ...form, name: 'Suraj' }
   const [form, setForm] = useState({ name: '', mobile_number: '', password: '', username: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,15 +37,22 @@ export default function SignupPage() {
     setError(null)
     setLoading(true)
 
+    // Strip spaces from mobile number before sending (user may type "+91 98765 43210")
     const payload: Record<string, string> = {
       name: form.name,
       mobile_number: form.mobile_number.replace(/\s+/g, ''),
       password: form.password,
     }
+    // Username is optional — only include if the user filled it in
     if (form.username.trim()) payload.username = form.username.trim()
 
     try {
+      // API call: POST /v1/auth/signup  Body: { name, mobile_number, password, username? }
+      // On success, backend creates the user and sends an OTP SMS
       const data = await api.post<SignupResponse>('/auth/signup', payload)
+
+      // Navigate to OTP page, passing context via router state (not URL params).
+      // OtpPage reads this state to know which number to verify and when the OTP expires.
       navigate('/otp', {
         state: {
           mobile_number: form.mobile_number,
@@ -74,6 +87,7 @@ export default function SignupPage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 px-6 py-8">
 
+          {/* Error banner */}
           {error && (
             <div className="mb-5 flex gap-2 items-start bg-red-50 text-red-700 text-sm rounded-lg px-4 py-3 border border-red-200">
               <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -124,6 +138,7 @@ export default function SignupPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
               <div className="relative">
+                {/* type toggles between "password" (masked dots) and "text" (visible) */}
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={form.password}

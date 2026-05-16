@@ -3,11 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise, initials } from '../lib/format'
 import type { User, GroupSummary, PaginatedResponse, NotificationListResponse } from '../types/api'
+import NotificationsDrawer from '../components/NotificationsDrawer'
 
 type FilterTab = 'All' | 'Admin' | 'Member'
 type SortKey = 'name' | 'month'
 
 // ─── Status pill ─────────────────────────────────────────────────────────────
+// Small coloured badge shown on each group row.
+// Logic differs for Admin (shows defaulter count) vs Member (shows own payment status).
 
 function StatusPill({ group }: { group: GroupSummary }) {
   if (!group.current_cycle_status || group.current_cycle_status === 'PendingStart') {
@@ -29,6 +32,8 @@ function StatusPill({ group }: { group: GroupSummary }) {
 }
 
 // ─── Group row ───────────────────────────────────────────────────────────────
+// Clicking a row navigates to the correct dashboard based on role:
+// Admin → /groups/:groupId, Member → /groups/:groupId/member
 
 function GroupRow({ group }: { group: GroupSummary }) {
   const navigate = useNavigate()
@@ -56,12 +61,15 @@ function GroupRow({ group }: { group: GroupSummary }) {
 }
 
 // ─── Join modal ──────────────────────────────────────────────────────────────
+// Modal for joining a group via invitation code.
+// Self-contained with its own loading/error/success state — doesn't need to talk to parent.
 
 function JoinModal({ onClose }: { onClose: () => void }) {
   const [code, setCode] = useState('')
   const [shareCount, setShareCount] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // sent: true means API call succeeded — switch to success screen
   const [sent, setSent] = useState(false)
 
   async function handleJoin(e: { preventDefault(): void }) {
@@ -69,6 +77,8 @@ function JoinModal({ onClose }: { onClose: () => void }) {
     setError(null)
     setLoading(true)
     try {
+      // API call: POST /v1/groups/join  Body: { invitation_code, requested_share_count }
+      // This sends a join request; admin must approve before the user is added
       await api.post('/groups/join', {
         invitation_code:       code.trim().toUpperCase(),
         requested_share_count: shareCount,
@@ -190,7 +200,10 @@ export default function HomePage() {
   const [filter, setFilter] = useState<FilterTab>('All')
   const [sort, setSort] = useState<SortKey>('name')
   const [showJoin, setShowJoin] = useState(false)
+  const [showNotifs, setShowNotifs] = useState(false)
 
+  // Fetch user profile, all groups, and unread notification count in parallel on mount.
+  // Promise.all fires all three requests simultaneously — faster than sequential awaits.
   useEffect(() => {
     Promise.all([
       api.get<User>('/me'),
@@ -203,6 +216,7 @@ export default function HomePage() {
         setUnreadCount(notifs.unread_count)
       })
       .catch(err => {
+        // 401 = token expired — redirect to login
         if (err instanceof ApiError && err.status === 401) {
           navigate('/login', { replace: true })
         } else {
@@ -212,11 +226,13 @@ export default function HomePage() {
       .finally(() => setLoading(false))
   }, [])
 
-  // ── derived data ──────────────────────────────────────────────────────────
+  // ── Derived data ──────────────────────────────────────────────────────────
+  // These are computed from `groups` state every render — no extra API calls needed.
 
   const activeGroups = groups.filter(g => g.status === 'Active')
   const closedGroups = groups.filter(g => g.status === 'Closed')
 
+  // Total unpaid contribution for this month across all groups (as a member)
   const pendingDues = activeGroups
     .filter(g => g.user_payment_status_this_month === 'Unpaid')
     .reduce((sum, g) => sum + g.monthly_contribution * g.share_count, 0)
@@ -261,7 +277,8 @@ export default function HomePage() {
           <p className="text-sm font-semibold text-gray-900 truncate">{user?.name}</p>
           <p className="text-xs text-gray-400">{user?.mobile_number}</p>
         </div>
-        <button className="relative p-2 text-gray-500 hover:text-gray-700 transition">
+        {/* Bell icon — opens notifications drawer */}
+        <button onClick={() => setShowNotifs(true)} className="relative p-2 text-gray-500 hover:text-gray-700 transition">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
@@ -286,7 +303,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Summary tiles */}
+        {/* Summary tiles — derived from groups state, no additional fetch */}
         <div className="grid grid-cols-2 gap-3 px-4 mt-4">
           <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm">
             <p className="text-xs text-gray-400 mb-1">Active groups</p>
@@ -300,7 +317,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search — filters groups client-side, no new API call */}
         <div className="px-4 mt-4">
           <div className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -316,7 +333,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Filter pills + sort */}
+        {/* Filter pills + sort — all client-side filtering of already-loaded groups */}
         <div className="flex items-center gap-2 px-4 mt-3">
           {(['All', 'Admin', 'Member'] as FilterTab[]).map(tab => {
             const count = tab === 'All' ? activeGroups.length : tab === 'Admin' ? adminCount : memberCount
@@ -364,7 +381,7 @@ export default function HomePage() {
           ))}
         </div>
 
-        {/* Closed groups */}
+        {/* Closed groups — shown dimmed at the bottom */}
         {filteredClosed.length > 0 && (
           <div className="mt-4">
             <p className="px-4 text-[11px] font-semibold text-gray-400 tracking-widest mb-1">CLOSED</p>
@@ -377,7 +394,7 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* Bottom action buttons */}
+      {/* Bottom action buttons — fixed above the nav bar */}
       <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-md px-4">
         <div className="flex gap-2">
           <button
@@ -417,7 +434,16 @@ export default function HomePage() {
         ))}
       </div>
 
+      {/* JoinModal — conditionally rendered; hidden by default, shown when showJoin is true */}
       {showJoin && <JoinModal onClose={() => setShowJoin(false)} />}
+
+      {/* Notifications drawer */}
+      {showNotifs && (
+        <NotificationsDrawer
+          onClose={() => setShowNotifs(false)}
+          onUnreadChange={setUnreadCount}
+        />
+      )}
     </div>
   )
 }

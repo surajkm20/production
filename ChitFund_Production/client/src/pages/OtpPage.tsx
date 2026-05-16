@@ -9,12 +9,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   OTP_RATE_LIMITED: 'Please wait before requesting another OTP.',
 }
 
+// Data passed from SignupPage via navigate('/otp', { state: { ... } })
 interface LocationState {
   mobile_number: string
   purpose: 'signup' | 'login' | 'password_reset'
   otp_expires_at: string
 }
 
+// Backend response on successful OTP verification — same tokens as login
 interface VerifyResponse {
   user_id: string
   access_token: string
@@ -25,51 +27,62 @@ interface VerifyResponse {
 interface ResendResponse {
   otp_sent: boolean
   otp_expires_at: string
-  next_resend_at: string
+  next_resend_at: string  // ISO timestamp — used to calculate the cooldown countdown
 }
 
 export default function OtpPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  // Read the state passed by SignupPage: mobile number and purpose
   const state = location.state as LocationState | null
 
+  // 6-digit OTP stored as an array of single characters — one per input box
   const [digits, setDigits] = useState(['', '', '', '', '', ''])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // resendCooldown: seconds remaining before resend is allowed (counts down to 0)
   const [resendCooldown, setResendCooldown] = useState(0)
   const [resendError, setResendError] = useState<string | null>(null)
+  // useRef stores direct references to the DOM input elements so we can call .focus() on them
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
+  // On mount: if there's no mobile number in state, the user navigated here directly — redirect back
   useEffect(() => {
     if (!state?.mobile_number) {
       navigate('/signup', { replace: true })
     }
-    inputRefs.current[0]?.focus()
+    inputRefs.current[0]?.focus()  // auto-focus the first digit box
   }, [])
 
+  // Countdown timer: fires every second while resendCooldown > 0
+  // Returns a cleanup function to clear the timeout when component unmounts or cooldown ends
   useEffect(() => {
     if (resendCooldown <= 0) return
     const t = setTimeout(() => setResendCooldown(s => s - 1), 1000)
     return () => clearTimeout(t)
   }, [resendCooldown])
 
+  // Called on every keystroke in a digit box
   function handleDigitChange(index: number, value: string) {
-    if (!/^\d*$/.test(value)) return
-    const char = value.slice(-1)
+    if (!/^\d*$/.test(value)) return  // reject non-numeric input
+    const char = value.slice(-1)      // take only the last character (handles paste into single box)
     const next = [...digits]
     next[index] = char
     setDigits(next)
+    // Auto-advance focus to next box after entering a digit
     if (char && index < 5) {
       inputRefs.current[index + 1]?.focus()
     }
   }
 
+  // Backspace on an empty box moves focus back to the previous box
   function handleKeyDown(index: number, e: React.KeyboardEvent) {
     if (e.key === 'Backspace' && !digits[index] && index > 0) {
       inputRefs.current[index - 1]?.focus()
     }
   }
 
+  // Paste handler: user pastes "123456" → fills all 6 boxes at once
   function handlePaste(e: React.ClipboardEvent) {
     e.preventDefault()
     const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
@@ -83,19 +96,22 @@ export default function OtpPage() {
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     const otp = digits.join('')
-    if (otp.length < 6) return
+    if (otp.length < 6) return  // button is disabled anyway, but guard defensively
 
     setError(null)
     setLoading(true)
 
     try {
+      // API call: POST /v1/auth/verify-otp  Body: { mobile_number, otp, purpose }
       const data = await api.post<VerifyResponse>('/auth/verify-otp', {
         mobile_number: state!.mobile_number,
         otp,
         purpose: state!.purpose,
       })
+      // Store tokens — same as after login
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)
+      // Redirect to login with a "verified" flag so LoginPage shows the green banner
       navigate('/login', { state: { verified: true } })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -103,6 +119,7 @@ export default function OtpPage() {
       } else {
         setError('Something went wrong. Please try again.')
       }
+      // Clear digits and refocus on failure so user can try again immediately
       setDigits(['', '', '', '', '', ''])
       inputRefs.current[0]?.focus()
     } finally {
@@ -113,17 +130,19 @@ export default function OtpPage() {
   async function handleResend() {
     setResendError(null)
     try {
+      // API call: POST /v1/auth/resend-otp
       const data = await api.post<ResendResponse>('/auth/resend-otp', {
         mobile_number: state!.mobile_number,
         purpose: state!.purpose,
       })
+      // Calculate seconds until next resend is allowed from the backend's timestamp
       const next = new Date(data.next_resend_at)
       const secs = Math.max(0, Math.ceil((next.getTime() - Date.now()) / 1000))
       setResendCooldown(secs || 30)
     } catch (err) {
       if (err instanceof ApiError) {
         setResendError(ERROR_MESSAGES[err.code] ?? err.message)
-        setResendCooldown(30)
+        setResendCooldown(30)  // still apply a cooldown on error
       }
     }
   }
@@ -159,11 +178,12 @@ export default function OtpPage() {
           )}
 
           <form onSubmit={handleSubmit}>
+            {/* 6 individual input boxes, one per digit. onPaste on the container handles full-code paste. */}
             <div className="flex gap-2 justify-center mb-6" onPaste={handlePaste}>
               {digits.map((d, i) => (
                 <input
                   key={i}
-                  ref={el => { inputRefs.current[i] = el }}
+                  ref={el => { inputRefs.current[i] = el }}  // store DOM ref for programmatic focus
                   type="text"
                   inputMode="numeric"
                   maxLength={1}
@@ -175,6 +195,7 @@ export default function OtpPage() {
               ))}
             </div>
 
+            {/* Button disabled until all 6 digits are entered */}
             <button
               type="submit"
               disabled={loading || otp.length < 6}
@@ -192,6 +213,7 @@ export default function OtpPage() {
             </button>
           </form>
 
+          {/* Resend section: shows countdown or resend button depending on cooldown state */}
           <div className="mt-5 text-center">
             {resendError && (
               <p className="text-xs text-red-600 mb-2">{resendError}</p>

@@ -1,8 +1,8 @@
 # ChitFund App — Database Schema (v1)
 
-**Status:** Draft v8 (loans: total_interest_accrued added; interest payment model changed to cumulative — no hard monthly enforcement)
+**Status:** Draft v9 (notifications: LOAN_DISBURSED type added; notes updated with cron trigger and v1 scope; notification_preferences per-group mute deferred to v2)
 **Database:** PostgreSQL 14+
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-16
 
 ---
 
@@ -475,7 +475,7 @@ CREATE TABLE notifications (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES users(id),
     group_id        UUID REFERENCES chit_groups(id),
-    type            VARCHAR(40) NOT NULL,    -- 'PAYMENT_DUE' | 'WINNER_ANNOUNCED' | 'PAYMENT_RECEIVED' | 'LOAN_INTEREST_DUE' | 'SKIP_MONTH_DECLARED' | 'DEFAULTER_REMINDER' | 'BASKET_ADJUSTED'
+    type            VARCHAR(40) NOT NULL,    -- 'PAYMENT_DUE' | 'PAYMENT_RECEIVED' | 'WINNER_ANNOUNCED' | 'LOAN_DISBURSED' | 'LOAN_INTEREST_DUE' | 'SKIP_MONTH_DECLARED' | 'DEFAULTER_REMINDER' | 'BASKET_ADJUSTED'
     title           VARCHAR(200) NOT NULL,
     body            TEXT NOT NULL,
     data            JSONB,                   -- deep-link payload, e.g. {"screen":"cycle","cycle_id":"..."}
@@ -492,6 +492,16 @@ CREATE INDEX idx_notif_user_all ON notifications(user_id, created_at DESC);
 **Notes:**
 - In-app inbox + push delivery flags. SMS only for critical events (defaulter reminders, OTP).
 - Partial index on unread for fast badge counts.
+- `type` values and their triggers (v1 implemented types **bolded**):
+  - **`PAYMENT_DUE`** — fired by a daily cron job (09:00 IST) when `due_date = today + 3 days`; sent to members with `Unpaid` payments for that cycle. Skip-month cycles excluded.
+  - **`PAYMENT_RECEIVED`** — fired when admin marks a payment `Paid` via PATCH `/payments/:id`.
+  - **`WINNER_ANNOUNCED`** — fired when admin records a cycle winner; sent to all active group members.
+  - **`LOAN_DISBURSED`** — fired when admin disburses a loan; sent to the borrower only. *(Added in schema v9.)*
+  - `LOAN_INTEREST_DUE` — reserved for future F-31 (borrower interest reminder); not implemented in v1.
+  - **`SKIP_MONTH_DECLARED`** — fired when admin declares a skip month; sent to all active group members.
+  - **`DEFAULTER_REMINDER`** — fired manually by admin via POST `…/remind-defaulters`.
+  - **`BASKET_ADJUSTED`** — fired when admin records a basket adjustment; sent to all active group members.
+- `group_id` is set on all group-scoped notifications; the API response also surfaces `group_name` (joined at query time) so the frontend can display it without an extra call.
 
 ---
 
@@ -510,7 +520,9 @@ CREATE TABLE notification_preferences (
 ```
 
 **Notes:**
-- Per-group mute toggle (F-32 in requirements).
+- Stores mute preferences per user. `group_id = NULL` means the global preference.
+- **v1 scope:** only the global mute (`group_id = NULL`) is surfaced in the UI. Per-group mute rows can exist in the table but the profile screen only exposes the global toggle. Per-group mute UI is deferred to v2 (F-32).
+- The `UNIQUE (user_id, group_id)` constraint correctly handles `NULL` group_id as a single global row per user (PostgreSQL treats each NULL as distinct in unique indexes, but app code uses upsert with `ON CONFLICT` targeting the pair explicitly).
 
 ---
 

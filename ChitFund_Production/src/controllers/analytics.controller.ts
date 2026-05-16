@@ -5,7 +5,7 @@
 //   Member — restricted to their own balance sheet; read-only on ledger / trends.
 
 import { Request, Response, NextFunction } from 'express';
-import { eq, and, isNotNull, sum, count } from 'drizzle-orm';
+import { eq, and, isNotNull, sum, count, sql } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   chit_groups, memberships, monthly_cycles,
@@ -30,10 +30,9 @@ export async function overview(req: Request, res: Response, next: NextFunction):
     const group_id = req.params.group_id as string;
     const userId   = req.user!.userId;
 
-    const caller = await assertActiveMember(group_id, userId);
-    if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+    await assertActiveMember(group_id, userId);
 
-    const [basketRows, collectedRows, disbursedRows, loanCountRows, defaulterRows] = await Promise.all([
+    const [basketRows, collectedRows, disbursedRows, loanCountRows, defaulterRows, adminCommRows, activeLoanRows, maxMonthRows] = await Promise.all([
 
       // Single row — basket holds the running aggregate totals.
       db.select({
@@ -84,19 +83,69 @@ export async function overview(req: Request, res: Response, next: NextFunction):
           eq(monthly_cycles.status,   'Open'),
         ))
         .where(eq(payments.status, 'Unpaid')),
+
+      // total_admin_commission — sum of commission the admin collected from all
+      // auction bids. Skip months have no bid so is_skip_month=false guards against
+      // accidentally summing a 0 stored in DB for those rows.
+      db.select({ total: sum(monthly_cycles.admin_commission) })
+        .from(monthly_cycles)
+        .where(and(
+          eq(monthly_cycles.group_id,    group_id),
+          isNotNull(monthly_cycles.winner_user_id),
+          eq(monthly_cycles.is_skip_month, false),
+        )),
+
+      // Active loan rows — needed to compute outstanding interest in app-code,
+      // since interest is derived dynamically (not stored).
+      db.select({
+        principal:                 loans.principal,
+        monthly_interest_rate:     loans.monthly_interest_rate,
+        disbursement_month_number: loans.disbursement_month_number,
+        total_interest_paid:       loans.total_interest_paid,
+      })
+      .from(loans)
+      .innerJoin(baskets, eq(baskets.id, loans.basket_id))
+      .where(and(
+        eq(baskets.group_id, group_id),
+        eq(loans.status,     'Active'),
+      )),
+
+      // Current cycle month — join to payments so future pre-created Open cycles
+      // (which have no payments yet) don't inflate max(month_number).
+      db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
+        .from(monthly_cycles)
+        .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+        .where(eq(monthly_cycles.group_id, group_id)),
     ]);
 
     const basket = basketRows[0];
     if (!basket) throw new AppError(404, 'BASKET_NOT_FOUND', 'Basket not found for this group.');
 
+    const currentMonth = Number(maxMonthRows[0]?.max_month ?? 0);
+    const { total_outstanding_interest, active_loans_principal } = activeLoanRows.reduce(
+      (acc, r) => {
+        const cyclesElapsed   = Math.max(0, currentMonth - r.disbursement_month_number + 1);
+        const monthlyInterest = Math.round(Number(r.principal) * Number(r.monthly_interest_rate) / 100);
+        const totalAccrued    = cyclesElapsed * monthlyInterest;
+        return {
+          active_loans_principal:    acc.active_loans_principal + Number(r.principal),
+          total_outstanding_interest: acc.total_outstanding_interest + Math.max(0, totalAccrued - Number(r.total_interest_paid)),
+        };
+      },
+      { active_loans_principal: 0, total_outstanding_interest: 0 },
+    );
+
     sendSuccess(res, {
-      total_collected:             Number(collectedRows[0].total  ?? 0),
-      total_disbursed_to_winners:  Number(disbursedRows[0].total  ?? 0),
+      total_collected:             Number(collectedRows[0].total    ?? 0),
+      total_disbursed_to_winners:  Number(disbursedRows[0].total    ?? 0),
       current_basket_balance:      basket.current_balance,
       total_lent_out:              basket.total_lent_out,
       total_interest_earned:       basket.total_interest_earned,
       active_loans_count:          loanCountRows[0].active_loans,
       defaulters_this_month:       defaulterRows[0].defaulters,
+      total_admin_commission:      Number(adminCommRows[0].total    ?? 0),
+      total_outstanding_interest,
+      active_loans_principal,
     });
   } catch (err) {
     next(err);

@@ -263,7 +263,7 @@ export async function disburseLoan(
   const [currentCycleRow] = await db
     .select({ month_number: monthly_cycles.month_number })
     .from(monthly_cycles)
-    .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+    .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
     .where(eq(monthly_cycles.group_id, group_id))
     .orderBy(desc(monthly_cycles.month_number))
     .limit(1);
@@ -307,6 +307,15 @@ export async function disburseLoan(
     actor_id:   borrower_user_id,
     data:       { principal },
   });
+
+  notify({
+    user_id:  borrower_user_id,
+    group_id,
+    type:     'LOAN_DISBURSED',
+    title:    'Loan disbursed',
+    body:     `${paiseToRupeeDisplay(principal)} has been disbursed to you from the basket.`,
+    data:     { loan_id: newLoan.id, principal },
+  }).catch(() => {});
 
   return {
     loan_id:              newLoan.id,
@@ -398,7 +407,7 @@ export async function listLoans(
 
     db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
-      .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+      .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
       .where(eq(monthly_cycles.group_id, group_id)),
   ]);
 
@@ -443,7 +452,7 @@ export async function getLoan(userId: string, group_id: string, loan_id: string)
 
     db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
-      .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+      .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
       .where(eq(monthly_cycles.group_id, group_id)),
   ]);
 
@@ -502,7 +511,7 @@ export async function repayLoan(
 
     db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
-      .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+      .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
       .where(eq(monthly_cycles.group_id, group_id)),
   ]);
 
@@ -527,7 +536,7 @@ export async function repayLoan(
 
   const newTotalInterestPaid   = Number(loanRow.total_interest_paid) + interest_paid;
   const newOutstandingInterest = outstanding_interest - interest_paid;
-  const loanFullyRepaid   = principal_repaid > 0 && newOutstandingInterest === 0;
+  const loanFullyRepaid   = principal_repaid > 0;
   const totalReturn       = principal_repaid + interest_paid;
   const newBalance        = Number(basketRows.current_balance)       + totalReturn;
   const newLentOut        = Number(basketRows.total_lent_out)        - principal_repaid;

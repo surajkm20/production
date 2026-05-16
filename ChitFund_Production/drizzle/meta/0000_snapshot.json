@@ -1,5 +1,5 @@
 {
-  "id": "d22c7398-517a-4522-a402-54546cf0c1db",
+  "id": "5b438b41-a59e-4b4f-9f74-e189d9386d27",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -454,6 +454,13 @@
           "notNull": true,
           "default": 10
         },
+        "admin_commission_rate": {
+          "name": "admin_commission_rate",
+          "type": "numeric(4, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0.00'"
+        },
         "monthly_interest_rate": {
           "name": "monthly_interest_rate",
           "type": "numeric(4, 2)",
@@ -497,6 +504,12 @@
         },
         "closed_at": {
           "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invitation_code_expires_at": {
+          "name": "invitation_code_expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -568,6 +581,10 @@
         "chk_months_shares": {
           "name": "chk_months_shares",
           "value": "\"chit_groups\".\"total_months\" > 0 AND \"chit_groups\".\"total_shares\" > 0 AND \"chit_groups\".\"total_months\" = \"chit_groups\".\"total_shares\""
+        },
+        "chk_commission_rate": {
+          "name": "chk_commission_rate",
+          "value": "\"chit_groups\".\"admin_commission_rate\" >= 0 AND \"chit_groups\".\"admin_commission_rate\" <= 100"
         },
         "chk_interest_rate": {
           "name": "chk_interest_rate",
@@ -822,6 +839,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "admin_commission": {
+          "name": "admin_commission",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "basket_credit": {
+          "name": "basket_credit",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "winner_takeaway": {
           "name": "winner_takeaway",
           "type": "bigint",
@@ -946,7 +975,7 @@
         },
         "chk_bid_consistency": {
           "name": "chk_bid_consistency",
-          "value": "\n    (\"monthly_cycles\".\"winner_user_id\" IS NULL AND \"monthly_cycles\".\"bid_amount\" IS NULL AND \"monthly_cycles\".\"winner_takeaway\" IS NULL)\n    OR\n    (\"monthly_cycles\".\"winner_user_id\" IS NOT NULL AND \"monthly_cycles\".\"bid_amount\" IS NOT NULL AND \"monthly_cycles\".\"winner_takeaway\" IS NOT NULL)\n  "
+          "value": "\n    (\"monthly_cycles\".\"winner_user_id\" IS NULL AND \"monthly_cycles\".\"bid_amount\" IS NULL AND \"monthly_cycles\".\"admin_commission\" IS NULL AND \"monthly_cycles\".\"basket_credit\" IS NULL AND \"monthly_cycles\".\"winner_takeaway\" IS NULL)\n    OR\n    (\"monthly_cycles\".\"winner_user_id\" IS NOT NULL AND \"monthly_cycles\".\"bid_amount\" IS NOT NULL AND \"monthly_cycles\".\"admin_commission\" IS NOT NULL AND \"monthly_cycles\".\"basket_credit\" IS NOT NULL AND \"monthly_cycles\".\"winner_takeaway\" IS NOT NULL)\n  "
         }
       },
       "isRLSEnabled": false
@@ -1063,7 +1092,7 @@
       "checkConstraints": {
         "chk_loan_txn_type": {
           "name": "chk_loan_txn_type",
-          "value": "\"loan_transactions\".\"txn_type\" IN ('PRINCIPAL_REPAID', 'INTEREST_PAID', 'ACCRUAL')"
+          "value": "\"loan_transactions\".\"txn_type\" IN ('PRINCIPAL_REPAID', 'INTEREST_PAID')"
         },
         "chk_loan_txn_amount": {
           "name": "chk_loan_txn_amount",
@@ -1106,6 +1135,13 @@
           "type": "numeric(4, 2)",
           "primaryKey": false,
           "notNull": true
+        },
+        "disbursement_month_number": {
+          "name": "disbursement_month_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "total_interest_paid": {
           "name": "total_interest_paid",
@@ -2411,6 +2447,107 @@
           "tableTo": "memberships",
           "columnsFrom": [
             "to_membership_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.group_activity": {
+      "name": "group_activity",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_activity_group": {
+          "name": "idx_activity_group",
+          "columns": [
+            {
+              "expression": "group_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "group_activity_group_id_chit_groups_id_fk": {
+          "name": "group_activity_group_id_chit_groups_id_fk",
+          "tableFrom": "group_activity",
+          "tableTo": "chit_groups",
+          "columnsFrom": [
+            "group_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "group_activity_actor_id_users_id_fk": {
+          "name": "group_activity_actor_id_users_id_fk",
+          "tableFrom": "group_activity",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_id"
           ],
           "columnsTo": [
             "id"

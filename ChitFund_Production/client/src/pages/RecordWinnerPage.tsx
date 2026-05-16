@@ -24,6 +24,7 @@ export default function RecordWinnerPage() {
 
   useEffect(() => { load() }, [groupId])
 
+  // Fetch group + all cycles + members in parallel on mount
   async function load() {
     setLoading(true)
     setError(null)
@@ -52,6 +53,8 @@ export default function RecordWinnerPage() {
     setSuccessMsg(null)
     setWarnings([])
     try {
+      // API call: POST /v1/groups/:groupId/cycles/:cycleId/record-winner
+      // bid is in paise (see conversion below); backend validates bid < poolAmount
       const result = await api.post<{ warnings?: string[] }>(
         `/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/record-winner`,
         {
@@ -61,7 +64,9 @@ export default function RecordWinnerPage() {
         },
       )
       setSuccessMsg('Winner recorded successfully.')
+      // Backend may return warnings (e.g., "member already won before") — show them as amber banners
       if (result.warnings?.length) setWarnings(result.warnings)
+      // Reset form and reload to reflect the updated cycle state
       setWinnerId('')
       setBidRupees('')
       setNotes('')
@@ -73,13 +78,19 @@ export default function RecordWinnerPage() {
     }
   }
 
+  // Rupees → paise conversion (same pattern as CreateGroupPage)
   const bid             = Math.round(parseFloat(bidRupees) * 100) || 0
   const poolAmount      = group?.pool_amount ?? 0
+  // winnerTakeaway: what the winner actually takes home = pool - bid (bid stays in basket)
+  // Only valid when bid is > 0 and less than the pool
   const winnerTakeaway  = bid > 0 && bid < poolAmount ? poolAmount - bid : null
 
   const currentCycle    = group?.current_cycle
+  // canRecord: must be an open cycle with no winner yet
   const canRecord       = !!currentCycle && currentCycle.status === 'Open' && !currentCycle.winner_user_id
+  // Backend computes eligibility (member hasn't won all their shares yet); we just filter the list
   const eligibleMembers = members.filter(m => m.is_eligible_to_win)
+  // Past winners: cycles that have a winner recorded, sorted newest first
   const pastWinners     = cycles
     .filter(c => c.winner !== null)
     .sort((a, b) => b.month_number - a.month_number)
@@ -124,7 +135,7 @@ export default function RecordWinnerPage() {
 
       <div className="flex-1 overflow-y-auto pb-8 space-y-3 pt-3 px-3">
 
-        {/* Record form */}
+        {/* Record form — only shown when canRecord is true */}
         {canRecord ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <p className="text-sm font-semibold text-gray-900 mb-1">
@@ -142,6 +153,7 @@ export default function RecordWinnerPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
 
+              {/* Winner dropdown — only shows eligible members (not all members) */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Winner</label>
                 <select
@@ -152,6 +164,7 @@ export default function RecordWinnerPage() {
                 >
                   <option value="">Select eligible member</option>
                   {eligibleMembers.map(m => (
+                    // Show wins vs shares so admin knows remaining eligibility
                     <option key={m.user_id} value={m.user_id}>
                       {m.name} ({m.wins_count}/{m.share_count} wins)
                     </option>
@@ -162,6 +175,7 @@ export default function RecordWinnerPage() {
                 )}
               </div>
 
+              {/* Bid amount — user types rupees, we convert to paise */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Winning bid — amount left behind (₹)
@@ -179,6 +193,7 @@ export default function RecordWinnerPage() {
                     className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500"
                   />
                 </div>
+                {/* Live preview: as user types, show how the bid splits into basket vs winner payout */}
                 {winnerTakeaway !== null && (
                   <div className="mt-2 bg-maroon-50 rounded-lg px-3 py-2 text-xs text-maroon-700 space-y-0.5">
                     <p>Bid left behind → basket: <span className="font-semibold">{formatPaise(bid)}</span></p>
@@ -201,6 +216,7 @@ export default function RecordWinnerPage() {
                 />
               </div>
 
+              {/* Submit disabled unless: winner selected, bid > 0, bid < pool */}
               <button
                 type="submit"
                 disabled={submitting || !winnerId || bid <= 0 || bid >= poolAmount}
@@ -211,6 +227,7 @@ export default function RecordWinnerPage() {
             </form>
           </div>
         ) : (
+          // Non-recordable state: winner already set, or no open cycle
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
             {currentCycle?.winner_user_id ? (
               <p className="text-sm text-gray-500">
@@ -222,7 +239,7 @@ export default function RecordWinnerPage() {
           </div>
         )}
 
-        {/* Past winners */}
+        {/* Past winners list */}
         <div>
           <p className="text-xs font-semibold text-gray-400 tracking-widest px-1 mb-2">PAST WINNERS</p>
 
@@ -255,6 +272,7 @@ export default function RecordWinnerPage() {
                     </div>
                   </div>
 
+                  {/* For regular (non-skip) months: show bid vs winner payout breakdown */}
                   {!c.is_skip_month && c.bid_amount !== null && c.winner_takeaway !== null && (
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <div className="bg-gray-50 rounded-lg px-3 py-2">
@@ -268,6 +286,7 @@ export default function RecordWinnerPage() {
                     </div>
                   )}
 
+                  {/* For skip months: entire basket pays out to the designated person */}
                   {c.is_skip_month && (
                     <div className="mt-3 bg-amber-50 rounded-lg px-3 py-2">
                       <p className="text-[10px] text-amber-500 mb-0.5">Basket payout (skip month)</p>

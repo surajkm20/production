@@ -7,7 +7,7 @@ import { z } from 'zod';
 const E164 = /^\+[1-9]\d{1,14}$/;
 const mobile = z.string().regex(E164, 'Mobile must be in E.164 format (e.g. +919876543210)').max(15);
 const otp    = z.string().length(6).regex(/^\d{6}$/, 'OTP must be exactly 6 digits');
-const otpPurpose = z.enum(['signup', 'login', 'password_reset', 'admin_transfer']);
+const otpPurpose = z.enum(['signup', 'password_reset', 'admin_transfer']);
 
 export const signupSchema = z.object({
   name:          z.string().min(1).max(100),

@@ -6,6 +6,7 @@ import type { GroupDetail, CycleItem, Payment, CycleSummary } from '../types/api
 
 type FilterTab = 'All' | 'Unpaid' | 'Paid'
 
+// Custom toggle switch component — shows green when checked (paid), gray when unchecked (unpaid)
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
     <button
@@ -30,6 +31,7 @@ export default function MarkPaymentsPage() {
 
   const [group, setGroup] = useState<GroupDetail | null>(null)
   const [cycles, setCycles] = useState<CycleItem[]>([])
+  // cycleIdx: which cycle is currently selected in the cycle nav (0 = oldest)
   const [cycleIdx, setCycleIdx] = useState(0)
   const [payments, setPayments] = useState<Payment[]>([])
   const [summary, setSummary] = useState<CycleSummary | null>(null)
@@ -41,10 +43,12 @@ export default function MarkPaymentsPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
+  // useRef stores the setTimeout ID so we can cancel it if a new toast fires before the old one expires
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { loadGroup() }, [groupId])
 
+  // Initial load: group + all cycles in parallel, then load payments for the active/current cycle
   async function loadGroup() {
     setLoading(true)
     setError(null)
@@ -56,6 +60,7 @@ export default function MarkPaymentsPage() {
       setGroup(g)
       setCycles(cycleList)
 
+      // Find the current open cycle to default-select it
       const currentCycleId = g.current_cycle?.cycle_id
       const defaultIdx = currentCycleId
         ? cycleList.findIndex(c => c.cycle_id === currentCycleId)
@@ -63,6 +68,7 @@ export default function MarkPaymentsPage() {
       const idx = defaultIdx >= 0 ? defaultIdx : cycleList.length - 1
       setCycleIdx(idx)
 
+      // Sequential: load payments only after we know which cycle to load
       if (cycleList[idx]) {
         await loadPayments(cycleList[idx].cycle_id)
       }
@@ -79,9 +85,11 @@ export default function MarkPaymentsPage() {
     }
   }
 
+  // Fetch payments for a specific cycle — also updates the summary bar
   async function loadPayments(cycle_id: string) {
     setPaymentsLoading(true)
     try {
+      // Response shape: { data: Payment[], summary: CycleSummary }
       const res = await api.get<{ data: Payment[]; summary: CycleSummary }>(
         `/groups/${groupId}/cycles/${cycle_id}/payments`
       )
@@ -92,6 +100,7 @@ export default function MarkPaymentsPage() {
     }
   }
 
+  // Navigate between cycles via the ← → arrows at the top
   async function goToCycle(newIdx: number) {
     if (newIdx < 0 || newIdx >= cycles.length) return
     setCycleIdx(newIdx)
@@ -99,36 +108,47 @@ export default function MarkPaymentsPage() {
     await loadPayments(cycles[newIdx].cycle_id)
   }
 
+  // Toast: show a brief message, auto-dismiss after 3s.
+  // Clears any running timer first to prevent stacking.
   function showToast(msg: string) {
     if (toastTimer.current) clearTimeout(toastTimer.current)
     setToastMsg(msg)
     toastTimer.current = setTimeout(() => setToastMsg(null), 3000)
   }
 
+  // Optimistic payment toggle:
+  // 1. Immediately flip the payment status in local state (instant UI feedback)
+  // 2. Recalculate the summary bar from the updated local state
+  // 3. Call the API in the background
+  // 4. On failure: revert both payments and summary to the pre-toggle snapshot
   async function togglePayment(payment: Payment) {
     const newStatus = payment.status === 'Paid' ? 'Unpaid' : 'Paid'
-    const prev = [...payments]
+    const prev = [...payments]  // snapshot for rollback
 
-    setPayments(ps => {
-      const updated = ps.map(p =>
-        p.payment_id === payment.payment_id
-          ? { ...p, status: newStatus, paid_at: newStatus === 'Paid' ? new Date().toISOString() : null, paid_amount: newStatus === 'Paid' ? p.expected_amount : 0 }
-          : p
-      )
-      setSummary(recalcSummary(updated))
-      return updated
-    })
+    // Compute the updated array first, then set both states from the same array.
+    // Avoids calling setSummary inside a state updater (side effect anti-pattern).
+    const updated = payments.map(p =>
+      p.payment_id === payment.payment_id
+        ? { ...p, status: newStatus, paid_at: newStatus === 'Paid' ? new Date().toISOString() : null, paid_amount: newStatus === 'Paid' ? p.expected_amount : 0 } as Payment
+        : p
+    )
+    setPayments(updated)
+    setSummary(recalcSummary(updated))
 
     try {
+      // API call: PATCH /v1/groups/:groupId/payments/:paymentId  Body: { status }
       await api.patch(`/groups/${groupId}/payments/${payment.payment_id}`, { status: newStatus })
       showToast(newStatus === 'Paid' ? `${payment.member_name} marked paid` : `${payment.member_name} marked unpaid`)
     } catch {
+      // Revert both states to the pre-toggle snapshot on failure
       setPayments(prev)
       setSummary(recalcSummary(prev))
       showToast('Failed to update — please retry.')
     }
   }
 
+  // Pure function: derive a CycleSummary from the current payments array.
+  // Called after every optimistic toggle so the totals in the summary bar stay in sync.
   function recalcSummary(ps: Payment[]): CycleSummary {
     return {
       total_expected: ps.reduce((s, p) => s + p.expected_amount, 0),
@@ -139,17 +159,20 @@ export default function MarkPaymentsPage() {
     }
   }
 
+  // Bulk mark all unpaid as paid — uses a separate bulk endpoint, then re-fetches payments
   async function handleMarkAllPaid() {
     setShowBulkConfirm(false)
     setBulkLoading(true)
     const cycle = cycles[cycleIdx]
     if (!cycle) return
     try {
+      // API call: POST /v1/groups/:groupId/cycles/:cycleId/payments/bulk
       await api.post(`/groups/${groupId}/cycles/${cycle.cycle_id}/payments/bulk`, {
         payment_ids: 'all_unpaid',
         status: 'Paid',
         paid_at: new Date().toISOString(),
       })
+      // Re-fetch to get the authoritative state from the server
       await loadPayments(cycle.cycle_id)
       showToast('All unpaid members marked as paid.')
     } catch (err) {
@@ -159,6 +182,7 @@ export default function MarkPaymentsPage() {
     }
   }
 
+  // Send payment reminders to all unpaid members for the currently selected cycle
   async function handleRemind() {
     const cycle = cycles[cycleIdx]
     if (!cycle) return
@@ -197,12 +221,14 @@ export default function MarkPaymentsPage() {
   const isCycleOpen = cycle?.status === 'Open'
   const unpaidCount = summary?.unpaid_count ?? 0
 
+  // Client-side filter — no API call, just filters the already-loaded payments array
   const filtered = payments.filter(p => {
     if (filter === 'Paid')   return p.status === 'Paid'
     if (filter === 'Unpaid') return p.status === 'Unpaid'
     return true
   })
 
+  // Progress bar width (0–100%)
   const collectionPct = summary && summary.total_expected > 0
     ? Math.round((summary.total_paid / summary.total_expected) * 100)
     : 0
@@ -223,7 +249,7 @@ export default function MarkPaymentsPage() {
 
       <div className="flex-1 overflow-y-auto pb-24">
 
-        {/* Cycle selector */}
+        {/* Cycle navigation — ← cycle month → arrows let admin browse past cycles */}
         {cycle && (
           <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
             <button
@@ -253,7 +279,7 @@ export default function MarkPaymentsPage() {
           </div>
         )}
 
-        {/* Summary tiles */}
+        {/* Summary tiles — updated optimistically on every toggle */}
         {summary && (
           <div className="mx-3 mt-3">
             <div className="grid grid-cols-2 gap-2 mb-2">
@@ -275,7 +301,7 @@ export default function MarkPaymentsPage() {
               </div>
             </div>
 
-            {/* Progress bar */}
+            {/* Collection progress bar — width controlled by inline style */}
             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-3">
               <div
                 className="h-full bg-green-500 rounded-full transition-all"
@@ -285,7 +311,7 @@ export default function MarkPaymentsPage() {
           </div>
         )}
 
-        {/* Filter pills + Mark all */}
+        {/* Filter pills */}
         <div className="mx-3 mb-2 flex items-center gap-2">
           <div className="flex bg-gray-100 rounded-lg p-0.5 gap-0.5">
             {(['All', 'Unpaid', 'Paid'] as FilterTab[]).map(f => (
@@ -315,7 +341,7 @@ export default function MarkPaymentsPage() {
           )}
         </div>
 
-        {/* Payment rows */}
+        {/* Payment rows — each row has a Toggle that calls togglePayment() */}
         <div className="mx-3 bg-white rounded-2xl border border-gray-100 overflow-hidden">
           {paymentsLoading ? (
             <div className="flex justify-center py-8">
@@ -335,7 +361,7 @@ export default function MarkPaymentsPage() {
                     key={p.payment_id}
                     className={`flex items-center gap-3 px-4 py-3 ${!isPaid && p.status === 'Unpaid' ? 'bg-red-50/40' : ''}`}
                   >
-                    {/* Avatar */}
+                    {/* Avatar color: green = paid, red = unpaid */}
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isPaid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
                       {initials(p.member_name)}
                     </div>
@@ -352,7 +378,7 @@ export default function MarkPaymentsPage() {
                       </p>
                     </div>
 
-                    {/* Amount + toggle */}
+                    {/* Amount + toggle switch — Toggle hidden for waived payments and closed cycles */}
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`text-xs font-medium ${isPaid ? 'text-green-600' : 'text-gray-400'}`}>
                         {formatPaise(p.expected_amount)}
@@ -393,14 +419,14 @@ export default function MarkPaymentsPage() {
         </button>
       </div>
 
-      {/* Toast */}
+      {/* Toast notification — fixed above the action bar, auto-dismisses via timer */}
       {toastMsg && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 whitespace-nowrap">
           {toastMsg}
         </div>
       )}
 
-      {/* Bulk confirm dialog */}
+      {/* Bulk confirm dialog — shown before marking all unpaid as paid */}
       {showBulkConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
           <div className="bg-white rounded-2xl w-full max-w-sm p-6">

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise, initials } from '../lib/format'
-import type { CycleDetail, GroupDetail } from '../types/api'
+import type { CycleDetail, GroupDetail, Member } from '../types/api'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,10 +38,14 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
 // ─── CycleDetailPage ──────────────────────────────────────────────────────────
 
 export default function CycleDetailPage() {
+  // Both groupId and cycleId come from URL params: /groups/:groupId/history/:cycleId
   const { groupId, cycleId } = useParams<{ groupId: string; cycleId: string }>()
   const navigate              = useNavigate()
+  // useLocation reads the state passed by HistoryPage when it called navigate():
+  //   navigate(`/groups/${groupId}/history/${cycle.cycle_id}`, { state: { role: '...', groupName: '...' } })
   const location              = useLocation()
 
+  // Extract role from navigation state — avoids an extra /me API call just to know the role
   const roleFromState: string = (location.state as { role?: string })?.role ?? 'Member'
   const isAdmin = roleFromState === 'Admin'
 
@@ -51,12 +55,22 @@ export default function CycleDetailPage() {
   const [error,         setError]         = useState<string | null>(null)
   const [auditExpanded, setAuditExpanded] = useState(false)
 
+  // Correct-cycle modal state
+  const [showCorrect,   setShowCorrect]   = useState(false)
+  const [members,       setMembers]       = useState<Member[]>([])
+  const [correctWinner, setCorrectWinner] = useState('')
+  const [correctBidRupees, setCorrectBidRupees] = useState('')
+  const [correctNotes,  setCorrectNotes]  = useState('')
+  const [correctLoading, setCorrectLoading] = useState(false)
+  const [correctError,  setCorrectError]  = useState<string | null>(null)
+
   useEffect(() => { load() }, [groupId, cycleId])
 
   async function load() {
     setLoading(true)
     setError(null)
     try {
+      // Fetch cycle detail and group in parallel — neither depends on the other
       const [c, g] = await Promise.all([
         api.get<CycleDetail>(`/groups/${groupId}/cycles/${cycleId}`),
         api.get<GroupDetail>(`/groups/${groupId}`),
@@ -68,6 +82,41 @@ export default function CycleDetailPage() {
       else setError('Could not load cycle. Tap to retry.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function openCorrectModal() {
+    setCorrectError(null)
+    setCorrectWinner(cycle?.winner?.user_id ?? '')
+    setCorrectBidRupees(cycle?.bid_amount != null ? String(cycle.bid_amount / 100) : '')
+    setCorrectNotes(cycle?.notes ?? '')
+    setShowCorrect(true)
+    try {
+      const list = await api.get<Member[]>(`/groups/${groupId}/members`)
+      setMembers(list)
+    } catch {
+      setCorrectError('Could not load members list.')
+    }
+  }
+
+  async function submitCorrection(e: React.FormEvent) {
+    e.preventDefault()
+    if (!cycle || !correctWinner) return
+    setCorrectLoading(true)
+    setCorrectError(null)
+    const bid = Math.round(parseFloat(correctBidRupees) * 100) || 0
+    try {
+      await api.correctCycle(groupId!, cycleId!, {
+        winner_user_id: correctWinner,
+        ...(!cycle.is_skip_month ? { bid_amount: bid } : {}),
+        ...(correctNotes.trim() ? { notes: correctNotes.trim() } : {}),
+      })
+      setShowCorrect(false)
+      await load()
+    } catch (err) {
+      setCorrectError(err instanceof ApiError ? err.message : 'Correction failed.')
+    } finally {
+      setCorrectLoading(false)
     }
   }
 
@@ -99,6 +148,15 @@ export default function CycleDetailPage() {
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length
+  const canCorrect     = isAdmin && cycle.status === 'Closed' && hasWinner
+
+  // For the correction modal: show eligible members + the current winner (even if no longer eligible)
+  const correctableMembers = members.filter(
+    m => m.is_eligible_to_win || m.user_id === cycle.winner?.user_id,
+  )
+  const correctBid = Math.round(parseFloat(correctBidRupees) * 100) || 0
+  const poolAmount = group?.pool_amount ?? 0
+  const correctTakeaway = correctBid > 0 && correctBid < poolAmount ? poolAmount - correctBid : null
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col max-w-md mx-auto">
@@ -118,10 +176,11 @@ export default function CycleDetailPage() {
 
       <div className="flex-1 overflow-y-auto pb-6 space-y-3 pt-3 px-3">
 
-        {/* ── Outcome card ──────────────────────────────────────────────────── */}
+        {/* ── Outcome card — shows winner, bid, and takeaway ──────────────────── */}
         <div className={`rounded-2xl p-4 border ${
           hasWinner ? 'bg-maroon-50 border-maroon-100' : 'bg-gray-50 border-gray-200'
         }`}>
+          {/* Regular month with winner */}
           {hasWinner && !cycle.is_skip_month && (
             <>
               <p className="text-[11px] font-semibold text-maroon-400 tracking-widest mb-3">WINNER</p>
@@ -145,9 +204,18 @@ export default function CycleDetailPage() {
                   {cycle.recorded_at ? ` on ${formatDateTime(cycle.recorded_at)}` : ''}
                 </p>
               )}
+              {canCorrect && (
+                <button
+                  onClick={openCorrectModal}
+                  className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
+                >
+                  Correct this entry
+                </button>
+              )}
             </>
           )}
 
+          {/* Skip month — someone receives from basket instead of a bid */}
           {hasWinner && cycle.is_skip_month && (
             <>
               <p className="text-[11px] font-semibold text-blue-400 tracking-widest mb-3">SKIP MONTH</p>
@@ -164,9 +232,18 @@ export default function CycleDetailPage() {
                   {cycle.recorded_at ? ` on ${formatDateTime(cycle.recorded_at)}` : ''}
                 </p>
               )}
+              {canCorrect && (
+                <button
+                  onClick={openCorrectModal}
+                  className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
+                >
+                  Correct this entry
+                </button>
+              )}
             </>
           )}
 
+          {/* No winner yet — admin sees a "Tap to record" shortcut if this is the current cycle */}
           {!hasWinner && (
             <>
               <p className="text-sm text-gray-400 text-center py-2">Winner not yet recorded</p>
@@ -182,7 +259,7 @@ export default function CycleDetailPage() {
           )}
         </div>
 
-        {/* ── Basket impact ─────────────────────────────────────────────────── */}
+        {/* ── Basket impact — how this cycle moved the basket balance ──────── */}
         {cycle.basket_impact && (
           <div className="bg-white rounded-2xl p-4 border border-gray-100">
             <p className="text-[11px] font-semibold text-gray-400 tracking-widest mb-2">BASKET IMPACT</p>
@@ -203,7 +280,7 @@ export default function CycleDetailPage() {
           </div>
         )}
 
-        {/* ── Payments ──────────────────────────────────────────────────────── */}
+        {/* ── Payments list for this cycle ──────────────────────────────────── */}
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50">
             <p className="text-[11px] font-semibold text-gray-400 tracking-widest">
@@ -254,7 +331,7 @@ export default function CycleDetailPage() {
           )}
         </div>
 
-        {/* ── Notes ─────────────────────────────────────────────────────────── */}
+        {/* ── Admin notes for this cycle ─────────────────────────────────────── */}
         {cycle.notes && (
           <div className="bg-white rounded-2xl p-4 border border-gray-100">
             <p className="text-[11px] font-semibold text-gray-400 tracking-widest mb-2">NOTES</p>
@@ -262,13 +339,14 @@ export default function CycleDetailPage() {
           </div>
         )}
 
-        {/* ── Audit log ─────────────────────────────────────────────────────── */}
+        {/* ── Audit log — collapsible section, toggles with auditExpanded ──── */}
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <button
             onClick={() => setAuditExpanded(v => !v)}
             className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition"
           >
             <p className="text-[11px] font-semibold text-gray-400 tracking-widest">ACTIVITY</p>
+            {/* Chevron rotates 180° when expanded */}
             <svg
               className={`w-4 h-4 text-gray-400 transition-transform ${auditExpanded ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -284,6 +362,100 @@ export default function CycleDetailPage() {
         </div>
 
       </div>
+
+      {/* ── Correct Cycle Modal ───────────────────────────────────────────────── */}
+      {showCorrect && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-0">
+          <div className="w-full max-w-md bg-white rounded-t-3xl p-5 pb-8 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-bold text-gray-900">Correct cycle entry</p>
+              <button onClick={() => setShowCorrect(false)} className="text-gray-400 hover:text-gray-600 transition">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
+              This will reverse the existing basket entry and apply the corrected values. The change is permanent and logged.
+            </p>
+
+            {correctError && <p className="text-sm text-red-600 mb-3">{correctError}</p>}
+
+            <form onSubmit={submitCorrection} className="space-y-4">
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Winner</label>
+                <select
+                  value={correctWinner}
+                  onChange={e => setCorrectWinner(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-maroon-500"
+                >
+                  <option value="">Select member</option>
+                  {correctableMembers.map(m => (
+                    <option key={m.user_id} value={m.user_id}>
+                      {m.name} ({m.wins_count}/{m.share_count} wins){m.user_id === cycle.winner?.user_id ? ' — current' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!cycle.is_skip_month && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Corrected bid amount (₹)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">₹</span>
+                    <input
+                      type="number"
+                      value={correctBidRupees}
+                      onChange={e => setCorrectBidRupees(e.target.value)}
+                      min="1"
+                      step="1"
+                      required
+                      className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500"
+                    />
+                  </div>
+                  {correctTakeaway !== null && (
+                    <div className="mt-2 bg-maroon-50 rounded-lg px-3 py-2 text-xs text-maroon-700 space-y-0.5">
+                      <p>Bid → basket: <span className="font-semibold">{formatPaise(correctBid)}</span></p>
+                      <p>Winner receives: <span className="font-semibold">{formatPaise(correctTakeaway)}</span></p>
+                    </div>
+                  )}
+                  {correctBid >= poolAmount && correctBid > 0 && (
+                    <p className="text-xs text-red-600 mt-1">Bid cannot exceed pool ({formatPaise(poolAmount)}).</p>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Notes <span className="text-gray-400">(optional)</span></label>
+                <input
+                  type="text"
+                  value={correctNotes}
+                  onChange={e => setCorrectNotes(e.target.value)}
+                  placeholder="Reason for correction"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={
+                  correctLoading || !correctWinner ||
+                  (!cycle.is_skip_month && (correctBid <= 0 || correctBid >= poolAmount))
+                }
+                className="w-full py-2.5 rounded-xl bg-maroon-600 hover:bg-maroon-700 disabled:opacity-60 text-sm font-semibold text-white transition"
+              >
+                {correctLoading ? 'Saving…' : 'Save correction'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

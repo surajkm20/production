@@ -5,6 +5,7 @@ import { formatPaise } from '../lib/format'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+// Pure helper: given startMonth "2026-06" and 12 shares, returns "May 2027"
 function getEndMonthLabel(startValue: string, totalShares: number): string {
   if (!startValue || totalShares < 1) return ''
   const [y, m] = startValue.split('-').map(Number)
@@ -12,17 +13,20 @@ function getEndMonthLabel(startValue: string, totalShares: number): string {
   return `${MONTHS[end.getMonth()]} ${end.getFullYear()}`
 }
 
+// Pure helper: "2026-06" → "Jun 2026"
 function getStartMonthLabel(startValue: string): string {
   if (!startValue) return ''
   const [y, m] = startValue.split('-').map(Number)
   return `${MONTHS[m - 1]} ${y}`
 }
 
+// Returns "YYYY-MM" for the current month — used as the `min` on the month input
 function minStartMonth(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
+// Shape of the backend's response on successful group creation
 interface CreateGroupResponse {
   group_id: string
   name: string
@@ -38,6 +42,8 @@ interface CreateGroupResponse {
 export default function CreateGroupPage() {
   const navigate = useNavigate()
 
+  // contributionRupees is a string because it's what the text input holds ("10000", "10,000", etc.)
+  // The actual paise value is derived below: contribution = Math.round(parseFloat(contributionRupees) * 100)
   const [name, setName] = useState('')
   const [contributionRupees, setContributionRupees] = useState('')
   const [totalShares, setTotalShares] = useState(10)
@@ -49,15 +55,19 @@ export default function CreateGroupPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // If admin reduces totalShares below their own share count, cap adminShareCount automatically
   useEffect(() => {
     setAdminShareCount(s => Math.min(s, totalShares))
   }, [totalShares])
 
+  // Rupees → paise conversion: "10000" → 1000000 paise. || 0 guards against NaN when input is empty.
+  // These are derived values — no useState needed, they recalculate on every render from the inputs above.
   const contribution = Math.round(parseFloat(contributionRupees) * 100) || 0
-  const poolAmount   = contribution * totalShares
+  const poolAmount   = contribution * totalShares    // total monthly pool in paise
   const startLabel   = getStartMonthLabel(startMonth)
   const endLabel     = getEndMonthLabel(startMonth, totalShares)
 
+  // Stepper helper: increment/decrement totalShares, minimum 2 (a chit needs at least 2 people)
   function adjustShares(delta: number) {
     setTotalShares(s => Math.max(2, s + delta))
   }
@@ -72,16 +82,19 @@ export default function CreateGroupPage() {
     try {
       const parsedCommission = parseFloat(commissionRate)
       const parsedInterest   = parseFloat(interestRate)
+      // API call: POST /v1/groups  Body: group configuration
       const data = await api.post<CreateGroupResponse>('/groups', {
         name: name.trim(),
-        monthly_contribution: contribution,
+        monthly_contribution: contribution,         // in paise
         total_shares: totalShares,
-        start_month: startMonth + '-01',   // YYYY-MM → YYYY-MM-01
+        start_month: startMonth + '-01',            // browser month picker gives "YYYY-MM"; backend wants "YYYY-MM-DD"
         payment_due_day: paymentDueDay,
         admin_share_count: adminShareCount,
+        // Spread operator with conditional: only include optional fields if the user entered a valid number
         ...(!isNaN(parsedCommission) ? { admin_commission_rate: parsedCommission } : {}),
         ...(!isNaN(parsedInterest)   ? { monthly_interest_rate: parsedInterest }   : {}),
       })
+      // On success, navigate to the new group's admin dashboard
       navigate(`/groups/${data.group_id}`)
     } catch (err) {
       if (err instanceof ApiError) {
@@ -131,7 +144,7 @@ export default function CreateGroupPage() {
             />
           </div>
 
-          {/* Contribution */}
+          {/* Contribution — user types rupees, we store/send paise */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Contribution per share, per month
@@ -181,7 +194,7 @@ export default function CreateGroupPage() {
             </div>
           </div>
 
-          {/* Admin share count */}
+          {/* Admin's own share count in the chit */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Your shares in this chit</label>
             <div className="flex items-center gap-4">
@@ -210,7 +223,7 @@ export default function CreateGroupPage() {
             </div>
           </div>
 
-          {/* Start month */}
+          {/* Start month — type="month" gives a "YYYY-MM" string, not a full date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Start month</label>
             <input
@@ -228,7 +241,7 @@ export default function CreateGroupPage() {
             )}
           </div>
 
-          {/* Payment due day */}
+          {/* Payment due day — capped at 28 to avoid month-end ambiguity (Feb has only 28 days) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Payment due day
@@ -256,7 +269,7 @@ export default function CreateGroupPage() {
             </p>
           </div>
 
-          {/* Admin commission rate */}
+          {/* Admin commission rate — optional field, blank = no commission */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Admin commission rate <span className="text-gray-400 font-normal">(optional)</span>
@@ -279,7 +292,7 @@ export default function CreateGroupPage() {
             </p>
           </div>
 
-          {/* Interest rate */}
+          {/* Monthly loan interest rate */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Monthly loan interest rate <span className="text-gray-400 font-normal">(optional)</span>
@@ -302,7 +315,8 @@ export default function CreateGroupPage() {
             </p>
           </div>
 
-          {/* Live preview panel */}
+          {/* Live preview panel — no API call, purely derived from form state above.
+              Re-renders automatically whenever any input changes because React re-renders the whole component. */}
           {(contribution > 0 || totalShares > 0) && (
             <div className="bg-maroon-600 rounded-2xl p-4 text-white">
               <p className="text-xs font-semibold text-maroon-200 mb-3 tracking-widest">SUMMARY</p>
@@ -352,7 +366,7 @@ export default function CreateGroupPage() {
         </div>
       </form>
 
-      {/* Action bar */}
+      {/* Action bar — fixed at bottom, outside the scrollable form */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 px-4 py-3 flex gap-3">
         <button
           type="button"

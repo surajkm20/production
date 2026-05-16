@@ -6,6 +6,7 @@
 //   DELETE /me/sessions/:id
 //   GET    /me/notifications
 //   POST   /me/notifications/mark-read
+//   DELETE /me/notifications
 //   GET    /me/notification-preferences
 //   PUT    /me/notification-preferences
 //   POST   /me/push-subscriptions
@@ -26,6 +27,7 @@ usersRouter.get('/sessions',                     users.listSessions);
 usersRouter.delete('/sessions/:id',              users.revokeSession);
 usersRouter.get('/notifications',                users.listNotifications);
 usersRouter.post('/notifications/mark-read',     users.markNotificationsRead);
+usersRouter.delete('/notifications',             users.clearNotifications);
 usersRouter.get('/notification-preferences',     users.getNotificationPreferences);
 usersRouter.put('/notification-preferences',     users.updateNotificationPreferences);
 usersRouter.post('/push-subscriptions',          users.addPushSubscription);

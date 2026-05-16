@@ -3,11 +3,13 @@
 // validate paid_amount does not exceed expected_amount, enforce cycle-not-closed
 // guard before edits. All money arithmetic done in integer paise — never floats.
 
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray, gte } from 'drizzle-orm';
 import { db } from '../config/db';
 import { memberships, monthly_cycles, payments, users, notifications } from '../db/schema';
 import { AppError } from '../utils/AppError';
+import { paiseToRupeeDisplay } from '../utils/money';
 import { assertActiveMember } from './memberships.service';
+import { notify } from './notifications.service';
 import { insertActivity } from './activity.service';
 
 
@@ -131,6 +133,15 @@ export async function updatePayment(
         month_label: paymentRow.month_label,
       },
     });
+
+    notify({
+      user_id:  paymentRow.member_user_id,
+      group_id,
+      type:     'PAYMENT_RECEIVED',
+      title:    'Payment confirmed',
+      body:     `${paiseToRupeeDisplay(effectivePaidAmount)} received for ${paymentRow.month_label}.`,
+      data:     { cycle_id: paymentRow.cycle_id, month_label: paymentRow.month_label, paid_amount: effectivePaidAmount },
+    }).catch(() => {});
   }
 
   const [updated] = await db
@@ -248,9 +259,29 @@ export async function remindDefaulters(
 
   if (defaulters.length === 0) return { data: { reminders_sent: 0, failed: [] } };
 
+  // Deduplicate: skip any user who already received a DEFAULTER_REMINDER for
+  // this cycle today (prevents duplicate rows when admin taps the button multiple times).
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const alreadySent = await db
+    .select({ user_id: notifications.user_id })
+    .from(notifications)
+    .where(and(
+      inArray(notifications.user_id, defaulters.map(d => d.user_id)),
+      eq(notifications.group_id, group_id),
+      eq(notifications.type, 'DEFAULTER_REMINDER'),
+      gte(notifications.created_at, startOfToday),
+    ));
+
+  const alreadySentSet = new Set(alreadySent.map(r => r.user_id));
+  const toRemind = defaulters.filter(d => !alreadySentSet.has(d.user_id));
+
+  if (toRemind.length === 0) return { data: { reminders_sent: 0, failed: [] } };
+
   const channels = data.channels ?? ['push'];
   await db.insert(notifications).values(
-    defaulters.map(d => ({
+    toRemind.map(d => ({
       user_id:  d.user_id,
       group_id,
       type:     'DEFAULTER_REMINDER' as const,
@@ -260,7 +291,7 @@ export async function remindDefaulters(
     })),
   );
 
-  return { data: { reminders_sent: defaulters.length, failed: [] } };
+  return { data: { reminders_sent: toRemind.length, failed: [] } };
 }
 
 // ─── memberPaymentHistory ────────────────────────────────────────────────────

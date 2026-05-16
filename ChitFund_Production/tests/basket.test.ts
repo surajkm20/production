@@ -63,7 +63,7 @@ async function arrangeActiveLoan() {
     .send({ borrower_user_id: admin.id, principal: 5000, expected_close_date: '2027-01-01' });
 
   const loan_id = disburseRes.body.data.loan_id as string;
-  const basketAfterDisburse = 5250;
+  const basketAfterDisburse = 5000;
 
   return { admin, group_id, loan_id, basketAfterDisburse, invitation_code };
 }
@@ -109,10 +109,8 @@ describe('POST /v1/groups/:group_id/loans', () => {
     const data = res.body.data;
     expect(typeof data.loan_id).toBe('string');
     expect(data.principal).toBe(5000);
-    expect(data.first_month_interest).toBe(250);
-    expect(data.amount_disbursed_to_borrower).toBe(4750);
     expect(data.status).toBe('Active');
-    expect(data.basket_balance_after).toBe(5250);
+    expect(data.basket_balance_after).toBe(5000);
   });
 
   it('returns 409 when borrower is not a group member', async () => {
@@ -205,7 +203,7 @@ describe('POST /v1/groups/:group_id/loans/:loan_id/repay', () => {
       .send({ principal_repaid: 2500, txn_date: '2026-06-01' });
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('PARTIAL_REPAYMENT_NOT_ALLOWED');
+    expect(res.body.error.code).toBe('PARTIAL_PRINCIPAL_NOT_ALLOWED');
   });
 
   it('returns 409 when loan is already Repaid', async () => {
@@ -267,7 +265,13 @@ describe('GET /v1/groups/:group_id/loans/:loan_id', () => {
     // Scenario: admin fetches a loan that has had one repayment recorded —
     //           response must include the full loan object plus a non-empty transactions array.
     const { admin, group_id, loan_id } = await arrangeActiveLoan();
-    
+
+    // Record an interest payment so there is at least one loan_transaction row
+    await request(app)
+      .post(`/v1/groups/${group_id}/loans/${loan_id}/repay`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ interest_paid: 100, txn_date: '2026-06-01' });
+
     const res = await request(app)
       .get(`/v1/groups/${group_id}/loans/${loan_id}`)
       .set('Authorization', `Bearer ${admin.token}`);
@@ -297,7 +301,7 @@ describe('GET /v1/groups/:group_id/loans/:loan_id', () => {
       .set('Authorization', `Bearer ${member.token}`);
 
     expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(res.body.error.code).toBe('NOT_A_MEMBER');
   });
 
 });
@@ -326,13 +330,21 @@ describe('GET /v1/groups/:group_id/loans', () => {
     const { admin, group_id, invitation_code } = await arrangeActiveLoan();
     const member = await createUser();
 
-    await request(app)
+    const joinRes = await request(app)
       .post('/v1/groups/join')
       .set('Authorization', `Bearer ${member.token}`)
       .send({ invitation_code });
 
+    const membership_id = joinRes.body.data.membership_id as string;
+
+    // Admin must approve the join request before the member becomes Active
+    await request(app)
+      .post(`/v1/groups/${group_id}/join-requests/${membership_id}/approve`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({});
+
     // Disburse a second loan to the member — now the group has 2 loans total.
-    // Basket has 5250 after arrangeActiveLoan, so 2000 is safely within balance.
+    // Basket has 5000 after arrangeActiveLoan, so 2000 is safely within balance.
     await request(app)
       .post(`/v1/groups/${group_id}/loans`)
       .set('Authorization', `Bearer ${admin.token}`)
@@ -374,13 +386,21 @@ describe('GET /v1/groups/:group_id/basket/transactions', () => {
   it('member only sees transactions they are counterparty to', async () => {
     // Scenario: basket has a loan transaction (borrower = admin) and an ADJUSTMENT (no counterparty).
     //           a second member lists transactions — must not see either (they're counterparty to none).
-    const { group_id, invitation_code } = await arrangeActiveLoan();
+    const { admin, group_id, invitation_code } = await arrangeActiveLoan();
     const member = await createUser();
 
-    await request(app)
+    const joinRes = await request(app)
       .post('/v1/groups/join')
       .set('Authorization', `Bearer ${member.token}`)
       .send({ invitation_code });
+
+    const membership_id = joinRes.body.data.membership_id as string;
+
+    // Admin must approve the join request before the member becomes Active
+    await request(app)
+      .post(`/v1/groups/${group_id}/join-requests/${membership_id}/approve`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({});
 
     const res = await request(app)
       .get(`/v1/groups/${group_id}/basket/transactions`)

@@ -14,6 +14,8 @@ import ProfilePage from './pages/ProfilePage'
 import HistoryPage from './pages/HistoryPage'
 import CycleDetailPage from './pages/CycleDetailPage'
 import AnalyticsPage from './pages/AnalyticsPage'
+import AllWinnersPage from './pages/AllWinnersPage'
+import MyLoansPage from './pages/MyLoansPage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('access_token')
@@ -38,6 +40,8 @@ export default function App() {
         <Route path="/groups/:groupId/history" element={<PrivateRoute><HistoryPage /></PrivateRoute>} />
         <Route path="/groups/:groupId/history/:cycleId" element={<PrivateRoute><CycleDetailPage /></PrivateRoute>} />
         <Route path="/groups/:groupId/analytics" element={<PrivateRoute><AnalyticsPage /></PrivateRoute>} />
+        <Route path="/groups/:groupId/winners" element={<PrivateRoute><AllWinnersPage /></PrivateRoute>} />
+        <Route path="/groups/:groupId/my-loans" element={<PrivateRoute><MyLoansPage /></PrivateRoute>} />
         <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

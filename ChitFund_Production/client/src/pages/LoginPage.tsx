@@ -3,12 +3,17 @@ import HornPayLogo from '../components/HornPayLogo'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 
+// Maps backend error codes to user-friendly messages.
+// The backend sends { error: { code: "INVALID_CREDENTIALS", message: "..." } }
+// We show these strings instead of the raw backend message.
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_CREDENTIALS: 'Incorrect mobile number/username or password.',
   MOBILE_NOT_VERIFIED: 'Your mobile number is not verified. Please complete OTP verification.',
   ACCOUNT_LOCKED: 'Your account has been locked due to too many failed attempts. Try again later.',
 }
 
+// Shape of the backend's response data on successful login.
+// api.post<LoginResponse> tells TypeScript what to expect from the response.
 interface LoginResponse {
   user_id: string
   access_token: string
@@ -17,33 +22,55 @@ interface LoginResponse {
 }
 
 export default function LoginPage() {
+  // useNavigate: programmatically redirect to another page (like res.redirect on backend)
   const navigate = useNavigate()
+  // useLocation: read the current URL + any state passed via navigate()
+  // OtpPage navigates here with { state: { verified: true } } after successful verification
   const location = useLocation()
   const verified = (location.state as { verified?: boolean } | null)?.verified ?? false
 
+  // useState holds form field values. Every keystroke updates these variables
+  // and React re-renders the input to show the new value.
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+
+  // error: null means no error banner shown; a string means the red box appears
   const [error, setError] = useState<string | null>(null)
+  // loading: true while the API call is in-flight — disables the button and shows spinner
   const [loading, setLoading] = useState(false)
 
+  // Runs when the user submits the form.
+  // e.preventDefault() stops the browser from doing a full page reload (default HTML behavior).
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     setError(null)
     setLoading(true)
 
     try {
+      // api.post sends: POST /v1/auth/login  Body: { identifier, password }
+      // On success, the backend returns { data: { access_token, refresh_token, ... } }
+      // api.post unwraps the `data` envelope, so `data` here is LoginResponse directly.
       const data = await api.post<LoginResponse>('/auth/login', { identifier, password })
+
+      // Store tokens in the browser's persistent key-value store (survives page refreshes).
+      // PrivateRoute in App.tsx reads access_token from here to guard protected pages.
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)
+
+      // Redirect to the dashboard — equivalent to res.redirect('/dashboard') on the backend
       navigate('/dashboard')
     } catch (err) {
+      // ApiError is thrown by lib/api.ts when the backend returns a non-2xx status.
+      // err.code is the machine-readable code from the backend (e.g. "INVALID_CREDENTIALS").
       if (err instanceof ApiError) {
         setError(ERROR_MESSAGES[err.code] ?? err.message)
       } else {
+        // Network failure, timeout, or unexpected error
         setError('Something went wrong. Please try again.')
       }
     } finally {
+      // Always re-enable the button whether the call succeeded or failed
       setLoading(false)
     }
   }
@@ -62,6 +89,7 @@ export default function LoginPage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 px-6 py-8">
 
+          {/* Green banner shown only when redirected here after OTP verification */}
           {verified && (
             <div className="mb-5 flex gap-2 items-start bg-green-50 text-green-700 text-sm rounded-lg px-4 py-3 border border-green-200">
               <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -71,6 +99,7 @@ export default function LoginPage() {
             </div>
           )}
 
+          {/* Error banner — only rendered when error state is non-null */}
           {error && (
             <div className="mb-5 flex gap-2 items-start bg-red-50 text-red-700 text-sm rounded-lg px-4 py-3 border border-red-200">
               <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -85,6 +114,8 @@ export default function LoginPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Mobile number or username
               </label>
+              {/* value + onChange = "controlled input": React owns the value, not the browser.
+                  Every keystroke fires onChange → setIdentifier → React re-renders with new value. */}
               <input
                 type="text"
                 value={identifier}
@@ -104,6 +135,7 @@ export default function LoginPage() {
                 </Link>
               </div>
               <div className="relative">
+                {/* showPassword toggles input type between "password" (masked) and "text" (visible) */}
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
@@ -133,6 +165,7 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* disabled while loading to prevent duplicate submissions */}
             <button
               type="submit"
               disabled={loading}

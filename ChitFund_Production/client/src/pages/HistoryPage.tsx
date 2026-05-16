@@ -3,9 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
 import type { CycleItem, GroupDetail } from '../types/api'
+import GroupNavBar from '../components/GroupNavBar'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Returns the display chip style for a given cycle
 function statusChip(cycle: CycleItem) {
   if (cycle.status === 'Pending') return { label: 'Pending', cls: 'bg-gray-100 text-gray-500' }
   if (cycle.is_skip_month)        return { label: 'Skip',    cls: 'bg-blue-100 text-blue-700' }
@@ -19,6 +21,8 @@ function formatShortDate(iso: string) {
 
 // ─── CycleRow ─────────────────────────────────────────────────────────────────
 
+// Each row is a button that navigates to CycleDetailPage.
+// Pending cycles are disabled (not yet started, no detail to show).
 function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }) {
   const isPending = cycle.status === 'Pending'
   const chip = statusChip(cycle)
@@ -56,7 +60,7 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
         )}
       </div>
 
-      {/* Right — collection */}
+      {/* Right — collection totals */}
       <div className="shrink-0 text-right">
         {isPending ? (
           <p className="text-sm text-gray-300">—</p>
@@ -83,6 +87,7 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
 
 // ─── HistoryPage ──────────────────────────────────────────────────────────────
 
+// The 4 filter pills: Regular/Skip = cycle type, Open/Closed = cycle status
 const FILTER_PILLS = ['Regular', 'Skip', 'Open', 'Closed'] as const
 
 export default function HistoryPage() {
@@ -93,6 +98,7 @@ export default function HistoryPage() {
   const [group,         setGroup]         = useState<GroupDetail | null>(null)
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState<string | null>(null)
+  // activeFilters is a Set — multiple filters can be active at once (e.g., "Regular" + "Closed")
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
 
   useEffect(() => { load() }, [groupId])
@@ -115,6 +121,7 @@ export default function HistoryPage() {
     }
   }
 
+  // Toggle a filter pill on/off — new Set() prevents mutating the existing state
   function toggleFilter(pill: string) {
     setActiveFilters(prev => {
       const next = new Set(prev)
@@ -123,7 +130,15 @@ export default function HistoryPage() {
     })
   }
 
-  // OR within type dimension, OR within status dimension, AND across dimensions
+  // useMemo: only re-runs this filter computation when cycles or activeFilters changes.
+  // Without useMemo it would re-filter on every render (e.g., while user scrolls).
+  //
+  // Filter logic:
+  //   - typeF = selected type filters (Regular, Skip)
+  //   - statusF = selected status filters (Open, Closed)
+  //   - Within each dimension it's OR: Regular OR Skip
+  //   - Across dimensions it's AND: (Regular OR Skip) AND (Open OR Closed)
+  //   - Empty dimension = no restriction on that dimension
   const filtered = useMemo(() => {
     if (activeFilters.size === 0) return cycles
     const typeF   = FILTER_PILLS.slice(0, 2).filter(f => activeFilters.has(f))
@@ -135,6 +150,7 @@ export default function HistoryPage() {
     })
   }, [cycles, activeFilters])
 
+  // Pill badge counts — pre-computed from the full list so pills show total counts, not filtered
   const counts: Record<string, number> = {
     All:     cycles.length,
     Regular: cycles.filter(c => !c.is_skip_month).length,
@@ -173,7 +189,7 @@ export default function HistoryPage() {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col max-w-md mx-auto">
 
-      {/* Header */}
+      {/* Header — navigate(-1) goes to the previous page in browser history */}
       <div className="bg-white border-b border-gray-100 px-2 py-2 flex items-center gap-1">
         <button onClick={() => navigate(-1)} className="p-2 text-gray-500 hover:text-gray-700 transition">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -184,9 +200,9 @@ export default function HistoryPage() {
         {group && <p className="text-xs text-gray-400 truncate pr-2">{group.name}</p>}
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="flex-1 overflow-y-auto pb-20">
 
-        {/* Group context strip */}
+        {/* Group context strip — shows current month progress */}
         {group && (
           <div className="bg-gray-50 border-b border-gray-100 px-4 py-3">
             <p className="text-xs text-gray-600 font-medium">
@@ -201,10 +217,9 @@ export default function HistoryPage() {
           </div>
         )}
 
-        {/* Filter pills */}
+        {/* Filter pills — "All" clears all filters; individual pills toggle */}
         <div className="px-4 py-3 bg-white border-b border-gray-100">
           <div className="flex gap-1.5 flex-wrap">
-            {/* All pill */}
             <button
               onClick={() => setActiveFilters(new Set())}
               className={`text-[11px] font-medium px-2.5 py-1 rounded-full border transition ${
@@ -235,7 +250,7 @@ export default function HistoryPage() {
           </div>
         </div>
 
-        {/* Cycle list */}
+        {/* Cycle list — each row navigates to CycleDetailPage with role passed via state */}
         <div className="bg-white mt-2 rounded-2xl mx-3 overflow-hidden border border-gray-100">
           {filtered.length === 0 ? (
             <div className="px-4 py-12 text-center">
@@ -253,6 +268,7 @@ export default function HistoryPage() {
               <CycleRow
                 key={cycle.cycle_id}
                 cycle={cycle}
+                // Pass role via navigate state so CycleDetailPage knows if admin actions should be shown
                 onClick={() => navigate(`/groups/${groupId}/history/${cycle.cycle_id}`, {
                   state: { role: group?.my_membership?.role ?? 'Member', groupName: group?.name }
                 })}
@@ -261,6 +277,7 @@ export default function HistoryPage() {
           )}
         </div>
       </div>
+      {group && <GroupNavBar groupId={groupId!} role={group.my_membership.role} />}
     </div>
   )
 }
