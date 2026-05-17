@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import OtpPage from './pages/OtpPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import HomePage from './pages/HomePage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
 import CreateGroupPage from './pages/CreateGroupPage'
@@ -29,6 +31,8 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/otp" element={<OtpPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/dashboard" element={<PrivateRoute><HomePage /></PrivateRoute>} />
         <Route path="/groups/new" element={<PrivateRoute><CreateGroupPage /></PrivateRoute>} />
         <Route path="/groups/:groupId" element={<PrivateRoute><AdminDashboardPage /></PrivateRoute>} />
