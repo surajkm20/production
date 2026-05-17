@@ -24,7 +24,7 @@ export default function ForgotPasswordPage() {
         mobile_number: mobile,
       })
       navigate('/reset-password', {
-        state: { mobile_number: mobile, otp_expires_at: data.otp_expires_at },
+        state: { mobile_number: mobile, otp_expires_at: data.otp_expires_at, otp_sent: data.otp_sent },
       })
     } catch (err) {
       if (err instanceof ApiError) {

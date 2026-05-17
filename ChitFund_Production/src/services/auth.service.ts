@@ -227,7 +227,13 @@ export async function forgotPassword(
   // Always return the same response shape — don't reveal whether mobile exists
   if (!user) {
     const fakeExpiry = new Date(Date.now() + env.OTP_EXPIRY_MINUTES * 60 * 1000);
-    return { otp_sent: true, otp_expires_at: fakeExpiry };
+    return { otp_sent: false, otp_expires_at: fakeExpiry };
+  }
+
+  // OTP_BYPASS: skip OTP when MSG91 is not configured
+  if (!env.MSG91_AUTH_KEY) {
+    const fakeExpiry = new Date(Date.now() + env.OTP_EXPIRY_MINUTES * 60 * 1000);
+    return { otp_sent: false, otp_expires_at: fakeExpiry };
   }
 
   const { otp_expires_at } = await otpService.sendOtp(mobileNumber, 'password_reset');
@@ -240,6 +246,20 @@ export async function resetPassword(
   newPassword: string,
 ): Promise<{ success: boolean }> {
   const now = new Date();
+
+  // OTP_BYPASS: skip OTP verification when MSG91 is not configured
+  if (!env.MSG91_AUTH_KEY) {
+    const [user] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.mobile_number, mobileNumber), isNull(users.deleted_at)))
+      .limit(1);
+    if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await db.update(users).set({ password_hash: newHash, updated_at: now }).where(eq(users.id, user.id));
+    await db.update(refresh_tokens).set({ revoked_at: now }).where(and(eq(refresh_tokens.user_id, user.id), isNull(refresh_tokens.revoked_at)));
+    return { success: true };
+  }
 
   // Accepts the OTP row whether or not verify-otp was called first (covers both UX flows)
   const [otpRow] = await db

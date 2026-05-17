@@ -12,6 +12,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 interface LocationState {
   mobile_number: string
   otp_expires_at: string
+  otp_sent: boolean
 }
 
 interface ResendResponse {
@@ -24,8 +25,9 @@ export default function ResetPasswordPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const state = location.state as LocationState | null
+  const otpBypassed = state?.otp_sent === false
 
-  const [digits, setDigits] = useState(['', '', '', '', '', ''])
+  const [digits, setDigits] = useState(otpBypassed ? ['0', '0', '0', '0', '0', '0'] : ['', '', '', '', '', ''])
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -159,41 +161,54 @@ export default function ResetPasswordPage() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">OTP</label>
-              <div className="flex gap-2 justify-center" onPaste={handlePaste}>
-                {digits.map((d, i) => (
-                  <input
-                    key={i}
-                    ref={el => { inputRefs.current[i] = el }}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={d}
-                    onChange={e => handleDigitChange(i, e.target.value)}
-                    onKeyDown={e => handleKeyDown(i, e)}
-                    className="w-11 h-12 text-center text-lg font-semibold text-gray-900 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
-                  />
-                ))}
-              </div>
+              {otpBypassed ? (
+                <div className="flex gap-2 items-start bg-amber-50 text-amber-700 text-sm rounded-lg px-4 py-3 border border-amber-200">
+                  <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  OTP bypassed — SMS not configured. Just set your new password below.
+                </div>
+              ) : (
+                <>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">OTP</label>
+                  <div className="flex gap-2 justify-center" onPaste={handlePaste}>
+                    {digits.map((d, i) => (
+                      <input
+                        key={i}
+                        ref={el => { inputRefs.current[i] = el }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={d}
+                        onChange={e => handleDigitChange(i, e.target.value)}
+                        onKeyDown={e => handleKeyDown(i, e)}
+                        className="w-11 h-12 text-center text-lg font-semibold text-gray-900 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
 
-              <div className="mt-3 text-center">
-                {resendError && (
-                  <p className="text-xs text-red-600 mb-1">{resendError}</p>
-                )}
-                {resendCooldown > 0 ? (
-                  <p className="text-sm text-gray-400">
-                    Resend OTP in <span className="font-medium text-gray-600">{resendCooldown}s</span>
-                  </p>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    className="text-sm text-maroon-600 hover:text-maroon-500 font-medium"
-                  >
-                    Resend OTP
-                  </button>
-                )}
-              </div>
+              {!otpBypassed && (
+                <div className="mt-3 text-center">
+                  {resendError && (
+                    <p className="text-xs text-red-600 mb-1">{resendError}</p>
+                  )}
+                  {resendCooldown > 0 ? (
+                    <p className="text-sm text-gray-400">
+                      Resend OTP in <span className="font-medium text-gray-600">{resendCooldown}s</span>
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResend}
+                      className="text-sm text-maroon-600 hover:text-maroon-500 font-medium"
+                    >
+                      Resend OTP
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
