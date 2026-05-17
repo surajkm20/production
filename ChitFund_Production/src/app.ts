@@ -31,10 +31,19 @@ app.use(helmet());
 // Requests with no Origin header (Capacitor Android WebView, Postman, curl) pass through.
 const allowedOrigins = env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());
 
+function isOriginAllowed(origin: string): boolean {
+  return allowedOrigins.some((allowed) => {
+    if (allowed.startsWith('*.')) {
+      return origin.endsWith(allowed.slice(1));
+    }
+    return allowed === origin;
+  });
+}
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || isOriginAllowed(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: origin '${origin}' is not allowed`));
