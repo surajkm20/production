@@ -135,11 +135,13 @@ function MemberRow({
   member,
   currentUserId,
   groupLocked,
+  isAdmin,
   onShareChange,
 }: {
   member: Member
   currentUserId: string
   groupLocked: boolean
+  isAdmin: boolean
   onShareChange: (membershipId: string, newCount: number) => Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
@@ -175,8 +177,8 @@ function MemberRow({
         </p>
       </div>
 
-      {/* Share stepper — hidden once cycle starts (groupLocked), replaced by a read-only count */}
-      {!groupLocked && (
+      {/* Share stepper — admin only, hidden once cycle starts (groupLocked) */}
+      {isAdmin && !groupLocked && (
         <div className="flex items-center gap-1.5 shrink-0">
           <button onClick={() => adjust(-1)} disabled={busy || member.share_count <= 1}
             className="w-7 h-7 rounded-md border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 disabled:opacity-40 transition text-sm">
@@ -456,6 +458,7 @@ export default function MembersPage() {
               member={m}
               currentUserId={currentUserId}
               groupLocked={groupLocked}
+              isAdmin={group.my_membership.role === 'Admin'}
               onShareChange={handleShareChange}
             />
           ))}
@@ -617,23 +620,25 @@ export default function MembersPage() {
         )}
       </div>
 
-      {/* Action bar — sits above the GroupNavBar */}
-      <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 px-4 py-3 flex gap-3 z-10">
-        <button
-          onClick={() => navigate(`/groups/${groupId}`)}
-          className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
-        >
-          Save & close
-        </button>
-        <button
-          onClick={handleStartCycle}
-          disabled={!canStart || starting}
-          className="flex-1 py-3 rounded-xl bg-maroon-600 hover:bg-maroon-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold text-white transition"
-          title={!canStart && !groupLocked ? `Fill all ${group.total_shares} shares first` : undefined}
-        >
-          {starting ? 'Starting...' : groupLocked ? 'Cycle started' : 'Start cycle 1'}
-        </button>
-      </div>
+      {/* Action bar — admin only; sits above the GroupNavBar */}
+      {group.my_membership.role === 'Admin' && (
+        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 px-4 py-3 flex gap-3 z-10">
+          <button
+            onClick={() => navigate(`/groups/${groupId}`)}
+            className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+          >
+            Save & close
+          </button>
+          <button
+            onClick={handleStartCycle}
+            disabled={!canStart || starting}
+            className="flex-1 py-3 rounded-xl bg-maroon-600 hover:bg-maroon-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold text-white transition"
+            title={!canStart && !groupLocked ? `Fill all ${group.total_shares} shares first` : undefined}
+          >
+            {starting ? 'Starting...' : groupLocked ? 'Cycle started' : 'Start cycle 1'}
+          </button>
+        </div>
+      )}
 
       {/* Add member modal — mounts when showAddModal is true */}
       {showAddModal && (
