@@ -263,9 +263,9 @@ export async function disburseLoan(
   const [currentCycleRow] = await db
     .select({ month_number: monthly_cycles.month_number })
     .from(monthly_cycles)
-    .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
-    .where(eq(monthly_cycles.group_id, group_id))
-    .orderBy(desc(monthly_cycles.month_number))
+    .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+    .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open')))
+    .orderBy(monthly_cycles.month_number)
     .limit(1);
 
   const disbursement_month_number = currentCycleRow?.month_number ?? 1;
@@ -405,13 +405,13 @@ export async function listLoans(
     .where(and(...conditions))
     .orderBy(desc(loans.disbursed_at)),
 
-    db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
+    db.select({ current_month: sql<number>`min(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
-      .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
-      .where(eq(monthly_cycles.group_id, group_id)),
+      .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+      .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open'))),
   ]);
 
-  const currentMonth = cycleRow?.max_month ?? 0;
+  const currentMonth = cycleRow?.current_month ?? 0;
 
   return rows.map(r => {
     const cyclesElapsed = Math.max(0, currentMonth - r.disbursement_month_number + 1);
@@ -450,10 +450,10 @@ export async function getLoan(userId: string, group_id: string, loan_id: string)
     .where(and(eq(loans.id, loan_id), eq(loans.basket_id, basketRows.id)))
     .limit(1),
 
-    db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
+    db.select({ current_month: sql<number>`min(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
-      .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
-      .where(eq(monthly_cycles.group_id, group_id)),
+      .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+      .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open'))),
   ]);
 
   if (!loanRow) throw new AppError(404, 'LOAN_NOT_FOUND', 'Loan not found in this group.');
@@ -465,7 +465,7 @@ export async function getLoan(userId: string, group_id: string, loan_id: string)
     .where(eq(loan_transactions.loan_id, loan_id))
     .orderBy(desc(loan_transactions.created_at));
 
-  const currentMonth = cycleRow?.max_month ?? 0;
+  const currentMonth = cycleRow?.current_month ?? 0;
   const cyclesElapsed = Math.max(0, currentMonth - loanRow.disbursement_month_number + 1);
   const outstanding_interest = loanRow.status === 'Active'
     ? computeOutstandingInterest(cyclesElapsed, Number(loanRow.principal), Number(loanRow.monthly_interest_rate), Number(loanRow.total_interest_paid))
@@ -509,16 +509,16 @@ export async function repayLoan(
       .where(and(eq(loans.id, loan_id), eq(loans.basket_id, basketRows.id)))
       .limit(1),
 
-    db.select({ max_month: sql<number>`max(${monthly_cycles.month_number})` })
+    db.select({ current_month: sql<number>`min(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
-      .leftJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
-      .where(eq(monthly_cycles.group_id, group_id)),
+      .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+      .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open'))),
   ]);
 
   if (!loanRow) throw new AppError(404, 'LOAN_NOT_FOUND', 'Loan not found.');
   if (loanRow.status !== 'Active') throw new AppError(409, 'LOAN_CLOSED', 'Cannot record repayment on a closed or written-off loan.');
 
-  const currentMonth         = cycleRow?.max_month ?? 0;
+  const currentMonth         = cycleRow?.current_month ?? 0;
   const cyclesElapsed        = Math.max(0, currentMonth - loanRow.disbursement_month_number + 1);
   const outstanding_interest = computeOutstandingInterest(
     cyclesElapsed, Number(loanRow.principal), Number(loanRow.monthly_interest_rate), Number(loanRow.total_interest_paid),
