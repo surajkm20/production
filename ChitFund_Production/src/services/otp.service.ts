@@ -89,8 +89,8 @@ async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
   let errorMessage: string | undefined;
   let providerMsgId: string | undefined;
 
-  if (env.NODE_ENV !== 'production') {
-    // Skip real SMS in dev/test — log to console for manual testing
+  if (env.NODE_ENV !== 'production' || !env.MSG91_AUTH_KEY) {
+    // Skip real SMS in dev/test, or when MSG91 is not yet configured
     console.log(`[OTP] ${mobileNumber} → ${otp}`);
   } else {
     try {
