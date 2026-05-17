@@ -97,12 +97,16 @@ export async function signup(data: {
       mobile_number: data.mobile_number,
       password_hash,
       username:      data.username,
+      mobile_verified: true, // OTP_BYPASS: remove this line when OTP is enabled
     })
     .returning({ id: users.id });
 
-  const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
+  // OTP_BYPASS: uncomment below and remove mobile_verified:true above when MSG91/DLT is ready
+  // const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
+  // return { user_id: user.id, otp_sent: true, otp_expires_at };
 
-  return { user_id: user.id, otp_sent: true, otp_expires_at };
+  const otp_expires_at = new Date();
+  return { user_id: user.id, otp_sent: false, otp_expires_at };
 }
 
 export async function verifySignupOtp(
@@ -152,9 +156,10 @@ export async function login(
     throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid mobile/username or password.');
   }
 
-  if (!user.mobile_verified) {
-    throw new AppError(401, 'MOBILE_NOT_VERIFIED', 'Please verify your mobile number first.');
-  }
+  // OTP_BYPASS: uncomment below when OTP is enabled
+  // if (!user.mobile_verified) {
+  //   throw new AppError(401, 'MOBILE_NOT_VERIFIED', 'Please verify your mobile number first.');
+  // }
 
   const passwordMatch = await bcrypt.compare(password, user.password_hash);
   if (!passwordMatch) {
