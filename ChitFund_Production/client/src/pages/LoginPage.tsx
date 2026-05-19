@@ -56,9 +56,12 @@ export default function LoginPage() {
       // treat it as an Indian mobile and auto-prepend +91. Usernames are left untouched.
       let resolvedIdentifier = identifier.replace(/\s+/g, '')
       if (/^\d+$/.test(resolvedIdentifier)) {
-        resolvedIdentifier = /^91\d{10}$/.test(resolvedIdentifier)
-          ? '+' + resolvedIdentifier
-          : '+91' + resolvedIdentifier
+        if (/^91[6-9]\d{9}$/.test(resolvedIdentifier)) {
+          resolvedIdentifier = '+' + resolvedIdentifier       // 91XXXXXXXXXX → +91XXXXXXXXXX
+        } else if (/^[6-9]\d{9}$/.test(resolvedIdentifier)) {
+          resolvedIdentifier = '+91' + resolvedIdentifier     // XXXXXXXXXX → +91XXXXXXXXXX
+        }
+        // anything else (wrong length/prefix) is passed as-is and rejected by backend
       }
       const data = await api.post<LoginResponse>('/auth/login', { identifier: resolvedIdentifier, password })
 
@@ -122,7 +125,6 @@ export default function LoginPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Mobile number or username
-                <span className="ml-1 text-xs text-gray-400 font-normal">(+91 added automatically)</span>
               </label>
               {/* value + onChange = "controlled input": React owns the value, not the browser.
                   Every keystroke fires onChange → setIdentifier → React re-renders with new value. */}

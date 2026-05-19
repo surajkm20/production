@@ -42,7 +42,12 @@ export default function SignupPage() {
     // Accepts: 9876543210 | 919876543210 | +919876543210 | +91 98765 43210
     let rawMobile = form.mobile_number.replace(/\s+/g, '')
     if (!rawMobile.startsWith('+')) {
-      rawMobile = /^91\d{10}$/.test(rawMobile) ? '+' + rawMobile : '+91' + rawMobile
+      if (/^91[6-9]\d{9}$/.test(rawMobile)) {
+        rawMobile = '+' + rawMobile                          // 91XXXXXXXXXX → +91XXXXXXXXXX
+      } else if (/^[6-9]\d{9}$/.test(rawMobile)) {
+        rawMobile = '+91' + rawMobile                        // XXXXXXXXXX → +91XXXXXXXXXX
+      }
+      // anything else passed as-is and rejected by backend
     }
     const payload: Record<string, string> = {
       name: form.name,
@@ -125,7 +130,6 @@ export default function SignupPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Mobile number
-                <span className="ml-1 text-xs text-gray-400 font-normal">(+91 added automatically)</span>
               </label>
               <input
                 type="tel"
