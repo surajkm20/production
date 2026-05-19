@@ -5,7 +5,7 @@
 // and no outstanding loans, compute and record CLOSURE_SPLIT basket transactions).
 
 import { randomBytes } from 'crypto';
-import { eq, and, lt, gt, desc, ilike, sum, count } from 'drizzle-orm';
+import { eq, and, lt, gt, desc, ilike, sum, count, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
 import { chit_groups, memberships, baskets, monthly_cycles, payments, loans, users, notifications } from '../db/schema';
 import { AppError } from '../utils/AppError';
@@ -248,6 +248,7 @@ export async function listGroups(
       monthly_contribution: chit_groups.monthly_contribution,
       total_shares:         chit_groups.total_shares,
       status:               chit_groups.status,
+      closed_at:            chit_groups.closed_at,
       created_at:           chit_groups.created_at,
       role:                 memberships.role,
       share_count:          memberships.share_count,
@@ -259,14 +260,81 @@ export async function listGroups(
     .orderBy(desc(chit_groups.created_at))
     .limit(limit + 1);
 
-  const has_more   = rows.length > limit;
-  const items      = has_more ? rows.slice(0, limit) : rows;
-  const last       = items.at(-1);
+  const has_more    = rows.length > limit;
+  const items       = has_more ? rows.slice(0, limit) : rows;
+  const last        = items.at(-1);
   const next_cursor = has_more && last
     ? encodeCursor({ id: last.group_id, created_at: last.created_at.toISOString() })
     : null;
 
-  return { items, next_cursor, has_more };
+  if (items.length === 0) return { items: [], next_cursor, has_more };
+
+  // ── Enrich each group with current-cycle data ────────────────────────────────
+  // The "current" cycle is the lowest-numbered Open cycle that already has payment
+  // rows generated (all future pre-created cycles are also Open but have no rows yet).
+  const groupIds = items.map(r => r.group_id);
+
+  const activeCycleRows = await db
+    .select({
+      group_id:     monthly_cycles.group_id,
+      cycle_id:     monthly_cycles.id,
+      month_number: monthly_cycles.month_number,
+      status:       monthly_cycles.status,
+    })
+    .from(monthly_cycles)
+    .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+    .where(and(inArray(monthly_cycles.group_id, groupIds), eq(monthly_cycles.status, 'Open')))
+    .orderBy(monthly_cycles.month_number);
+
+  // One entry per group — take the first (lowest month_number)
+  const cycleByGroup = new Map<string, { cycle_id: string; month_number: number; status: string }>();
+  for (const c of activeCycleRows) {
+    if (!cycleByGroup.has(c.group_id)) {
+      cycleByGroup.set(c.group_id, { cycle_id: c.cycle_id, month_number: c.month_number, status: c.status });
+    }
+  }
+
+  const cycleIds = [...new Set(activeCycleRows.map(c => c.cycle_id))];
+
+  let userPaymentMap = new Map<string, string>(); // cycle_id → payment status
+  let defaultersMap  = new Map<string, number>(); // cycle_id → unpaid count
+
+  if (cycleIds.length > 0) {
+    const [userPayments, defaulterCounts] = await Promise.all([
+      db.select({ cycle_id: payments.cycle_id, status: payments.status })
+        .from(payments)
+        .where(and(inArray(payments.cycle_id, cycleIds), eq(payments.member_user_id, userId))),
+      db.select({ cycle_id: payments.cycle_id, cnt: count(payments.id) })
+        .from(payments)
+        .where(and(inArray(payments.cycle_id, cycleIds), eq(payments.status, 'Unpaid')))
+        .groupBy(payments.cycle_id),
+    ]);
+
+    for (const p of userPayments)   userPaymentMap.set(p.cycle_id, p.status);
+    for (const d of defaulterCounts) defaultersMap.set(d.cycle_id, Number(d.cnt));
+  }
+
+  const enriched = items.map(row => {
+    const cycle   = cycleByGroup.get(row.group_id) ?? null;
+    const cycleId = cycle?.cycle_id ?? null;
+    return {
+      group_id:                       row.group_id,
+      name:                           row.name,
+      monthly_contribution:           row.monthly_contribution,
+      total_shares:                   row.total_shares,
+      status:                         row.status,
+      closed_at:                      row.closed_at?.toISOString() ?? null,
+      role:                           row.role,
+      share_count:                    row.share_count,
+      wins_count:                     row.wins_count,
+      current_month_number:           cycle?.month_number ?? null,
+      current_cycle_status:           cycle?.status ?? null,
+      user_payment_status_this_month: cycleId ? (userPaymentMap.get(cycleId) ?? 'Unpaid') : null,
+      defaulters_count:               cycleId ? (defaultersMap.get(cycleId) ?? 0) : 0,
+    };
+  });
+
+  return { items: enriched, next_cursor, has_more };
 }
 
 // ─── joinGroup ───────────────────────────────────────────────────────────────
