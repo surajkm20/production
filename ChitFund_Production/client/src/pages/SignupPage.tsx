@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
+import HornPayLogo from '../components/HornPayLogo'
 
 // Maps backend error codes to user-friendly messages
 const ERROR_MESSAGES: Record<string, string> = {
@@ -51,6 +52,14 @@ export default function SignupPage() {
       // On success, backend creates the user and sends an OTP SMS
       const data = await api.post<SignupResponse>('/auth/signup', payload)
 
+      // OTP_BYPASS: when otp_sent is false (MSG91 not configured), account is already
+      // verified — skip OTP and go straight to login.
+      // TODO: remove this branch and always navigate('/otp', ...) when MSG91/DLT is live.
+      if (!data.otp_sent) {
+        navigate('/login', { state: { accountCreated: true } })
+        return
+      }
+
       // Navigate to OTP page, passing context via router state (not URL params).
       // OtpPage reads this state to know which number to verify and when the OTP expires.
       navigate('/otp', {
@@ -76,12 +85,10 @@ export default function SignupPage() {
       <div className="w-full max-w-sm">
 
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-maroon-600 mb-4">
-            <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="mb-4">
+            <HornPayLogo size={52} />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">ChitFlow</h1>
+          <h1 className="text-2xl font-bold text-gray-900">HornPay</h1>
           <p className="text-sm text-gray-500 mt-1">Create your account</p>
         </div>
 
@@ -179,7 +186,7 @@ export default function SignupPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Sending OTP...
+                  Creating account...
                 </span>
               ) : 'Create account'}
             </button>
