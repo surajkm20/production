@@ -38,10 +38,15 @@ export default function SignupPage() {
     setError(null)
     setLoading(true)
 
-    // Strip spaces from mobile number before sending (user may type "+91 98765 43210")
+    // Normalise mobile: strip spaces, then auto-prepend +91 for bare Indian numbers.
+    // Accepts: 9876543210 | 919876543210 | +919876543210 | +91 98765 43210
+    let rawMobile = form.mobile_number.replace(/\s+/g, '')
+    if (!rawMobile.startsWith('+')) {
+      rawMobile = /^91\d{10}$/.test(rawMobile) ? '+' + rawMobile : '+91' + rawMobile
+    }
     const payload: Record<string, string> = {
       name: form.name,
-      mobile_number: form.mobile_number.replace(/\s+/g, ''),
+      mobile_number: rawMobile,
       password: form.password,
     }
     // Username is optional — only include if the user filled it in
@@ -118,12 +123,15 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Mobile number</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Mobile number
+                <span className="ml-1 text-xs text-gray-400 font-normal">(+91 added automatically)</span>
+              </label>
               <input
                 type="tel"
                 value={form.mobile_number}
                 onChange={e => set('mobile_number', e.target.value)}
-                placeholder="+919876543210"
+                placeholder="9876543210"
                 required
                 className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
               />

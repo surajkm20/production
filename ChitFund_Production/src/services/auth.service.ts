@@ -151,9 +151,8 @@ export async function login(
     )
     .limit(1);
 
-  // Use the same error for "not found" and "wrong password" — don't reveal which
   if (!user) {
-    throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid mobile/username or password.');
+    throw new AppError(404, 'USER_NOT_FOUND', 'No account found. Please sign up first.');
   }
 
   // OTP_BYPASS: uncomment below when OTP is enabled

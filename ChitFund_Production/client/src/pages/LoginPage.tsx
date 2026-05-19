@@ -7,7 +7,8 @@ import { api, ApiError } from '../lib/api'
 // The backend sends { error: { code: "INVALID_CREDENTIALS", message: "..." } }
 // We show these strings instead of the raw backend message.
 const ERROR_MESSAGES: Record<string, string> = {
-  INVALID_CREDENTIALS: 'Incorrect mobile number/username or password.',
+  USER_NOT_FOUND: 'No account found with these details. Please sign up first.',
+  INVALID_CREDENTIALS: 'Incorrect password. Please try again.',
   MOBILE_NOT_VERIFIED: 'Your mobile number is not verified. Please complete OTP verification.',
   ACCOUNT_LOCKED: 'Your account has been locked due to too many failed attempts. Try again later.',
 }
@@ -51,10 +52,15 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      // api.post sends: POST /v1/auth/login  Body: { identifier, password }
-      // On success, the backend returns { data: { access_token, refresh_token, ... } }
-      // api.post unwraps the `data` envelope, so `data` here is LoginResponse directly.
-      const data = await api.post<LoginResponse>('/auth/login', { identifier, password })
+      // Normalise mobile identifiers: if the input is all digits (no letters/underscores),
+      // treat it as an Indian mobile and auto-prepend +91. Usernames are left untouched.
+      let resolvedIdentifier = identifier.replace(/\s+/g, '')
+      if (/^\d+$/.test(resolvedIdentifier)) {
+        resolvedIdentifier = /^91\d{10}$/.test(resolvedIdentifier)
+          ? '+' + resolvedIdentifier
+          : '+91' + resolvedIdentifier
+      }
+      const data = await api.post<LoginResponse>('/auth/login', { identifier: resolvedIdentifier, password })
 
       // Store tokens in the browser's persistent key-value store (survives page refreshes).
       // PrivateRoute in App.tsx reads access_token from here to guard protected pages.
@@ -116,6 +122,7 @@ export default function LoginPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Mobile number or username
+                <span className="ml-1 text-xs text-gray-400 font-normal">(+91 added automatically)</span>
               </label>
               {/* value + onChange = "controlled input": React owns the value, not the browser.
                   Every keystroke fires onChange → setIdentifier → React re-renders with new value. */}
@@ -123,7 +130,7 @@ export default function LoginPage() {
                 type="text"
                 value={identifier}
                 onChange={e => setIdentifier(e.target.value)}
-                placeholder="+91 98765 43210"
+                placeholder="9876543210 or username"
                 required
                 autoComplete="username"
                 className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"

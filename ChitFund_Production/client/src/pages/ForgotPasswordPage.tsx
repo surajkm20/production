@@ -20,16 +20,20 @@ export default function ForgotPasswordPage() {
     setLoading(true)
 
     try {
+      let rawMobile = mobile.replace(/\s+/g, '')
+      if (!rawMobile.startsWith('+')) {
+        rawMobile = /^91\d{10}$/.test(rawMobile) ? '+' + rawMobile : '+91' + rawMobile
+      }
       const data = await api.post<ForgotPasswordResponse>('/auth/forgot-password', {
-        mobile_number: mobile,
+        mobile_number: rawMobile,
       })
       navigate('/reset-password', {
-        state: { mobile_number: mobile, otp_expires_at: data.otp_expires_at, otp_sent: data.otp_sent },
+        state: { mobile_number: rawMobile, otp_expires_at: data.otp_expires_at, otp_sent: data.otp_sent },
       })
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 'VALIDATION_ERROR') {
-          setError('Please enter a valid mobile number in E.164 format (e.g. +919876543210).')
+          setError('Please enter your 10-digit mobile number.')
         } else {
           setError(err.message)
         }
@@ -70,17 +74,17 @@ export default function ForgotPasswordPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Mobile number
+                <span className="ml-1 text-xs text-gray-400 font-normal">(+91 added automatically)</span>
               </label>
               <input
                 type="tel"
                 value={mobile}
                 onChange={e => setMobile(e.target.value)}
-                placeholder="+91 98765 43210"
+                placeholder="9876543210"
                 required
                 autoComplete="tel"
                 className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
               />
-              <p className="mt-1.5 text-xs text-gray-400">Include country code, e.g. +919876543210</p>
             </div>
 
             <button
