@@ -12,9 +12,9 @@ export function validate(schema: ZodTypeAny) {
     if (!result.success) {
       const { fieldErrors, formErrors } = result.error.flatten();
       const details: Record<string, unknown> = { fields: fieldErrors };
-      // formErrors carries top-level .refine() messages (e.g. "at least one field")
       if (formErrors.length) details.errors = formErrors;
-      next(new AppError(400, 'VALIDATION_ERROR', 'Request body validation failed.', details));
+      const firstMessage = Object.values(fieldErrors).flat()[0] ?? formErrors[0] ?? 'Request body validation failed.';
+      next(new AppError(400, 'VALIDATION_ERROR', firstMessage, details));
       return;
     }
     req.body = result.data;

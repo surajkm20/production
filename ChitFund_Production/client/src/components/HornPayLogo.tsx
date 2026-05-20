@@ -5,6 +5,7 @@ export default function HornPayLogo({ size = 48 }: { size?: number }) {
       width={size}
       height={size}
       viewBox="0 0 64 64"
+      style={{ display: 'block', margin: '0 auto' }}
     >
       <rect width="64" height="64" rx="14" fill="#0F766E" />
       {/* Tail */}
