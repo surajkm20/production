@@ -1,8 +1,8 @@
 # ChitFund App — UI Wireframes (v1)
 
-**Status:** Draft v9 (Screen 6: loan sub-tiles updated for cumulative interest model — "Interest outstanding" replaces "Interest paid"; overdue-interest red state removed)
+**Status:** Draft v10 (commission model corrected — Screen 5/7/11 math preview updated: admin_commission = pool × rate, basket_credit = bid_amount, winner_takeaway = pool − bid − commission)
 **Scope:** 11 screens that anchor the API design
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-20
 
 ---
 
@@ -261,11 +261,11 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
 4. **(Regular month only) Winning bid amount** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
 5. **Math preview panel** (purple-tinted, live-updates as admin types):
    - Pool amount: ₹1,00,000.
-   - Winning bid: ₹16,000 (from input).
-   - Admin commission (5%): ₹800 — "Admin keeps this in cash".
-   - Goes to basket: ₹15,200.
-   - Suresh takes home: ₹84,000.
-   - Basket after this month: ₹38,000 → ₹53,200.
+   - Winning bid (sacrifice): ₹16,000 (from input).
+   - Admin commission (5% of pool): ₹5,000 — "Admin keeps this in cash".
+   - Goes to basket: ₹16,000 (full sacrifice).
+   - Suresh takes home: ₹79,000 (pool − bid − commission).
+   - Basket after this month: ₹38,000 → ₹54,000.
    - All three split lines are always shown even when `admin_commission_rate = 0` (commission shows ₹0) so members can always verify the math.
 6. **(Skip month only) Skip-month math preview** — different content:
    - "Basket has ₹38,000. Need ₹1,00,000."
@@ -423,7 +423,7 @@ Ledger entries (paginated, filter by type and/or cycle_id; member response is au
 4. **Total shares in the chit** — number stepper (− N +). Info banner explains: "10 shares = 10 monthly cycles. You can have fewer than 10 people if some hold multiple shares (e.g. 5 people with 2 shares each)."
 5. **Your shares in this chit** — number stepper (− N +). Min 1, max `total_shares`. Defaults to 1. Updates dynamically — if the admin later reduces total shares below the selected value, this clamps down automatically. Helper: "You'll pay ₹[contribution × N]/mo." (live, updates as either stepper changes).
 6. **Start month** — month picker. Helper: "Chit will run May 2026 — Feb 2027".
-7. **Admin commission rate** — percentage input. Default 0%. Helper: "Your cut from each month's winning bid. Example: 5% on a ₹16,000 bid = ₹800 to you. Visible to all members. Locked once cycle 1 starts."
+7. **Admin commission rate** — percentage input. Default 0%. Helper: "Your cut from each month's pool. Example: 5% on a ₹1,00,000 pool = ₹5,000 to you, regardless of the winning bid. Visible to all members. Locked once cycle 1 starts."
 8. **Loan interest range** — two number inputs (Min % / Max %). Defaults 2% and 5%. Helper: "Per-loan rate is set when you disburse a loan, within this range."
 9. **Group summary panel** (purple, live-updating preview):
    - Pool per month: ₹1,00,000 (computed = contribution × shares).
@@ -690,7 +690,7 @@ Plus group context:
    - **Regular cycle (winner recorded):**
      - Heading: "Winner".
      - Avatar + name in large text.
-     - Three metric tiles below: "Won bid ₹16,000", "Took home ₹84,000", and a split breakdown tile showing "Admin ₹800 · Basket ₹15,200".
+     - Three metric tiles below: "Sacrificed ₹16,000", "Took home ₹79,000", and a split breakdown tile showing "Admin ₹5,000 (pool × 5%) · Basket ₹16,000".
      - Subtitle: "Recorded by <admin name> on Apr 26, 7:42 PM".
    - **Skip month:**
      - Heading: "Skip month".
@@ -701,7 +701,7 @@ Plus group context:
      - If admin viewing and cycle is current → "Tap to record →" link to screen 5.
 
 3. **Basket impact card:**
-   - **Regular:** "Basket: ₹38,000 → ₹53,200 (+₹15,200 this month)" — uses `basket_credit` (post-commission), not the full bid.
+   - **Regular:** "Basket: ₹38,000 → ₹54,000 (+₹16,000 this month)" — uses `basket_credit` (= `bid_amount`, the full sacrifice).
    - **Skip:** "Basket: ₹1,38,000 → ₹38,000 (−₹1,00,000 this month)".
    - Small "View ledger entry →" link → deep-links into **Screen 6 (Basket & loans)**, switches to the Ledger tab, and applies a `cycle_id=<this>` filter so only entries from this cycle are shown.
 

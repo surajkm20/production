@@ -69,7 +69,7 @@ drizzle/            — migration SQL files + meta snapshots
 - **Cycles are pre-created as `Open`** when a group is formed. To find the current active cycle: join `monthly_cycles` with `payments` to find the cycle with pending payments — never use raw `max(month_number)`.
 - `bid_amount` fields on a cycle are all-or-nothing: either all null (no winner yet) or all filled (DB check constraint `chk_bid_consistency`).
 - `payments` has a `chk_paid_consistency` constraint: `paid_at` and `marked_by` must be set if and only if status is `Paid`.
-- Admin commission is taken offline (cash); `basket_credit = bid_amount − admin_commission`.
+- Admin commission is taken offline (cash); `admin_commission = pool_amount × rate` (NOT bid_amount × rate). `basket_credit = bid_amount` (full sacrifice). `winner_takeaway = pool_amount − bid_amount − admin_commission`.
 
 ## Dev commands
 ```bash

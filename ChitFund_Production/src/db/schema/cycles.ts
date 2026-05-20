@@ -1,7 +1,7 @@
 // Drizzle schema definition for the monthly_cycles table.
 // One row per month in a group's lifecycle, pre-created at group start.
-// Stores auction result: bid_amount (total bid), admin_commission (offline cash),
-// basket_credit (bid − commission, credited to basket), winner_takeaway (pool − bid).
+// Stores auction result: bid_amount (winner's sacrifice), admin_commission (pool × rate, offline cash),
+// basket_credit (= bid_amount, full sacrifice credited to basket), winner_takeaway (pool − bid − commission).
 // A DB check constraint ensures all five bid fields are null or all filled.
 
 import { pgTable, uuid, varchar, text, bigint, smallint, date, timestamp, boolean, unique, index, check } from 'drizzle-orm/pg-core';

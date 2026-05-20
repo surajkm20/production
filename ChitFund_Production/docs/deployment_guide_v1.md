@@ -69,9 +69,10 @@ Everything between the user and your server is HTTPS — this is why the HTTPS s
 Before deploying, make sure locally:
 
 ```bash
-npx tsc --noEmit          # zero TypeScript errors
-npm run test:run          # all tests pass
-npm run build             # dist/ folder builds successfully
+npx tsc --noEmit                        # zero TypeScript errors (backend)
+cd client && npx tsc -b --noEmit && cd ..  # zero TypeScript errors (frontend)
+npm run test:run                        # all tests pass
+npm run build                           # dist/ folder builds successfully
 ```
 
 If any of these fail, fix before deploying. A failed build on Railway means the app won't start.

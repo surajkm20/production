@@ -1,8 +1,8 @@
 # ChitFund App — Database Schema (v1)
 
-**Status:** Draft v9 (notifications: LOAN_DISBURSED type added; notes updated with cron trigger and v1 scope; notification_preferences per-group mute deferred to v2)
+**Status:** Draft v10 (commission model corrected — admin_commission = pool_amount × rate; basket_credit = bid_amount; winner_takeaway = pool − bid − commission; worked example updated)
 **Database:** PostgreSQL 14+
-**Last updated:** 2026-05-16
+**Last updated:** 2026-05-20
 
 ---
 
@@ -137,7 +137,7 @@ CREATE TABLE chit_groups (
     total_shares         SMALLINT NOT NULL,             -- total share slots in this group
     start_month          DATE NOT NULL,                 -- first day of the start month
     payment_due_day      SMALLINT NOT NULL DEFAULT 10,         -- day of month (1-28) when contributions + loan interest are due
-    admin_commission_rate NUMERIC(4,2) NOT NULL DEFAULT 0.00,  -- % of winning bid retained by admin in cash (e.g. 5.00 = 5%)
+    admin_commission_rate NUMERIC(4,2) NOT NULL DEFAULT 0.00,  -- % of full pool_amount retained by admin in cash (e.g. 5.00 = 5%)
     interest_rate_min    NUMERIC(4,2) NOT NULL DEFAULT 2.00,   -- 2.00 = 2%
     interest_rate_max    NUMERIC(4,2) NOT NULL DEFAULT 5.00,
     currency             CHAR(3) NOT NULL DEFAULT 'INR',
@@ -172,7 +172,7 @@ CREATE INDEX idx_groups_invite ON chit_groups(invitation_code);
   - `SUM(memberships.share_count WHERE active) = total_shares` (enforced in app code, not DB, since memberships are added incrementally)
 - Money in paise as `BIGINT`. ₹1 crore = 1,00,00,00,000 paise — well within `BIGINT` range.
 - `payment_due_day` — day of month on which both the monthly contribution and loan interest are due for every cycle. Capped at 28 (DB constraint) so the date is valid even in February. Days 29–31 are rejected in app code before the row is inserted. Typical value is 10. When cycles are pre-created at group start, each cycle's `due_date` is computed as `payment_due_day` of that cycle's calendar month.
-- `admin_commission_rate` — percentage of the winning bid the admin retains in cash (e.g. 5.00 = 5%). Set at group creation. Locked once cycle 1 starts (enforced in app code). A 0.00 value means no commission. The basket credit per cycle = `bid_amount × (1 − admin_commission_rate/100)`.
+- `admin_commission_rate` — percentage of the full pool amount the admin retains in cash (e.g. 5.00 = 5%). Set at group creation. Locked once cycle 1 starts (enforced in app code). A 0.00 value means no commission. Admin commission per cycle = `pool_amount × admin_commission_rate/100` (offline cash). Basket credit = `bid_amount` (full sacrifice — commission does not reduce it).
 - `invitation_code` — 8-character alphanumeric (uppercase + digits, avoiding ambiguous chars like O/0, I/1). Generated at group creation. Admin can share via WhatsApp/SMS; new members enter it to join. Admin can rotate the code if it leaks (handled in app logic).
 
 ---
@@ -227,10 +227,10 @@ CREATE TABLE monthly_cycles (
     due_date             DATE NOT NULL,
     is_skip_month        BOOLEAN NOT NULL DEFAULT FALSE,
     winner_user_id       UUID REFERENCES users(id),
-    bid_amount           BIGINT,                        -- paise. The winning bid. Splits into admin_commission + basket_credit. NULL until winner recorded.
-    admin_commission     BIGINT,                        -- paise. = bid_amount × group.admin_commission_rate / 100. Retained by admin in cash (not a basket entry).
-    basket_credit        BIGINT,                        -- paise. = bid_amount − admin_commission. This is what's credited to the basket as CREDIT_DISCOUNT.
-    winner_takeaway      BIGINT,                        -- paise. = pool_amount − bid_amount (what winner actually receives).
+    bid_amount           BIGINT,                        -- paise. Amount the winner sacrificed (left behind). Full amount credited to basket. NULL until winner recorded.
+    admin_commission     BIGINT,                        -- paise. = pool_amount × group.admin_commission_rate / 100. Retained by admin in cash (not a basket entry).
+    basket_credit        BIGINT,                        -- paise. = bid_amount (full sacrifice credited to basket as CREDIT_DISCOUNT; commission does not reduce this).
+    winner_takeaway      BIGINT,                        -- paise. = pool_amount − bid_amount − admin_commission (net amount winner actually receives).
     status               VARCHAR(20) NOT NULL DEFAULT 'Open', -- 'Open' | 'Closed'
     opened_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at            TIMESTAMPTZ,
@@ -251,12 +251,12 @@ CREATE INDEX idx_cycles_status ON monthly_cycles(group_id, status);
 
 **Notes:**
 - **`due_date` derivation:** set at cycle pre-creation time as `payment_due_day` of that cycle's calendar month. Example: `payment_due_day = 10`, group starts May 2026 → cycle 1 due `2026-05-10`, cycle 2 due `2026-06-10`, etc. This is the hard deadline for the monthly contribution. Loan interest **accrues** on this date (added to `loans.total_interest_accrued`) but has no hard payment deadline — borrowers can pay cumulatively at any point.
-- **Bidding model:** members bid the amount they're willing to leave behind. The **highest** bidder wins. The bid splits into admin commission (offline cash) and basket credit.
-  - Example: Pool ₹1,00,000, commission rate 5%. Suresh bids ₹16,000 (highest). Suresh wins → admin keeps ₹800 (5% × ₹16,000), basket gets ₹15,200, Suresh takes ₹84,000.
-- `bid_amount` = total bid (the winner's sacrifice). This is what the winner gave up.
-- `admin_commission` = `bid_amount × admin_commission_rate / 100`. Stored on the cycle for full transparency; does NOT create a basket transaction.
-- `basket_credit` = `bid_amount − admin_commission`. This is the amount recorded as `CREDIT_DISCOUNT` in the basket ledger.
-- `winner_takeaway` = `pool_amount − bid_amount` (auto-computed; stored for reporting).
+- **Bidding model:** members bid the amount they're willing to sacrifice (leave behind). The **highest** bidder wins. The full sacrifice goes to the basket; admin commission is computed separately on the full pool_amount and collected offline in cash.
+  - Example: Pool ₹1,00,000, commission rate 5%. Suresh bids ₹16,000 (sacrifice). Suresh wins → admin keeps ₹5,000 (5% × ₹1,00,000, offline cash), basket gets ₹16,000 (full bid), Suresh takes ₹79,000 (pool − bid − commission).
+- `bid_amount` = the winner's sacrifice (what they agreed to leave behind for the basket).
+- `admin_commission` = `pool_amount × admin_commission_rate / 100`. Stored on the cycle for transparency; does NOT create a basket transaction (collected offline in cash).
+- `basket_credit` = `bid_amount` (the full sacrifice). This is the amount recorded as `CREDIT_DISCOUNT` in the basket ledger.
+- `winner_takeaway` = `pool_amount − bid_amount − admin_commission` (auto-computed; net disbursement to winner; stored for reporting).
 - The `chk_bid_consistency` constraint says: either all five bid-related fields are NULL (not yet recorded) or all five are filled. No partial state.
 - Cycles are pre-created (one per `total_months`) when the group is created. Easier than creating on-the-fly.
 
@@ -622,9 +622,9 @@ Group: 10 shares total, ₹10,000/month per share, 10 monthly cycles. Pool = ₹
 **Assume admin_commission_rate = 5%.**
 
 **Month 1:** Highest bid is Ramesh at ₹10,000. Ramesh wins.
-- `admin_commission` = 5% × ₹10,000 = ₹500 (admin keeps offline).
-- `basket_credit` = ₹10,000 − ₹500 = ₹9,500.
-- Ramesh receives ₹1,00,000 − ₹10,000 = ₹90,000.
+- `admin_commission` = 5% × ₹1,00,000 (pool) = ₹5,000 (admin keeps offline in cash).
+- `basket_credit` = ₹10,000 (= bid_amount, full sacrifice).
+- Ramesh receives ₹1,00,000 − ₹10,000 − ₹5,000 = ₹85,000 (`winner_takeaway`).
 - `payments`: 5 rows for cycle 1 (one per person), expected_amount based on share_count:
   - Ramesh row: expected ₹20,000
   - Suresh: ₹10,000
@@ -633,19 +633,20 @@ Group: 10 shares total, ₹10,000/month per share, 10 monthly cycles. Pool = ₹
   - Deepa: ₹20,000
 - Admin marks all `Paid`.
 - `memberships`: Ramesh's `wins_count` increments from 0 to 1 (he still has 1 share remaining; he can win once more).
-- `basket_transactions`: 1 row, `CREDIT_DISCOUNT` for 950,000 paise (₹9,500 — the basket_credit, not the full bid).
-- `baskets.current_balance`: ₹9,500.
+- `basket_transactions`: 1 row, `CREDIT_DISCOUNT` for 1,000,000 paise (₹10,000 — the full bid sacrifice).
+- `baskets.current_balance`: ₹10,000.
 
-**Month 2:** Ramesh is *still eligible* (wins_count=1 < share_count=2). He bids ₹8,000 again, but Priya outbids at ₹12,000. Priya wins.
-- `admin_commission` = 5% × ₹12,000 = ₹600. `basket_credit` = ₹11,400.
-- Priya receives ₹1,00,000 − ₹12,000 = ₹88,000.
+**Month 2:** Ramesh is *still eligible* (wins_count=1 < share_count=2). He bids ₹8,000, but Priya outbids at ₹12,000. Priya wins.
+- `admin_commission` = 5% × ₹1,00,000 = ₹5,000. `basket_credit` = ₹12,000 (full bid).
+- Priya receives ₹1,00,000 − ₹12,000 − ₹5,000 = ₹83,000.
 - Priya's `wins_count`: 0 → 1 (still has 2 shares left, eligible).
-- Basket: ₹9,500 + ₹11,400 = ₹20,900.
+- Basket: ₹10,000 + ₹12,000 = ₹22,000.
 
 **Month 3:** Priya bids ₹15,000 and wins again.
-- `admin_commission` = ₹750. `basket_credit` = ₹14,250.
+- `admin_commission` = 5% × ₹1,00,000 = ₹5,000. `basket_credit` = ₹15,000 (full bid).
+- Priya receives ₹1,00,000 − ₹15,000 − ₹5,000 = ₹80,000.
 - Priya's `wins_count`: 1 → 2 (still has 1 share left).
-- Basket: ₹20,900 + ₹14,250 = ₹35,150.
+- Basket: ₹22,000 + ₹15,000 = ₹37,000.
 
 **Month 5:** Skip month! Pool is ₹1,00,000. Basket ≥ pool? Suppose basket = ₹1,10,000. Yes.
 - All payments for cycle 5 → `Waived`, `expected_amount = 0`. Nobody pays anything — Ramesh saves ₹20,000, Priya saves ₹30,000, etc. (proportional benefit happens automatically because each person's contribution is share-weighted.)

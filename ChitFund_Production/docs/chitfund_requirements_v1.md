@@ -1,8 +1,8 @@
 # ChitFund Management App — Requirements (v1)
 
-**Status:** Draft v10 (notifications section updated — F-26 cron trigger clarified, F-30a Loan Disbursed added, F-32 updated to global-mute only for v1)
+**Status:** Draft v11 (commission model corrected — admin commission is on pool_amount not bid_amount; bid_amount redefined as sacrifice; basket_credit = bid_amount; winner_takeaway = pool − bid − commission)
 **Owner:** Suraj
-**Last updated:** 2026-05-16
+**Last updated:** 2026-05-20
 
 ---
 
@@ -85,7 +85,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - group_id, name, pool_amount (e.g. ₹1,00,000 — full undiscounted pool), monthly_contribution (per share), total_months, total_shares, start_month, currency (INR), status (Active / Closed), created_by (admin user_id), created_at.
 - **Settings:**
   - `monthly_interest_rate` — fixed monthly interest rate applied to all basket loans in this group (e.g. 5% means ₹5,000/month on ₹1L).
-  - `admin_commission_rate` — percentage of the winning bid amount that the admin retains as a foreman fee (e.g. 5% on a ₹16,000 bid = ₹800 to admin). Set at group creation; cannot be changed after cycle 1 starts. Only the remainder (bid − commission) is credited to the basket.
+  - `admin_commission_rate` — percentage of the full pool amount that the admin retains as a foreman fee (e.g. 5% on a ₹1,00,000 pool = ₹5,000 to admin, regardless of the winning bid). Set at group creation; cannot be changed after cycle 1 starts. The commission is collected offline in cash and does not affect the basket.
   - `payment_due_day` — day of month (1–28) on which all payments are due every cycle. This covers both the monthly contribution and loan interest for members with active loans. Days 29–31 are not allowed (blocked at creation) to ensure the date is valid across all months including February.
 - **Invariant:** total_shares × monthly_contribution should equal pool_amount. Validate on creation.
 - **Multi-share model:** a chit has `total_shares` slots (one cycle per share). A single person can hold multiple shares — see §4.3. So `total_shares ≥ unique_person_count`.
@@ -109,13 +109,13 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **Cycle type:** `is_skip_month` (bool) — if true, this month's pool is covered by the basket and members do not pay.
 - **Bidding fields (entered by admin after offline auction; NULL for skip-month cycles):**
   - winner_user_id (nullable until decided).
-  - bid_amount (the highest bid. Example: highest bidder Suresh at ₹16,000 → bid_amount = ₹16,000.)
-  - admin_commission (auto-computed = bid_amount × group.admin_commission_rate; cash retained by admin offline. Example: 5% × ₹16,000 = ₹800.)
-  - basket_credit (auto-computed = bid_amount − admin_commission; this is the amount actually credited to the basket. Example: ₹16,000 − ₹800 = ₹15,200.)
-  - winner_takeaway (auto-computed = pool_amount − bid_amount; what the winner actually receives. Example: pool ₹1,00,000 − bid ₹16,000 = takeaway ₹84,000.)
-- **Bidding model:** Ascending bid — members bid the amount they're willing to leave behind. **Highest bidder wins.** The bid splits into admin commission (offline cash) and basket credit; the winner takes pool minus the full bid.
+  - bid_amount (the amount the winner agrees to sacrifice/leave behind. Example: highest bidder Suresh agrees to give up ₹16,000 → bid_amount = ₹16,000.)
+  - admin_commission (auto-computed = pool_amount × group.admin_commission_rate; cash retained by admin offline. Example: 5% × ₹1,00,000 = ₹5,000.)
+  - basket_credit (auto-computed = bid_amount; the full bid sacrifice is credited to the basket. Example: ₹16,000.)
+  - winner_takeaway (auto-computed = pool_amount − bid_amount − admin_commission; what the winner actually receives. Example: ₹1,00,000 − ₹16,000 − ₹5,000 = ₹79,000.)
+- **Bidding model:** Ascending bid — members bid the amount they're willing to sacrifice (leave behind). **Highest bidder wins.** The full bid sacrifice goes to the basket; admin commission is computed separately on the full pool_amount and collected offline in cash; the winner takes pool minus bid minus commission.
 - **Basket impact:**
-  - On a regular month: `basket_credit` (= bid_amount − admin_commission) is credited to the basket. The admin_commission portion is retained by the admin in cash and is not a basket transaction.
+  - On a regular month: `basket_credit` (= bid_amount, the full bid sacrifice) is credited to the basket. The admin_commission is computed on pool_amount and retained by the admin in cash — it is not a basket transaction.
   - On a skip month: `pool_amount` is debited from the basket and paid to the winner.
 
 ### 4.5 Payment
@@ -131,7 +131,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 ### 4.7 Basket Transaction (ledger entries)
 - txn_id, basket_id, cycle_id (nullable), type, amount, counterparty_user_id (nullable — who borrowed or benefited), notes, created_at, created_by.
 - **Transaction types:**
-  - `CREDIT_DISCOUNT` — net basket credit from a regular cycle (= bid_amount − admin_commission). Does NOT include the admin's commission portion, which is offline cash.
+  - `CREDIT_DISCOUNT` — basket credit from a regular cycle (= bid_amount, the full bid sacrifice). Admin commission is computed on pool_amount and collected offline — it never enters the basket.
   - `DEBIT_SKIP_MONTH` — basket pays the winner of a skip-month cycle.
   - `LOAN_DISBURSED` — loan given out to a member (debit).
   - `LOAN_REPAID` — principal repayment from a borrower (credit).
@@ -176,10 +176,10 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **F-10** Admin records the winner for the month from a dropdown of **eligible members** — those where `wins_count < share_count` AND who have no active loan in this group.
 
 ### 5.3 Bidding, Basket & Loans (Admin)
-- **F-11** When recording a winner for a regular cycle, admin enters the **winning bid amount**. App auto-computes and displays the three-way split:
-  - **Admin commission** = bid_amount × admin_commission_rate (admin retains this offline in cash).
-  - **Basket credit** = bid_amount − admin_commission (credited to the basket).
-  - **Winner takeaway** = pool_amount − bid_amount (what the winner receives).
+- **F-11** When recording a winner for a regular cycle, admin enters the **winning bid amount** (the amount the winner agrees to sacrifice). App auto-computes and displays the three-way split:
+  - **Admin commission** = pool_amount × admin_commission_rate (admin retains this offline in cash; based on full pool, not the bid).
+  - **Basket credit** = bid_amount (the full sacrifice is credited to the basket; commission does not reduce this).
+  - **Winner takeaway** = pool_amount − bid_amount − admin_commission (net amount the winner actually receives).
   Admin confirms and the basket_credit is recorded as a `CREDIT_DISCOUNT` ledger entry.
 - **F-12** Admin can declare a cycle a **Skip Month** (before the cycle opens or while it's open, as long as no payments have been collected). In a skip-month cycle:
   - Members are not required to pay their contribution (their payment is auto-set to `Waived`).
@@ -205,7 +205,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 ### 5.4 Member view
 - **F-19** Member sees a dashboard per group: current month, their payment status, next due date, whether the month is a skip-month (no payment needed).
 - **F-20** Member sees their own full payment history (table: month, expected amount, paid amount, status, paid date).
-- **F-21** Member sees the winners list across all months for the group. Each row shows: month, winner name, bid amount, admin commission (bid × commission rate), and basket credit (bid − commission). All three figures are always visible so every member can verify the split for each cycle.
+- **F-21** Member sees the winners list across all months for the group. Each row shows: month, winner name, bid amount (sacrifice), admin commission (pool × commission rate), basket credit (= bid amount), and winner takeaway (pool − bid − commission). All figures are always visible so every member can verify the split for each cycle.
 - **F-22** Member sees the full member list of the group (read-only), with the admin badge visible.
 - **F-23** Member sees the basket balance (current value) and any loans they personally have taken (borrower view only — not other members' loans).
 
@@ -292,14 +292,14 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 | 5 | Member self-report of payment | Not supported (admin-only) |
 | 6 | Dropout policy | Mark Inactive, keep history, offline settlement |
 | 7 | Admin visible to members | Yes (admin badge shown) |
-| 8 | Admin commission | Set at group creation as `admin_commission_rate` (% of winning bid). Admin retains this portion offline in cash. Cannot change after cycle 1 starts. |
-| 9 | Basket credit from bid | `bid_amount − admin_commission` is credited to the basket as `CREDIT_DISCOUNT`. The commission portion never enters the basket. |
+| 8 | Admin commission | Set at group creation as `admin_commission_rate` (% of **full pool_amount**, not the winning bid). Admin retains this portion offline in cash. Cannot change after cycle 1 starts. |
+| 9 | Basket credit from bid | `bid_amount` (the full bid sacrifice) is credited to the basket as `CREDIT_DISCOUNT`. Admin commission is computed on pool_amount separately and never enters the basket. |
 | 10 | Skip-month trigger | Admin decides freely; no threshold logic — app only enforces sufficient basket balance |
 | 11 | Basket loan interest | Simple interest, 2–5% **per month**; first month's interest deducted upfront at disbursement |
 | 12 | Loan close rule | All loans must be repaid before chit can close: **full principal** (no partial repayments) AND **all outstanding interest cleared** (`outstanding_interest = 0`). Interest payments are flexible — no hard monthly enforcement; borrower can pay cumulatively at any time. |
 | 13 | End-of-cycle basket | Remaining balance split **proportional to share_count** among all members |
 | 14 | Cross-group analytics | Deferred to Phase 2 |
-| 15 | Bidding model | **Ascending bid** — highest bid wins; bid amount = basket credit; winner takes (pool − bid) |
+| 15 | Bidding model | **Ascending bid** — highest bid wins; bid amount = amount sacrificed = basket credit; admin commission = pool × rate (offline cash); winner takes (pool − bid − commission) |
 | 16 | Multi-share model | A person can hold N shares in a group. Pays N × contribution. Eligible to win N times. Closure split is proportional to shares. |
 | 17 | Payment due day | Day of month (1–28) set at group creation. Days 29–31 blocked. Applies uniformly to contributions AND loan interest every cycle. Default suggestion: 10. |
 | 18 | Admin share count at creation | Admin selects their own share count at group creation (min 1, max total_shares). Defaults to 1. Adjustable via the members screen before cycle 1 starts. |

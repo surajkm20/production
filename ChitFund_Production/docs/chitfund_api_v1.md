@@ -1,10 +1,10 @@
 # ChitFund App — API Specification (v1)
 
-**Status:** Draft v8 (notifications section expanded — types table, LOAN_DISBURSED type added, group_name in notification item, cron-triggered PAYMENT_DUE documented)
+**Status:** Draft v9 (commission model corrected — admin_commission = pool_amount × rate; basket_credit = bid_amount; winner_takeaway = pool − bid − commission; all examples updated)
 **Style:** REST over HTTPS
 **Base URL:** `https://api.chitfund.app/v1`
 **Auth:** JWT (access token in `Authorization: Bearer <token>` header)
-**Last updated:** 2026-05-16
+**Last updated:** 2026-05-20
 
 ---
 
@@ -350,7 +350,7 @@ Create a new group. The caller becomes admin and gets a membership with `share_c
 - `monthly_contribution` and amounts are in paise.
 - `total_shares` = `total_months`.
 - `payment_due_day` must be between 1 and 28 (inclusive). Days 29–31 are rejected. This day is used to auto-compute `due_date` for every cycle in this group.
-- `admin_commission_rate` — percentage of the winning bid the admin retains in cash (e.g. `5.00` = 5%). Defaults to `0.00` if omitted. Locked once cycle 1 starts.
+- `admin_commission_rate` — percentage of the full pool amount the admin retains in cash (e.g. `5.00` = 5%). Defaults to `0.00` if omitted. Locked once cycle 1 starts.
 
 **Response 201**
 ```json
@@ -731,9 +731,9 @@ List all cycles in the group.
         "name": "Ramesh K"
       },
       "bid_amount": 1000000,
-      "admin_commission": 50000,
-      "basket_credit": 950000,
-      "winner_takeaway": 9000000,
+      "admin_commission": 500000,
+      "basket_credit": 1000000,
+      "winner_takeaway": 8500000,
       "collected_amount": 10000000,
       "paid_count": 5,
       "total_count": 5
@@ -786,15 +786,15 @@ Record the winning bid for a regular cycle.
     "cycle_id": "uuid",
     "winner_user_id": "uuid",
     "bid_amount": 1600000,
-    "admin_commission": 80000,
-    "basket_credit": 1520000,
-    "winner_takeaway": 8400000,
+    "admin_commission": 500000,
+    "basket_credit": 1600000,
+    "winner_takeaway": 7900000,
     "basket_balance_after": 5420000
   }
 }
 ```
-- `admin_commission` = `bid_amount × group.admin_commission_rate / 100` (offline cash, not added to basket).
-- `basket_credit` = `bid_amount − admin_commission` (what's actually credited to the basket).
+- `admin_commission` = `pool_amount × group.admin_commission_rate / 100` (offline cash, not added to basket; based on full pool, not the bid).
+- `basket_credit` = `bid_amount` (the full sacrifice is credited to the basket; commission does not reduce this).
 
 **Errors:**
 - `WINNER_INELIGIBLE` — member has exhausted their share allocation (`wins_count >= share_count`) OR has an active loan in this group
@@ -1452,9 +1452,9 @@ Winners ledger across all cycles.
       "month_label": "May 2026",
       "winner_name": "Ramesh K",
       "bid_amount": 1000000,
-      "admin_commission": 50000,
-      "basket_credit": 950000,
-      "winner_takeaway": 9000000,
+      "admin_commission": 500000,
+      "basket_credit": 1000000,
+      "winner_takeaway": 8500000,
       "is_skip_month": false
     }
   ]
