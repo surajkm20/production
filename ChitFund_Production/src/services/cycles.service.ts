@@ -223,7 +223,7 @@ export async function recordWinner(
     db.select({ id: baskets.id, current_balance: baskets.current_balance })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
-    db.select({ share_count: memberships.share_count, wins_count: memberships.wins_count })
+    db.select({ share_count: memberships.share_count, wins_count: memberships.wins_count, role: memberships.role })
       .from(memberships)
       .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, winner_user_id), eq(memberships.status, 'Active')))
       .limit(1),
@@ -238,43 +238,58 @@ export async function recordWinner(
   const cycle  = cycleRows[0];
   const basket = basketRows[0];
 
-  if (!cycle)                                 throw new AppError(404, 'CYCLE_NOT_FOUND',          'Cycle not found in this group.');
-  if (cycle.status === 'Closed')              throw new AppError(409, 'CYCLE_CLOSED',             'Cycle is already closed.');
-  if (cycle.winner_user_id !== null)          throw new AppError(409, 'CYCLE_ALREADY_RECORDED',  'Winner already recorded. Use PATCH to edit within 24h.');
-  if (bid_amount <= 0)                        throw new AppError(400, 'BID_NEGATIVE_OR_ZERO',    'bid_amount must be greater than 0.');
-  if (bid_amount > Number(cycle.pool_amount)) throw new AppError(400, 'BID_EXCEEDS_POOL',        'bid_amount cannot exceed the group pool amount.');
+  if (!cycle)                        throw new AppError(404, 'CYCLE_NOT_FOUND',         'Cycle not found in this group.');
+  if (cycle.status === 'Closed')     throw new AppError(409, 'CYCLE_CLOSED',            'Cycle is already closed.');
+  if (cycle.winner_user_id !== null) throw new AppError(409, 'CYCLE_ALREADY_RECORDED', 'Winner already recorded. Use PATCH to edit within 24h.');
 
   const winner = winnerMemberRows[0];
   if (!winner || Number(winner.wins_count) >= Number(winner.share_count)) {
     throw new AppError(409, 'WINNER_INELIGIBLE', 'This member is not eligible to win (already won their share allocation).');
   }
-  const hasActiveLoan = !!winnerActiveLoanRows[0];
+  const hasActiveLoan     = !!winnerActiveLoanRows[0];
+  const is_admin_winner   = winner.role === 'Admin';
+  const pool_amount_num   = Number(cycle.pool_amount);
+  const commission_rate   = parseFloat(String(cycle.admin_commission_rate));
 
-  const commission_rate      = parseFloat(String(cycle.admin_commission_rate));
-  const admin_commission     = Math.round(Number(cycle.pool_amount) * commission_rate / 100);
-  const basket_credit        = bid_amount - admin_commission;
-  const winner_takeaway      = Number(cycle.pool_amount) - bid_amount;
-  const basket_balance_after = Number(basket.current_balance) + basket_credit;
+  // Admin withdraws the full pool — no bid, no commission, nothing to basket
+  let stored_bid: number, admin_commission: number, basket_credit: number, winner_takeaway: number, basket_balance_after: number;
+  if (is_admin_winner) {
+    stored_bid           = 0;
+    admin_commission     = 0;
+    basket_credit        = 0;
+    winner_takeaway      = pool_amount_num;
+    basket_balance_after = Number(basket.current_balance);
+  } else {
+    if (bid_amount <= 0)               throw new AppError(400, 'BID_NEGATIVE_OR_ZERO', 'bid_amount must be greater than 0.');
+    if (bid_amount > pool_amount_num)  throw new AppError(400, 'BID_EXCEEDS_POOL',     'bid_amount cannot exceed the group pool amount.');
+    stored_bid           = bid_amount;
+    admin_commission     = Math.round(pool_amount_num * commission_rate / 100);
+    basket_credit        = bid_amount - admin_commission;
+    winner_takeaway      = pool_amount_num - bid_amount;
+    basket_balance_after = Number(basket.current_balance) + basket_credit;
+  }
 
   await db.transaction(async (tx) => {
     await tx.update(monthly_cycles)
-      .set({ winner_user_id, bid_amount, admin_commission, basket_credit, winner_takeaway, ...(notes ? { notes } : {}) })
+      .set({ winner_user_id, bid_amount: stored_bid, admin_commission, basket_credit, winner_takeaway, ...(notes ? { notes } : {}) })
       .where(eq(monthly_cycles.id, cycle_id));
 
-    await tx.update(baskets)
-      .set({ current_balance: basket_balance_after })
-      .where(eq(baskets.id, basket.id));
+    if (!is_admin_winner) {
+      await tx.update(baskets)
+        .set({ current_balance: basket_balance_after })
+        .where(eq(baskets.id, basket.id));
 
-    await tx.insert(basket_transactions).values({
-      basket_id:            basket.id,
-      cycle_id,
-      txn_type:             'CREDIT_DISCOUNT',
-      amount:               basket_credit,
-      direction:            'C',
-      counterparty_user_id: winner_user_id,
-      notes:                notes ?? 'Cycle bid savings',
-      created_by:           userId,
-    });
+      await tx.insert(basket_transactions).values({
+        basket_id:            basket.id,
+        cycle_id,
+        txn_type:             'CREDIT_DISCOUNT',
+        amount:               basket_credit,
+        direction:            'C',
+        counterparty_user_id: winner_user_id,
+        notes:                notes ?? 'Cycle bid savings',
+        created_by:           userId,
+      });
+    }
 
     await tx.update(memberships)
       .set({ wins_count: Number(winner.wins_count) + 1 })
@@ -291,7 +306,7 @@ export async function recordWinner(
     actor_id:   winner_user_id,
     data: {
       month_label:      cycle.month_label,
-      bid_amount,
+      bid_amount:       stored_bid,
       admin_commission,
       basket_credit,
       winner_takeaway,
@@ -308,7 +323,9 @@ export async function recordWinner(
 
   const winnerName = winnerRow?.name ?? 'A member';
   const title      = `Winner announced — ${cycle.month_label}`;
-  const body       = `${winnerName} won with a bid of ${paiseToRupeeDisplay(bid_amount)}.`;
+  const body       = is_admin_winner
+    ? `${winnerName} (admin) withdrew the full pool of ${paiseToRupeeDisplay(pool_amount_num)}.`
+    : `${winnerName} won with a bid of ${paiseToRupeeDisplay(stored_bid)}.`;
 
   Promise.all(
     activeMembers.map(m => notify({
@@ -317,14 +334,14 @@ export async function recordWinner(
       type:     'WINNER_ANNOUNCED',
       title,
       body,
-      data:     { cycle_id, month_label: cycle.month_label, winner_user_id, winner_name: winnerName, bid_amount, basket_credit },
+      data:     { cycle_id, month_label: cycle.month_label, winner_user_id, winner_name: winnerName, bid_amount: stored_bid, basket_credit },
     })),
   ).catch(() => {});
 
   return {
     cycle_id,
     winner_user_id,
-    bid_amount,
+    bid_amount:      stored_bid,
     admin_commission,
     basket_credit,
     winner_takeaway,

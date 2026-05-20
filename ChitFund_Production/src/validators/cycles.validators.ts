@@ -9,7 +9,7 @@ import { z } from 'zod';
 // stay in the service and are not duplicated here.
 export const recordWinnerSchema = z.object({
   winner_user_id: z.string().uuid(),
-  bid_amount:     z.number().int().positive(),
+  bid_amount:     z.number().int().min(0),
   notes:          z.string().optional(),
 });
 
