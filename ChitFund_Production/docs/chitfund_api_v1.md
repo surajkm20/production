@@ -1,6 +1,6 @@
 # ChitFund App — API Specification (v1)
 
-**Status:** Draft v9 (commission model corrected — admin_commission = pool_amount × rate; basket_credit = bid_amount; winner_takeaway = pool − bid − commission; all examples updated)
+**Status:** Draft v10 (admin withdrawal added — when winner is group admin, bid_amount=0, no commission, no basket transaction, full pool takeaway)
 **Style:** REST over HTTPS
 **Base URL:** `https://api.chitfund.app/v1`
 **Auth:** JWT (access token in `Authorization: Bearer <token>` header)
@@ -770,7 +770,7 @@ Get full cycle detail.
 ### POST `/groups/:group_id/cycles/:cycle_id/record-winner` **[admin]**
 Record the winning bid for a regular cycle.
 
-**Request**
+**Request — regular member winner**
 ```json
 {
   "winner_user_id": "uuid",
@@ -779,7 +779,17 @@ Record the winning bid for a regular cycle.
 }
 ```
 
-**Response 200**
+**Request — admin withdrawal** (admin selects themselves as winner)
+```json
+{
+  "winner_user_id": "<admin-uuid>",
+  "bid_amount": 0,
+  "notes": "Admin taking the chit this month."
+}
+```
+- When `winner_user_id` is the group admin, the server activates admin withdrawal regardless of `bid_amount`. Sending `bid_amount: 0` is the convention; any value is ignored server-side for the admin winner.
+
+**Response 200 — regular member winner** (e.g., pool=₹1,00,000, bid=₹16,000, rate=5%)
 ```json
 {
   "data": {
@@ -793,13 +803,29 @@ Record the winning bid for a regular cycle.
   }
 }
 ```
-- `admin_commission` = `pool_amount × group.admin_commission_rate / 100` (offline cash, not added to basket; based on full pool, not the bid).
-- `basket_credit` = `bid_amount − admin_commission` (net amount credited to basket after admin's cut).
+- `admin_commission` = `pool_amount × group.admin_commission_rate / 100` (offline cash; based on full pool).
+- `basket_credit` = `bid_amount − admin_commission` (net credited to basket).
+
+**Response 200 — admin withdrawal** (pool=₹1,00,000)
+```json
+{
+  "data": {
+    "cycle_id": "uuid",
+    "winner_user_id": "<admin-uuid>",
+    "bid_amount": 0,
+    "admin_commission": 0,
+    "basket_credit": 0,
+    "winner_takeaway": 10000000,
+    "basket_balance_after": 5420000
+  }
+}
+```
+- Admin takes the full pool. No basket transaction is created; `basket_balance_after` is unchanged.
 
 **Errors:**
 - `WINNER_INELIGIBLE` — member has exhausted their share allocation (`wins_count >= share_count`) OR has an active loan in this group
-- `BID_EXCEEDS_POOL`
-- `BID_NEGATIVE_OR_ZERO`
+- `BID_EXCEEDS_POOL` — only for non-admin winners
+- `BID_NEGATIVE_OR_ZERO` — only for non-admin winners (bid_amount must be > 0 for regular members)
 - `CYCLE_ALREADY_RECORDED` (use PATCH to edit)
 - `CYCLE_CLOSED`
 
@@ -1378,7 +1404,7 @@ Register a Web Push endpoint for the current device.
 |---|---|---|---|
 | `PAYMENT_DUE` | Daily cron — fires when `due_date = today + 3 days` for an open cycle that has unpaid payments | Members with `Unpaid` payment in that cycle | `{ cycle_id, month_number, due_date }` |
 | `PAYMENT_RECEIVED` | Admin marks a payment as `Paid` via PATCH `/payments/:id` | The member whose payment was marked | `{ cycle_id, month_number, paid_amount }` |
-| `WINNER_ANNOUNCED` | Admin records a winner via POST `…/record-winner` | All active members of the group | `{ cycle_id, month_number, winner_user_id, winner_name, bid_amount, basket_credit }` |
+| `WINNER_ANNOUNCED` | Admin records a winner via POST `…/record-winner` | All active members of the group | `{ cycle_id, month_number, winner_user_id, winner_name, bid_amount, basket_credit }`. For admin withdrawal: body reads "Admin withdrew the full pool of ₹X"; bid_amount=0, basket_credit=0. |
 | `LOAN_DISBURSED` | Admin disburses a loan via POST `…/loans` | The borrower (member receiving the loan) | `{ loan_id, principal, amount_disbursed_to_borrower }` |
 | `SKIP_MONTH_DECLARED` | Admin declares a skip month via POST `…/declare-skip-month` | All active members of the group | `{ cycle_id, month_number }` |
 | `DEFAULTER_REMINDER` | Admin triggers via POST `…/remind-defaulters` (manual) | Members with `Unpaid` status this cycle | `{ cycle_id, month_number, due_date }` |

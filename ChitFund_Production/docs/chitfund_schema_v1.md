@@ -1,6 +1,6 @@
 # ChitFund App — Database Schema (v1)
 
-**Status:** Draft v10 (commission model corrected — admin_commission = pool_amount × rate; basket_credit = bid_amount; winner_takeaway = pool − bid − commission; worked example updated)
+**Status:** Draft v11 (admin withdrawal added — when admin wins: all bid fields stored as 0, no basket transaction; chk_bid_consistency still satisfied with zeros)
 **Database:** PostgreSQL 14+
 **Last updated:** 2026-05-20
 
@@ -253,11 +253,12 @@ CREATE INDEX idx_cycles_status ON monthly_cycles(group_id, status);
 - **`due_date` derivation:** set at cycle pre-creation time as `payment_due_day` of that cycle's calendar month. Example: `payment_due_day = 10`, group starts May 2026 → cycle 1 due `2026-05-10`, cycle 2 due `2026-06-10`, etc. This is the hard deadline for the monthly contribution. Loan interest **accrues** on this date (added to `loans.total_interest_accrued`) but has no hard payment deadline — borrowers can pay cumulatively at any point.
 - **Bidding model:** members bid the amount they're willing to sacrifice (leave behind). The **highest** bidder wins. Admin commission is carved out of the bid sacrifice (computed on pool_amount, collected offline in cash); the remainder goes to basket. The winner takes pool minus the full bid.
   - Example: Pool ₹1,00,000, commission rate 5%. Suresh bids ₹16,000 (sacrifice). Suresh wins → admin keeps ₹5,000 (5% × ₹1,00,000, offline cash), basket gets ₹11,000 (bid − commission), Suresh takes ₹84,000 (pool − bid).
-- `bid_amount` = the winner's sacrifice (what they agreed to leave behind).
-- `admin_commission` = `pool_amount × admin_commission_rate / 100`. Stored on the cycle for transparency; does NOT create a basket transaction (collected offline in cash).
-- `basket_credit` = `bid_amount − admin_commission`. This is the amount recorded as `CREDIT_DISCOUNT` in the basket ledger.
-- `winner_takeaway` = `pool_amount − bid_amount` (auto-computed; what the winner receives; stored for reporting).
-- The `chk_bid_consistency` constraint says: either all five bid-related fields are NULL (not yet recorded) or all five are filled. No partial state.
+- `bid_amount` = the winner's sacrifice (what they agreed to leave behind). **0 for admin withdrawal or skip month.**
+- `admin_commission` = `pool_amount × admin_commission_rate / 100`. Stored for transparency; does NOT create a basket transaction (collected offline in cash). **0 for admin withdrawal or skip month.**
+- `basket_credit` = `bid_amount − admin_commission`. The amount recorded as `CREDIT_DISCOUNT` in the basket ledger. **0 for admin withdrawal** (no basket transaction created) **and skip month** (basket is debited instead).
+- `winner_takeaway` = `pool_amount − bid_amount` for regular cycles; equals `pool_amount` for admin withdrawal and skip months.
+- **Admin withdrawal:** when the winner is the group admin, all four bid fields are stored as **0** (not NULL). The `chk_bid_consistency` constraint is satisfied because all five fields (including `winner_user_id`) are non-null. No `CREDIT_DISCOUNT` basket transaction is created.
+- The `chk_bid_consistency` constraint says: either all five bid-related fields are NULL (not yet recorded) or all five are filled. No partial state. Zeros for admin withdrawal / skip month are valid "filled" values.
 - Cycles are pre-created (one per `total_months`) when the group is created. Easier than creating on-the-fly.
 
 ---

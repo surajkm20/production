@@ -1,6 +1,6 @@
 # ChitFund Management App — Requirements (v1)
 
-**Status:** Draft v11 (commission model corrected — admin commission is on pool_amount not bid_amount; bid_amount redefined as sacrifice; basket_credit = bid_amount; winner_takeaway = pool − bid − commission)
+**Status:** Draft v12 (admin withdrawal added — when admin wins, bid=0, commission=0, basket_credit=0, winner_takeaway=full pool; no basket transaction)
 **Owner:** Suraj
 **Last updated:** 2026-05-20
 
@@ -115,7 +115,8 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - winner_takeaway (auto-computed = pool_amount − bid_amount; what the winner actually receives. Example: ₹1,00,000 − ₹16,000 = ₹84,000.)
 - **Bidding model:** Ascending bid — members bid the amount they're willing to sacrifice (leave behind). **Highest bidder wins.** Admin commission is carved out of the bid sacrifice (computed on pool_amount, collected offline in cash); the remainder goes to basket. The winner always takes pool minus the full bid.
 - **Basket impact:**
-  - On a regular month: `basket_credit` (= bid_amount − admin_commission) is credited to the basket. The admin_commission is computed on pool_amount and retained by the admin in cash — it is not a basket transaction.
+  - On a regular month (non-admin winner): `basket_credit` (= bid_amount − admin_commission) is credited to the basket. The admin_commission is computed on pool_amount and retained by the admin in cash — it is not a basket transaction.
+  - On an admin withdrawal month: all bid fields are stored as 0; winner_takeaway = pool_amount (admin takes everything). No basket transaction is created — nothing goes to basket, no commission is taken.
   - On a skip month: `pool_amount` is debited from the basket and paid to the winner.
 
 ### 4.5 Payment
@@ -173,7 +174,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **F-7** Marking Paid auto-stamps the current date & time (admin can override the date if collected earlier).
 - **F-8** Admin can add a free-text note per payment (e.g. "paid in two installments", "received via Ramesh").
 - **F-9** Admin can edit/undo a payment entry. Every edit is logged in an audit trail.
-- **F-10** Admin records the winner for the month from a dropdown of **eligible members** — those where `wins_count < share_count` AND who have no active loan in this group.
+- **F-10** Admin records the winner for the month from a dropdown of **eligible members** — those where `wins_count < share_count` AND who have no active loan in this group. If the admin selects themselves as the winner, the **admin withdrawal** flow is triggered (see F-11a).
 
 ### 5.3 Bidding, Basket & Loans (Admin)
 - **F-11** When recording a winner for a regular cycle, admin enters the **winning bid amount** (the amount the winner agrees to sacrifice). App auto-computes and displays the three-way split:
@@ -181,6 +182,12 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - **Basket credit** = bid_amount − admin_commission (net amount credited to basket after admin's cut).
   - **Winner takeaway** = pool_amount − bid_amount (what the winner actually receives).
   Admin confirms and the basket_credit is recorded as a `CREDIT_DISCOUNT` ledger entry.
+- **F-11a** **Admin withdrawal.** When the admin selects themselves as the winner:
+  - The bid amount input is hidden — no bid is required.
+  - The admin receives **100% of the pool** (`winner_takeaway = pool_amount`). No sacrifice, no commission, nothing to basket.
+  - `bid_amount`, `admin_commission`, and `basket_credit` are all stored as 0 in the DB (satisfies `chk_bid_consistency`; no basket transaction is created).
+  - Auto-detected server-side: when `winner_user_id` equals the admin's `user_id`, the backend activates this special path without any extra flag in the request.
+  - Notification sent to all members: "Admin withdrew the full pool of ₹X."
 - **F-12** Admin can declare a cycle a **Skip Month** (before the cycle opens or while it's open, as long as no payments have been collected). In a skip-month cycle:
   - Members are not required to pay their contribution (their payment is auto-set to `Waived`).
   - The full pool amount is debited from the basket and paid to the winner.
@@ -304,6 +311,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 | 17 | Payment due day | Day of month (1–28) set at group creation. Days 29–31 blocked. Applies uniformly to contributions AND loan interest every cycle. Default suggestion: 10. |
 | 18 | Admin share count at creation | Admin selects their own share count at group creation (min 1, max total_shares). Defaults to 1. Adjustable via the members screen before cycle 1 starts. |
 | 19 | Member self-join flow | Via invitation code: member submits a join request with a requested share count → admin approves / approves-with-change / rejects. No immediate self-add. Code is locked once cycle 1 starts. |
+| 20 | Admin withdrawal | When admin wins the chit: bid=0, commission=0, basket_credit=0, winner_takeaway=full pool_amount. No basket transaction. Auto-detected server-side via winner membership role. No request flag needed. |
 
 ---
 

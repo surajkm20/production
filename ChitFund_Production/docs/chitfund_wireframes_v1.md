@@ -1,6 +1,6 @@
 # ChitFund App — UI Wireframes (v1)
 
-**Status:** Draft v10 (commission model corrected — Screen 5/7/11 math preview updated: admin_commission = pool × rate, basket_credit = bid_amount, winner_takeaway = pool − bid − commission)
+**Status:** Draft v11 (admin withdrawal added — Screen 5 hides bid input when admin selected as winner; Screen 11 shows distinct admin outcome card)
 **Scope:** 11 screens that anchor the API design
 **Last updated:** 2026-05-20
 
@@ -257,16 +257,22 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
 **Layout, top to bottom:**
 1. **Header bar** — back, "Record month outcome", cycle label (e.g., "Apr 2026") on right.
 2. **Outcome toggle** — two cards side-by-side: "Regular month" (default selected) vs "Skip month". Selecting "Skip month" reshapes the form below.
-3. **Winner picker** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count`. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins (e.g., "Priya S — 2 of 3 wins remaining").
-4. **(Regular month only) Winning bid amount** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
+3. **Winner picker** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count`. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins (e.g., "Priya S — 2 of 3 wins remaining"). The admin's own name appears with a "(you)" suffix.
+4. **(Regular month only, non-admin winner) Winning bid amount** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won." **Hidden when the admin selects themselves as winner** (admin withdrawal path — no bid is entered).
 5. **Math preview panel** (purple-tinted, live-updates as admin types):
-   - Pool amount: ₹1,00,000.
-   - Winning bid (sacrifice): ₹16,000 (from input).
-   - Admin commission (5% of pool): ₹5,000 — "Admin keeps this in cash".
-   - Goes to basket: ₹11,000 (bid − commission).
-   - Suresh takes home: ₹84,000 (pool − bid).
-   - Basket after this month: ₹38,000 → ₹49,000.
-   - All three split lines are always shown even when `admin_commission_rate = 0` (commission shows ₹0) so members can always verify the math.
+   - **Regular member winner:**
+     - Pool amount: ₹1,00,000.
+     - Winning bid (sacrifice): ₹16,000 (from input).
+     - Admin commission (5% of pool): ₹5,000 — "Admin keeps this in cash".
+     - Goes to basket: ₹11,000 (bid − commission).
+     - Suresh takes home: ₹84,000 (pool − bid).
+     - Basket after this month: ₹38,000 → ₹49,000.
+     - All three split lines always shown even when `admin_commission_rate = 0` (shows ₹0) so members can verify the math.
+   - **Admin withdrawal (admin selects themselves):** Replace the regular preview with a distinct panel:
+     - "Admin withdrawal — full pool"
+     - Admin takes home: ₹1,00,000 (100% of pool).
+     - Commission: ₹0 · Basket: ₹0 (nothing goes to basket).
+     - Basket after this month: ₹38,000 → ₹38,000 (unchanged).
 6. **(Skip month only) Skip-month math preview** — different content:
    - "Basket has ₹38,000. Need ₹1,00,000."
    - If insufficient: red banner blocking save.
@@ -290,7 +296,8 @@ Basket state:
 **Actions:**
 - Toggle between Regular / Skip month → reshapes form.
 - Type bid amount → math preview updates client-side.
-- Save (Regular) → `POST /groups/:group_id/cycles/:cycle_id/record-winner` with `{winner_user_id, bid_amount, notes}`.
+- Save (Regular, non-admin winner) → `POST /groups/:group_id/cycles/:cycle_id/record-winner` with `{winner_user_id, bid_amount, notes}`.
+- Save (Admin withdrawal) → same endpoint with `{winner_user_id: <admin-id>, bid_amount: 0, notes}`. Server auto-detects admin winner and applies withdrawal logic.
 - Save (Skip) → `POST /groups/:group_id/cycles/:cycle_id/declare-skip-month` with `{winner_user_id, notes}`. App validates basket sufficient.
 - After save → redirect to admin dashboard.
 
@@ -687,10 +694,16 @@ Plus group context:
 1. **Header bar** — back arrow, month label (e.g., "Apr 2026"), status chip on right (`Closed` / `Open` / `Skip`).
 
 2. **Outcome card** (purple-tinted if winner recorded, gray if pending):
-   - **Regular cycle (winner recorded):**
+   - **Regular cycle — member winner:**
      - Heading: "Winner".
      - Avatar + name in large text.
      - Three metric tiles below: "Sacrificed ₹16,000", "Took home ₹84,000", and a split breakdown tile showing "Admin ₹5,000 (pool × 5%) · Basket ₹11,000".
+     - Subtitle: "Recorded by <admin name> on Apr 26, 7:42 PM".
+   - **Regular cycle — admin withdrawal** (`bid_amount = 0` and winner is the admin):
+     - Heading: "Admin withdrawal".
+     - Avatar + admin name + "(Admin)" badge.
+     - Single metric tile: "Took home ₹1,00,000 (full pool)".
+     - Sub-line: "Commission ₹0 · Basket ₹0".
      - Subtitle: "Recorded by <admin name> on Apr 26, 7:42 PM".
    - **Skip month:**
      - Heading: "Skip month".
@@ -701,7 +714,8 @@ Plus group context:
      - If admin viewing and cycle is current → "Tap to record →" link to screen 5.
 
 3. **Basket impact card:**
-   - **Regular:** "Basket: ₹38,000 → ₹49,000 (+₹11,000 this month)" — uses `basket_credit` (= bid_amount − admin_commission).
+   - **Regular (member winner):** "Basket: ₹38,000 → ₹49,000 (+₹11,000 this month)" — uses `basket_credit` (= bid_amount − admin_commission).
+   - **Admin withdrawal:** "Basket: ₹38,000 → ₹38,000 (no change — admin took full pool)" — basket is unchanged; no ledger entry exists so the "View ledger entry →" link is hidden.
    - **Skip:** "Basket: ₹1,38,000 → ₹38,000 (−₹1,00,000 this month)".
    - Small "View ledger entry →" link → deep-links into **Screen 6 (Basket & loans)**, switches to the Ledger tab, and applies a `cycle_id=<this>` filter so only entries from this cycle are shown.
 
