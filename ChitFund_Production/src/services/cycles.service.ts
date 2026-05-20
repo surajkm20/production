@@ -252,8 +252,8 @@ export async function recordWinner(
 
   const commission_rate      = parseFloat(String(cycle.admin_commission_rate));
   const admin_commission     = Math.round(Number(cycle.pool_amount) * commission_rate / 100);
-  const basket_credit        = bid_amount;
-  const winner_takeaway      = Number(cycle.pool_amount) - bid_amount - admin_commission;
+  const basket_credit        = bid_amount - admin_commission;
+  const winner_takeaway      = Number(cycle.pool_amount) - bid_amount;
   const basket_balance_after = Number(basket.current_balance) + basket_credit;
 
   await db.transaction(async (tx) => {
@@ -485,10 +485,10 @@ export async function updateCycle(
 
   const commission_rate     = parseFloat(String(cycle.admin_commission_rate));
   const new_commission      = Math.round(Number(cycle.pool_amount) * commission_rate / 100);
-  const new_basket_credit   = new_bid;
+  const new_basket_credit   = new_bid - new_commission;
   const old_basket_credit   = Number(cycle.basket_credit);
   const credit_delta        = new_basket_credit - old_basket_credit;
-  const new_takeaway        = Number(cycle.pool_amount) - new_bid - new_commission;
+  const new_takeaway        = Number(cycle.pool_amount) - new_bid;
   const balance_after       = Number(basket.current_balance) + credit_delta;
 
   await db.transaction(async (tx) => {
@@ -589,8 +589,8 @@ export async function correctClosedCycle(
 
     const commission_rate    = parseFloat(String(cycle.admin_commission_rate));
     const new_commission     = Math.round(Number(cycle.pool_amount) * commission_rate / 100);
-    const new_basket_credit  = new_bid;
-    const new_winner_takeaway = Number(cycle.pool_amount) - new_bid - new_commission;
+    const new_basket_credit  = new_bid - new_commission;
+    const new_winner_takeaway = Number(cycle.pool_amount) - new_bid;
     const old_basket_credit  = Number(cycle.basket_credit);
     const credit_delta       = new_basket_credit - old_basket_credit;
     const new_balance        = Number(basket.current_balance) + credit_delta;

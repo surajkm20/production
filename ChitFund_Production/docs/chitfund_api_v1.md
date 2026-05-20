@@ -732,8 +732,8 @@ List all cycles in the group.
       },
       "bid_amount": 1000000,
       "admin_commission": 500000,
-      "basket_credit": 1000000,
-      "winner_takeaway": 8500000,
+      "basket_credit": 500000,
+      "winner_takeaway": 9000000,
       "collected_amount": 10000000,
       "paid_count": 5,
       "total_count": 5
@@ -787,14 +787,14 @@ Record the winning bid for a regular cycle.
     "winner_user_id": "uuid",
     "bid_amount": 1600000,
     "admin_commission": 500000,
-    "basket_credit": 1600000,
-    "winner_takeaway": 7900000,
+    "basket_credit": 1100000,
+    "winner_takeaway": 8400000,
     "basket_balance_after": 5420000
   }
 }
 ```
 - `admin_commission` = `pool_amount × group.admin_commission_rate / 100` (offline cash, not added to basket; based on full pool, not the bid).
-- `basket_credit` = `bid_amount` (the full sacrifice is credited to the basket; commission does not reduce this).
+- `basket_credit` = `bid_amount − admin_commission` (net amount credited to basket after admin's cut).
 
 **Errors:**
 - `WINNER_INELIGIBLE` — member has exhausted their share allocation (`wins_count >= share_count`) OR has an active loan in this group
@@ -1453,8 +1453,8 @@ Winners ledger across all cycles.
       "winner_name": "Ramesh K",
       "bid_amount": 1000000,
       "admin_commission": 500000,
-      "basket_credit": 1000000,
-      "winner_takeaway": 8500000,
+      "basket_credit": 500000,
+      "winner_takeaway": 9000000,
       "is_skip_month": false
     }
   ]

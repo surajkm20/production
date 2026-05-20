@@ -263,9 +263,9 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
    - Pool amount: ₹1,00,000.
    - Winning bid (sacrifice): ₹16,000 (from input).
    - Admin commission (5% of pool): ₹5,000 — "Admin keeps this in cash".
-   - Goes to basket: ₹16,000 (full sacrifice).
-   - Suresh takes home: ₹79,000 (pool − bid − commission).
-   - Basket after this month: ₹38,000 → ₹54,000.
+   - Goes to basket: ₹11,000 (bid − commission).
+   - Suresh takes home: ₹84,000 (pool − bid).
+   - Basket after this month: ₹38,000 → ₹49,000.
    - All three split lines are always shown even when `admin_commission_rate = 0` (commission shows ₹0) so members can always verify the math.
 6. **(Skip month only) Skip-month math preview** — different content:
    - "Basket has ₹38,000. Need ₹1,00,000."
@@ -690,7 +690,7 @@ Plus group context:
    - **Regular cycle (winner recorded):**
      - Heading: "Winner".
      - Avatar + name in large text.
-     - Three metric tiles below: "Sacrificed ₹16,000", "Took home ₹79,000", and a split breakdown tile showing "Admin ₹5,000 (pool × 5%) · Basket ₹16,000".
+     - Three metric tiles below: "Sacrificed ₹16,000", "Took home ₹84,000", and a split breakdown tile showing "Admin ₹5,000 (pool × 5%) · Basket ₹11,000".
      - Subtitle: "Recorded by <admin name> on Apr 26, 7:42 PM".
    - **Skip month:**
      - Heading: "Skip month".
@@ -701,7 +701,7 @@ Plus group context:
      - If admin viewing and cycle is current → "Tap to record →" link to screen 5.
 
 3. **Basket impact card:**
-   - **Regular:** "Basket: ₹38,000 → ₹54,000 (+₹16,000 this month)" — uses `basket_credit` (= `bid_amount`, the full sacrifice).
+   - **Regular:** "Basket: ₹38,000 → ₹49,000 (+₹11,000 this month)" — uses `basket_credit` (= bid_amount − admin_commission).
    - **Skip:** "Basket: ₹1,38,000 → ₹38,000 (−₹1,00,000 this month)".
    - Small "View ledger entry →" link → deep-links into **Screen 6 (Basket & loans)**, switches to the Ledger tab, and applies a `cycle_id=<this>` filter so only entries from this cycle are shown.
 
