@@ -30,16 +30,16 @@ export default function RecordWinnerPage() {
     setLoading(true)
     setError(null)
     try {
-      const [g, cycleList, memberList, elig] = await Promise.all([
+      const [g, cycleList, memberList] = await Promise.all([
         api.get<GroupDetail>(`/groups/${groupId}`),
         api.get<CycleItem[]>(`/groups/${groupId}/cycles`),
         api.get<Member[]>(`/groups/${groupId}/members`),
-        api.getChitiEligibility(groupId!),
       ])
       setGroup(g)
       setCycles(cycleList)
       setMembers(memberList)
-      setEligibility(elig)
+      // eligibility is non-critical — don't block page load if it fails
+      api.getChitiEligibility(groupId!).then(setEligibility).catch(() => {})
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) navigate('/login', { replace: true })
       else setError('Could not load data. Tap to retry.')
