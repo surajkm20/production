@@ -43,7 +43,6 @@ export const cycle_winners = pgTable('cycle_winners', {
   created_at:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   unique('uniq_cycle_slot').on(table.cycle_id, table.winner_number),
-  unique('uniq_cycle_user').on(table.cycle_id, table.winner_user_id),
   index('idx_cycle_winners_cycle').on(table.cycle_id),
   index('idx_cycle_winners_group').on(table.group_id),
   index('idx_cycle_winners_user').on(table.winner_user_id),

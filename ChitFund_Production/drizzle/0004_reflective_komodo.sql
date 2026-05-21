@@ -1,0 +1,1 @@
+ALTER TABLE "cycle_winners" DROP CONSTRAINT "uniq_cycle_user";
