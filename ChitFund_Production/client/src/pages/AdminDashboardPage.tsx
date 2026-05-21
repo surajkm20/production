@@ -455,9 +455,9 @@ export default function AdminDashboardPage() {
               {/* onTap makes this tile clickable → navigate to record-winner page */}
               <MetricTile
                 label="WINNER"
-                value={cycle.winner_user_id ? 'Recorded' : 'Not recorded'}
-                sub={cycle.bid_amount ? `Bid ${formatPaise(cycle.bid_amount)}` : 'Tap to add ↗'}
-                onTap={!cycle.winner_user_id ? () => navigate(`/groups/${groupId}/record-winner`) : undefined}
+                value={(cycle.winners?.length ?? 0) > 0 ? 'Recorded' : 'Not recorded'}
+                sub={cycle.winners?.[0]?.bid_amount ? `Bid ${formatPaise(cycle.winners[0].bid_amount)}` : 'Tap to add ↗'}
+                onTap={(cycle.winners?.length ?? 0) === 0 ? () => navigate(`/groups/${groupId}/record-winner`) : undefined}
               />
               <MetricTile
                 label="BASKET"

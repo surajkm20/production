@@ -87,8 +87,8 @@ export default function CycleDetailPage() {
 
   async function openCorrectModal() {
     setCorrectError(null)
-    setCorrectWinner(cycle?.winner?.user_id ?? '')
-    setCorrectBidRupees(cycle?.bid_amount != null ? String(cycle.bid_amount / 100) : '')
+    setCorrectWinner(cycle?.winners?.[0]?.user_id ?? '')
+    setCorrectBidRupees(cycle?.winners?.[0]?.bid_amount != null ? String(cycle.winners[0].bid_amount / 100) : '')
     setCorrectNotes(cycle?.notes ?? '')
     setShowCorrect(true)
     try {
@@ -142,8 +142,9 @@ export default function CycleDetailPage() {
     )
   }
 
-  const winnerName     = cycle.winner?.name ?? ''
-  const hasWinner      = !!cycle.winner
+  const firstWinner    = cycle.winners?.[0] ?? null
+  const winnerName     = firstWinner?.name ?? ''
+  const hasWinner      = (cycle.winners?.length ?? 0) > 0
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length
@@ -151,7 +152,7 @@ export default function CycleDetailPage() {
 
   // For the correction modal: show eligible members + the current winner (even if no longer eligible)
   const correctableMembers = members.filter(
-    m => m.is_eligible_to_win || m.user_id === cycle.winner?.user_id,
+    m => m.is_eligible_to_win || m.user_id === firstWinner?.user_id,
   )
   const correctBid = Math.round(parseFloat(correctBidRupees) * 100) || 0
   const poolAmount = group?.pool_amount ?? 0
@@ -190,17 +191,16 @@ export default function CycleDetailPage() {
               <div className="flex gap-2">
                 <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
                   <p className="text-[10px] text-gray-400 mb-0.5">Won bid</p>
-                  <p className="text-sm font-bold text-gray-900">{formatPaise(cycle.bid_amount!)}</p>
+                  <p className="text-sm font-bold text-gray-900">{formatPaise(firstWinner?.bid_amount ?? 0)}</p>
                 </div>
                 <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
                   <p className="text-[10px] text-gray-400 mb-0.5">Took home</p>
-                  <p className="text-sm font-bold text-gray-900">{formatPaise(cycle.winner_takeaway!)}</p>
+                  <p className="text-sm font-bold text-gray-900">{formatPaise(firstWinner?.winner_takeaway ?? 0)}</p>
                 </div>
               </div>
-              {cycle.recorded_by && (
+              {firstWinner?.recorded_at && (
                 <p className="text-[11px] text-gray-400 mt-2.5">
-                  Recorded by {cycle.recorded_by.name}
-                  {cycle.recorded_at ? ` on ${formatDateTime(cycle.recorded_at)}` : ''}
+                  Recorded on {formatDateTime(firstWinner.recorded_at)}
                 </p>
               )}
               {canCorrect && (
@@ -222,13 +222,12 @@ export default function CycleDetailPage() {
                 <Avatar name={winnerName} size="lg" />
                 <div>
                   <p className="text-base font-bold text-gray-900">{winnerName}</p>
-                  <p className="text-xs text-gray-500">Took {formatPaise(cycle.winner_takeaway!)} from basket</p>
+                  <p className="text-xs text-gray-500">Took {formatPaise(firstWinner?.winner_takeaway ?? 0)} from basket</p>
                 </div>
               </div>
-              {cycle.recorded_by && (
+              {firstWinner?.recorded_at && (
                 <p className="text-[11px] text-gray-400 mt-2">
-                  Declared by {cycle.recorded_by.name}
-                  {cycle.recorded_at ? ` on ${formatDateTime(cycle.recorded_at)}` : ''}
+                  Declared on {formatDateTime(firstWinner.recorded_at)}
                 </p>
               )}
               {canCorrect && (
@@ -394,7 +393,7 @@ export default function CycleDetailPage() {
                   <option value="">Select member</option>
                   {correctableMembers.map(m => (
                     <option key={m.user_id} value={m.user_id}>
-                      {m.name} ({m.wins_count}/{m.share_count} wins){m.user_id === cycle.winner?.user_id ? ' — current' : ''}
+                      {m.name} ({m.wins_count}/{m.share_count} wins){m.user_id === firstWinner?.user_id ? ' — current' : ''}
                     </option>
                   ))}
                 </select>

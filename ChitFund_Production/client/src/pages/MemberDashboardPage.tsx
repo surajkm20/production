@@ -28,7 +28,7 @@ export default function MemberDashboardPage() {
   const [_myUser, setMyUser] = useState<User | null>(null)
   const [myPayment, setMyPayment] = useState<Payment | null>(null)
   const [adminName, setAdminName] = useState<string>('')
-  const [winnerName, setWinnerName] = useState<string | null>(null)
+
   const [paymentHistory, setPaymentHistory] = useState<MemberPaymentHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -73,10 +73,6 @@ export default function MemberDashboardPage() {
       if (admin) setAdminName(admin.name)
 
       // Find the winner's name for the current cycle
-      if (g.current_cycle?.winner_user_id) {
-        const winner = members.find(m => m.user_id === g.current_cycle!.winner_user_id)
-        setWinnerName(winner?.name ?? null)
-      }
 
       // Extract this member's own payment from the cycle payments list (results[2] if it was fetched)
       if (g.current_cycle && results[2]) {
@@ -220,18 +216,18 @@ export default function MemberDashboardPage() {
         {cycle && (
           <div className="mx-3 mt-3 bg-purple-50 rounded-2xl p-4 border border-maroon-100">
             <p className="text-sm font-semibold text-gray-700 mb-3">This month's winner</p>
-            {cycle.winner_user_id ? (
+            {(cycle.winners?.length ?? 0) > 0 ? (
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-purple-200 flex items-center justify-center text-sm font-bold text-maroon-700">
-                  {(winnerName ?? '?').slice(0, 1).toUpperCase()}
+                  {(cycle.winners[0].name ?? '?').slice(0, 1).toUpperCase()}
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-gray-800">{winnerName ?? 'Unknown'}</p>
-                  {cycle.bid_amount && (
-                    <p className="text-xs text-gray-500">Won bid {formatPaise(cycle.bid_amount)}</p>
+                  <p className="text-sm font-semibold text-gray-800">{cycle.winners[0].name ?? 'Unknown'}</p>
+                  {cycle.winners[0].bid_amount > 0 && (
+                    <p className="text-xs text-gray-500">Won bid {formatPaise(cycle.winners[0].bid_amount)}</p>
                   )}
-                  {cycle.winner_takeaway && (
-                    <p className="text-xs text-gray-400">Took home {formatPaise(cycle.winner_takeaway)}</p>
+                  {cycle.winners[0].winner_takeaway > 0 && (
+                    <p className="text-xs text-gray-400">Took home {formatPaise(cycle.winners[0].winner_takeaway)}</p>
                   )}
                 </div>
               </div>

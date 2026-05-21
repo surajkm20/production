@@ -48,11 +48,11 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
       <div className="flex-1 min-w-0">
         {isPending ? (
           <p className="text-xs text-gray-400">Opens {formatShortDate(cycle.due_date)}</p>
-        ) : cycle.winner ? (
+        ) : (cycle.winners?.length ?? 0) > 0 ? (
           <>
-            <p className="text-xs font-medium text-gray-800 truncate">{cycle.winner.name}</p>
+            <p className="text-xs font-medium text-gray-800 truncate">{cycle.winners[0].name}</p>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              {cycle.is_skip_month ? 'Skip month' : `Bid ${formatPaise(cycle.bid_amount!)}`}
+              {cycle.is_skip_month ? 'Skip month' : `Bid ${formatPaise(cycle.winners[0].bid_amount)}`}
             </p>
           </>
         ) : (

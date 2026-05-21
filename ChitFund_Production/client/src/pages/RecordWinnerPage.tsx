@@ -85,7 +85,7 @@ export default function RecordWinnerPage() {
 
   const currentCycle   = group?.current_cycle
   const xChiti         = eligibility?.x_chiti ?? 1
-  const slotsRecorded  = currentCycle?.winners.length ?? 0
+  const slotsRecorded  = currentCycle?.winners?.length ?? 0
   const slotsRemaining = Math.max(0, xChiti - slotsRecorded)
   const canRecord      = !!currentCycle && currentCycle.status === 'Open' && slotsRemaining > 0
 
@@ -96,7 +96,7 @@ export default function RecordWinnerPage() {
   const eligibleMembers = members.filter(m => m.is_eligible_to_win && !alreadyWonIds.has(m.user_id))
 
   const pastWinners = cycles
-    .filter(c => c.winners.length > 0)
+    .filter(c => (c.winners?.length ?? 0) > 0)
     .sort((a, b) => b.month_number - a.month_number)
 
   // Admin withdrawal helpers
@@ -163,13 +163,13 @@ export default function RecordWinnerPage() {
         )}
 
         {/* Already-recorded winners for this cycle */}
-        {currentCycle && currentCycle.winners.length > 0 && (
+        {currentCycle && (currentCycle.winners?.length ?? 0) > 0 && (
           <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3">
             <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2">
               RECORDED — {currentCycle.month_label}
             </p>
             <div className="space-y-2">
-              {currentCycle.winners.map(w => (
+              {(currentCycle.winners ?? []).map(w => (
                 <div key={w.winner_number} className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-full bg-maroon-100 flex items-center justify-center text-[10px] font-bold text-maroon-700 shrink-0">
                     {initials(w.name ?? '?')}
@@ -347,7 +347,7 @@ export default function RecordWinnerPage() {
                       {c.is_skip_month && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Skip</span>
                       )}
-                      {c.winners.length > 1 && (
+                      {(c.winners?.length ?? 0) > 1 && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
                           {c.winners.length}× Chiti
                         </span>
@@ -356,7 +356,7 @@ export default function RecordWinnerPage() {
                   </div>
 
                   <div className="space-y-3">
-                    {c.winners.map(w => (
+                    {(c.winners ?? []).map(w => (
                       <div key={w.winner_number}>
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
@@ -364,7 +364,7 @@ export default function RecordWinnerPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-800 truncate">{w.name ?? '—'}</p>
-                            {c.winners.length > 1 && (
+                            {(c.winners?.length ?? 0) > 1 && (
                               <p className="text-[10px] text-gray-400">Winner #{w.winner_number}</p>
                             )}
                           </div>
