@@ -5,7 +5,7 @@
 export * from './users';
 export * from './groups';
 export * from './memberships';
-export * from './cycles';
+export * from './cycles';   // exports: monthly_cycles, cycle_winners
 export * from './loans';
 export * from './payments';
 export * from './notifications';

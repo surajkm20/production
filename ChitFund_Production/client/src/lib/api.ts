@@ -62,4 +62,7 @@ export const api = {
       `/groups/${groupId}/cycles/${cycleId}/correct`,
       { method: 'POST', body: JSON.stringify(data) },
     ),
+
+  getChitiEligibility: (groupId: string) =>
+    request<import('../types/api').ChitiEligibility>(`/groups/${groupId}/chiti-eligibility`),
 }

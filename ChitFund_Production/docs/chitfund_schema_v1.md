@@ -228,23 +228,13 @@ CREATE TABLE monthly_cycles (
     month_label          VARCHAR(20) NOT NULL,          -- e.g. "Apr 2026"
     due_date             DATE NOT NULL,
     is_skip_month        BOOLEAN NOT NULL DEFAULT FALSE,
-    winner_user_id       UUID REFERENCES users(id),
-    bid_amount           BIGINT,                        -- paise. Amount the winner sacrificed (left behind). NULL until winner recorded.
-    admin_commission     BIGINT,                        -- paise. = pool_amount × group.admin_commission_rate / 100. Retained by admin in cash (not a basket entry).
-    basket_credit        BIGINT,                        -- paise. = bid_amount − admin_commission. Net amount credited to basket as CREDIT_DISCOUNT.
-    winner_takeaway      BIGINT,                        -- paise. = pool_amount − bid_amount (what winner actually receives).
     status               VARCHAR(20) NOT NULL DEFAULT 'Open', -- 'Open' | 'Closed'
     opened_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at            TIMESTAMPTZ,
     notes                TEXT,
 
     UNIQUE (group_id, month_number),
-    CONSTRAINT chk_cycle_status CHECK (status IN ('Open', 'Closed')),
-    CONSTRAINT chk_bid_consistency CHECK (
-        (winner_user_id IS NULL AND bid_amount IS NULL AND admin_commission IS NULL AND basket_credit IS NULL AND winner_takeaway IS NULL)
-        OR
-        (winner_user_id IS NOT NULL AND bid_amount IS NOT NULL AND admin_commission IS NOT NULL AND basket_credit IS NOT NULL AND winner_takeaway IS NOT NULL)
-    )
+    CONSTRAINT chk_cycle_status CHECK (status IN ('Open', 'Closed'))
 );
 
 CREATE INDEX idx_cycles_group ON monthly_cycles(group_id, month_number);
@@ -252,16 +242,47 @@ CREATE INDEX idx_cycles_status ON monthly_cycles(group_id, status);
 ```
 
 **Notes:**
-- **`due_date` derivation:** set at cycle pre-creation time as `payment_due_day` of that cycle's calendar month. Example: `payment_due_day = 10`, group starts May 2026 → cycle 1 due `2026-05-10`, cycle 2 due `2026-06-10`, etc. This is the hard deadline for the monthly contribution. Loan interest **accrues** on this date (added to `loans.total_interest_accrued`) but has no hard payment deadline — borrowers can pay cumulatively at any point.
-- **Bidding model:** members bid the amount they're willing to sacrifice (leave behind). The **highest** bidder wins. Admin commission is carved out of the bid sacrifice (computed on pool_amount, collected offline in cash); the remainder goes to basket. The winner takes pool minus the full bid.
-  - Example: Pool ₹1,00,000, commission rate 5%. Suresh bids ₹16,000 (sacrifice). Suresh wins → admin keeps ₹5,000 (5% × ₹1,00,000, offline cash), basket gets ₹11,000 (bid − commission), Suresh takes ₹84,000 (pool − bid).
-- `bid_amount` = the winner's sacrifice (what they agreed to leave behind). **0 for admin withdrawal or skip month.**
-- `admin_commission` = `pool_amount × admin_commission_rate / 100`. Stored for transparency; does NOT create a basket transaction (collected offline in cash). **0 for admin withdrawal or skip month.**
-- `basket_credit` = `bid_amount − admin_commission`. The amount recorded as `CREDIT_DISCOUNT` in the basket ledger. **0 for admin withdrawal** (no basket transaction created) **and skip month** (basket is debited instead).
-- `winner_takeaway` = `pool_amount − bid_amount` for regular cycles; equals `pool_amount` for admin withdrawal and skip months.
-- **Admin withdrawal:** when the winner is the group admin, all four bid fields are stored as **0** (not NULL). The `chk_bid_consistency` constraint is satisfied because all five fields (including `winner_user_id`) are non-null. No `CREDIT_DISCOUNT` basket transaction is created.
-- The `chk_bid_consistency` constraint says: either all five bid-related fields are NULL (not yet recorded) or all five are filled. No partial state. Zeros for admin withdrawal / skip month are valid "filled" values.
-- Cycles are pre-created (one per `total_months`) when the group is created. Easier than creating on-the-fly.
+- **`due_date` derivation:** set at cycle pre-creation time as `payment_due_day` of that cycle's calendar month. Example: `payment_due_day = 10`, group starts May 2026 → cycle 1 due `2026-05-10`, cycle 2 due `2026-06-10`, etc.
+- Bid fields (`winner_user_id`, `bid_amount`, etc.) have been **moved to `cycle_winners`** (see below) to support multiple winners per cycle (X Chiti).
+- Cycles are pre-created (one per `total_months`) when the group is created.
+
+---
+
+### 6a. `cycle_winners`
+
+```sql
+CREATE TABLE cycle_winners (
+    id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cycle_id             UUID NOT NULL REFERENCES monthly_cycles(id),
+    group_id             UUID NOT NULL REFERENCES chit_groups(id),
+    winner_number        SMALLINT NOT NULL,             -- 1-based order within cycle (1 = first winner, 2 = second, ...)
+    winner_user_id       UUID NOT NULL REFERENCES users(id),
+    bid_amount           BIGINT NOT NULL,               -- paise. 0 for admin withdrawal / skip month.
+    admin_commission     BIGINT NOT NULL,               -- paise. pool_amount × rate / 100. Collected offline in cash.
+    basket_credit        BIGINT NOT NULL,               -- paise. bid_amount − admin_commission. 0 for admin withdrawal.
+    winner_takeaway      BIGINT NOT NULL,               -- paise. pool_amount − bid_amount. Equals pool_amount for admin withdrawal / skip month.
+    is_admin_withdrawal  BOOLEAN NOT NULL DEFAULT FALSE,
+    notes                TEXT,
+    created_by           UUID NOT NULL REFERENCES users(id),
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (cycle_id, winner_number),
+    UNIQUE (cycle_id, winner_user_id)                  -- a user wins at most once per cycle
+);
+
+CREATE INDEX idx_cycle_winners_cycle ON cycle_winners(cycle_id);
+CREATE INDEX idx_cycle_winners_group ON cycle_winners(group_id);
+CREATE INDEX idx_cycle_winners_user  ON cycle_winners(winner_user_id);
+```
+
+**Notes:**
+- One row per winner per cycle. For single-winner cycles (normal), exactly 1 row. For X Chiti (Double/Triple/etc.), up to X rows.
+- `winner_number` is assigned sequentially as admin records each winner (first recorded = 1, second = 2, …).
+- **Bidding model:** same as before — highest bid wins, sacrifice model. Admin commission = `pool_amount × rate / 100` (offline cash); basket_credit = `bid_amount − admin_commission`; winner_takeaway = `pool_amount − bid_amount`.
+- **Admin withdrawal:** `bid_amount = 0`, `admin_commission = 0`, `basket_credit = 0`, `winner_takeaway = pool_amount`, `is_admin_withdrawal = true`. No basket transaction created.
+- **Skip month winner:** `bid_amount = 0`, `admin_commission = 0`, `basket_credit = 0`, `winner_takeaway = pool_amount`. A `DEBIT_SKIP_MONTH` basket transaction is created for the full pool.
+- The **X Chiti cap** (`x_chiti = floor(total_basket / pool_amount)`) is enforced at record time — admin cannot record more winners than the current eligibility allows.
+- `total_basket = baskets.current_balance (realized) + SUM(active loan principals) + SUM(outstanding interest per active loan) (unrealized)`
 
 ---
 

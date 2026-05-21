@@ -1,9 +1,10 @@
 // Routes for monthly cycle management (require JWT + group membership):
+//   GET   /groups/:group_id/chiti-eligibility                     — X Chiti eligibility (admin + member)
 //   GET   /groups/:group_id/cycles                                — list all cycles
 //   GET   /groups/:group_id/cycles/:cycle_id                      — cycle detail
-//   POST  /groups/:group_id/cycles/:cycle_id/record-winner  [admin]
+//   POST  /groups/:group_id/cycles/:cycle_id/record-winner  [admin] — supports multiple calls (X Chiti)
 //   POST  /groups/:group_id/cycles/:cycle_id/declare-skip-month  [admin]
-//   PATCH /groups/:group_id/cycles/:cycle_id                [admin] — edit winner within 24h window
+//   PATCH /groups/:group_id/cycles/:cycle_id                [admin] — edit first winner within 24h window
 //   POST  /groups/:group_id/cycles/:cycle_id/close          [admin]
 
 import { Router } from 'express';
@@ -16,8 +17,9 @@ import * as cycles from '../controllers/cycles.controller';
 
 export const cyclesRouter = Router();
 
-cyclesRouter.use('/:group_id/cycles', authenticate, requireMember);
+cyclesRouter.use('/:group_id', authenticate, requireMember);
 
+cyclesRouter.get('/:group_id/chiti-eligibility',                                 cycles.getChitiEligibility);
 cyclesRouter.get('/:group_id/cycles',                                          cycles.listCycles);
 cyclesRouter.get('/:group_id/cycles/:cycle_id',                                cycles.getCycle);
 cyclesRouter.post('/:group_id/cycles/:cycle_id/record-winner',     requireAdmin, validate(recordWinnerSchema),     cycles.recordWinner);

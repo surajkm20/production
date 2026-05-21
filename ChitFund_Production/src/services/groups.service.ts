@@ -7,7 +7,7 @@
 import { randomBytes } from 'crypto';
 import { eq, and, lt, gt, desc, ilike, sum, count, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
-import { chit_groups, memberships, baskets, monthly_cycles, payments, loans, users, notifications } from '../db/schema';
+import { chit_groups, memberships, baskets, monthly_cycles, cycle_winners, payments, loans, users, notifications } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { encodeCursor, decodeCursor } from '../utils/pagination';
 import { assertActiveMember } from './memberships.service';
@@ -72,17 +72,12 @@ async function fetchGroupDetail(userId: string, group_id: string) {
     .limit(1),
 
     db.select({
-      id:               monthly_cycles.id,
-      month_number:     monthly_cycles.month_number,
-      month_label:      monthly_cycles.month_label,
-      due_date:         monthly_cycles.due_date,
-      status:           monthly_cycles.status,
-      is_skip_month:    monthly_cycles.is_skip_month,
-      winner_user_id:   monthly_cycles.winner_user_id,
-      bid_amount:       monthly_cycles.bid_amount,
-      admin_commission: monthly_cycles.admin_commission,
-      basket_credit:    monthly_cycles.basket_credit,
-      winner_takeaway:  monthly_cycles.winner_takeaway,
+      id:            monthly_cycles.id,
+      month_number:  monthly_cycles.month_number,
+      month_label:   monthly_cycles.month_label,
+      due_date:      monthly_cycles.due_date,
+      status:        monthly_cycles.status,
+      is_skip_month: monthly_cycles.is_skip_month,
     })
     .from(monthly_cycles)
     .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
@@ -102,6 +97,23 @@ async function fetchGroupDetail(userId: string, group_id: string) {
   const currentCycle = cycleRows[0]   ?? null;
   const { shares_filled, people_count } = aggRows[0];
 
+  const currentCycleWinners = currentCycle
+    ? await db.select({
+        winner_number:    cycle_winners.winner_number,
+        winner_user_id:   cycle_winners.winner_user_id,
+        winner_name:      users.name,
+        bid_amount:       cycle_winners.bid_amount,
+        admin_commission: cycle_winners.admin_commission,
+        basket_credit:    cycle_winners.basket_credit,
+        winner_takeaway:  cycle_winners.winner_takeaway,
+        is_admin_withdrawal: cycle_winners.is_admin_withdrawal,
+      })
+      .from(cycle_winners)
+      .innerJoin(users, eq(users.id, cycle_winners.winner_user_id))
+      .where(eq(cycle_winners.cycle_id, currentCycle.id))
+      .orderBy(cycle_winners.winner_number)
+    : [];
+
   return {
     group_id:                     row.id,
     name:                         row.name,
@@ -119,17 +131,13 @@ async function fetchGroupDetail(userId: string, group_id: string) {
     monthly_interest_rate: row.monthly_interest_rate,
     status:                row.status,
     current_cycle: currentCycle ? {
-      cycle_id:         currentCycle.id,
-      month_number:     currentCycle.month_number,
-      month_label:      currentCycle.month_label,
-      due_date:         currentCycle.due_date,
-      status:           currentCycle.status,
-      is_skip_month:    currentCycle.is_skip_month,
-      winner_user_id:   currentCycle.winner_user_id,
-      bid_amount:       currentCycle.bid_amount,
-      admin_commission: currentCycle.admin_commission,
-      basket_credit:    currentCycle.basket_credit,
-      winner_takeaway:  currentCycle.winner_takeaway,
+      cycle_id:      currentCycle.id,
+      month_number:  currentCycle.month_number,
+      month_label:   currentCycle.month_label,
+      due_date:      currentCycle.due_date,
+      status:        currentCycle.status,
+      is_skip_month: currentCycle.is_skip_month,
+      winners:       currentCycleWinners,
     } : null,
     basket: basket ? {
       current_balance: basket.current_balance,

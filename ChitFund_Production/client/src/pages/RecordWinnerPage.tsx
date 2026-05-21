@@ -2,17 +2,18 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise, initials } from '../lib/format'
-import type { GroupDetail, CycleItem, Member } from '../types/api'
+import type { GroupDetail, CycleItem, Member, ChitiEligibility } from '../types/api'
 
 export default function RecordWinnerPage() {
   const { groupId } = useParams<{ groupId: string }>()
   const navigate    = useNavigate()
 
-  const [group,   setGroup]   = useState<GroupDetail | null>(null)
-  const [cycles,  setCycles]  = useState<CycleItem[]>([])
-  const [members, setMembers] = useState<Member[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState<string | null>(null)
+  const [group,       setGroup]       = useState<GroupDetail | null>(null)
+  const [cycles,      setCycles]      = useState<CycleItem[]>([])
+  const [members,     setMembers]     = useState<Member[]>([])
+  const [eligibility, setEligibility] = useState<ChitiEligibility | null>(null)
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState<string | null>(null)
 
   const [winnerId,          setWinnerId]          = useState('')
   const [bidRupees,         setBidRupees]         = useState('')
@@ -25,19 +26,20 @@ export default function RecordWinnerPage() {
 
   useEffect(() => { load() }, [groupId])
 
-  // Fetch group + all cycles + members in parallel on mount
   async function load() {
     setLoading(true)
     setError(null)
     try {
-      const [g, cycleList, memberList] = await Promise.all([
+      const [g, cycleList, memberList, elig] = await Promise.all([
         api.get<GroupDetail>(`/groups/${groupId}`),
         api.get<CycleItem[]>(`/groups/${groupId}/cycles`),
         api.get<Member[]>(`/groups/${groupId}/members`),
+        api.getChitiEligibility(groupId!),
       ])
       setGroup(g)
       setCycles(cycleList)
       setMembers(memberList)
+      setEligibility(elig)
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) navigate('/login', { replace: true })
       else setError('Could not load data. Tap to retry.')
@@ -55,7 +57,7 @@ export default function RecordWinnerPage() {
     setSuccessMsg(null)
     setWarnings([])
     try {
-      const result = await api.post<{ warnings?: string[] }>(
+      const result = await api.post<{ winner_number: number; warnings?: string[] }>(
         `/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/record-winner`,
         {
           winner_user_id:      winnerId,
@@ -64,7 +66,7 @@ export default function RecordWinnerPage() {
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         },
       )
-      setSuccessMsg('Winner recorded successfully.')
+      setSuccessMsg(`Winner #${result.winner_number} recorded successfully.`)
       if (result.warnings?.length) setWarnings(result.warnings)
       setWinnerId('')
       setBidRupees('')
@@ -78,20 +80,28 @@ export default function RecordWinnerPage() {
     }
   }
 
-  const bid            = Math.round(parseFloat(bidRupees) * 100) || 0
-  const poolAmount     = group?.pool_amount ?? 0
+  const bid        = Math.round(parseFloat(bidRupees) * 100) || 0
+  const poolAmount = group?.pool_amount ?? 0
+
+  const currentCycle   = group?.current_cycle
+  const xChiti         = eligibility?.x_chiti ?? 1
+  const slotsRecorded  = currentCycle?.winners.length ?? 0
+  const slotsRemaining = Math.max(0, xChiti - slotsRecorded)
+  const canRecord      = !!currentCycle && currentCycle.status === 'Open' && slotsRemaining > 0
+
   const winnerTakeaway = bid > 0 && bid < poolAmount ? poolAmount - bid : null
 
-  const currentCycle    = group?.current_cycle
-  const canRecord       = !!currentCycle && currentCycle.status === 'Open' && !currentCycle.winner_user_id
-  const eligibleMembers = members.filter(m => m.is_eligible_to_win)
-  const pastWinners     = cycles
-    .filter(c => c.winner !== null)
+  // Members who haven't won this cycle yet
+  const alreadyWonIds  = new Set((currentCycle?.winners ?? []).map(w => w.user_id))
+  const eligibleMembers = members.filter(m => m.is_eligible_to_win && !alreadyWonIds.has(m.user_id))
+
+  const pastWinners = cycles
+    .filter(c => c.winners.length > 0)
     .sort((a, b) => b.month_number - a.month_number)
 
   // Admin withdrawal helpers
-  const selectedMember       = members.find(m => m.user_id === winnerId)
-  const selectedIsAdmin      = selectedMember?.role === 'Admin'
+  const selectedMember        = members.find(m => m.user_id === winnerId)
+  const selectedIsAdmin       = selectedMember?.role === 'Admin'
   const withdrawalAlreadyUsed = selectedMember?.admin_withdrawal_used ?? false
 
   // ── loading / error ──────────────────────────────────────────────────────────
@@ -134,11 +144,61 @@ export default function RecordWinnerPage() {
 
       <div className="flex-1 overflow-y-auto pb-8 space-y-3 pt-3 px-3">
 
+        {/* X Chiti eligibility banner */}
+        {eligibility && eligibility.x_chiti >= 2 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500 text-base leading-none mt-0.5">★</span>
+              <div>
+                <p className="text-sm font-bold text-amber-800">{group.name} is eligible for {eligibility.label}!</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  Total basket: {formatPaise(eligibility.total_basket)} · {xChiti} winners this cycle
+                </p>
+                <p className="text-[10px] text-amber-500 mt-1">
+                  Realized {formatPaise(eligibility.realized)} + Unrealized {formatPaise(eligibility.unrealized)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Already-recorded winners for this cycle */}
+        {currentCycle && currentCycle.winners.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3">
+            <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2">
+              RECORDED — {currentCycle.month_label}
+            </p>
+            <div className="space-y-2">
+              {currentCycle.winners.map(w => (
+                <div key={w.winner_number} className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-maroon-100 flex items-center justify-center text-[10px] font-bold text-maroon-700 shrink-0">
+                    {initials(w.name ?? '?')}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{w.name ?? '—'}</p>
+                    <p className="text-xs text-gray-400">
+                      {w.is_admin_withdrawal ? 'Admin withdrawal' : `Bid ${formatPaise(w.bid_amount)} · Takes ${formatPaise(w.winner_takeaway)}`}
+                    </p>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium shrink-0">
+                    #{w.winner_number}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Record form — only shown when canRecord is true */}
         {canRecord ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <p className="text-sm font-semibold text-gray-900 mb-1">
               {currentCycle!.month_label}
+              {xChiti >= 2 && (
+                <span className="ml-2 text-xs font-medium text-amber-600">
+                  Winner #{slotsRecorded + 1} of {xChiti}
+                </span>
+              )}
             </p>
             <p className="text-xs text-gray-400 mb-4">
               Pool: {formatPaise(poolAmount)} · record the highest bidder
@@ -152,7 +212,7 @@ export default function RecordWinnerPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
 
-              {/* Winner dropdown — only shows eligible members (not all members) */}
+              {/* Winner dropdown — only shows eligible members not yet won this cycle */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Winner</label>
                 <select
@@ -163,7 +223,6 @@ export default function RecordWinnerPage() {
                 >
                   <option value="">Select eligible member</option>
                   {eligibleMembers.map(m => (
-                    // Show wins vs shares so admin knows remaining eligibility
                     <option key={m.user_id} value={m.user_id}>
                       {m.name} ({m.wins_count}/{m.share_count} wins)
                     </option>
@@ -250,16 +309,19 @@ export default function RecordWinnerPage() {
                 disabled={submitting || !winnerId || (!isAdminWithdrawal && (bid <= 0 || bid >= poolAmount))}
                 className="w-full py-2.5 rounded-xl bg-maroon-600 hover:bg-maroon-700 disabled:opacity-60 text-sm font-semibold text-white transition"
               >
-                {submitting ? 'Recording…' : 'Confirm winner'}
+                {submitting ? 'Recording…' : `Confirm winner${xChiti >= 2 ? ` #${slotsRecorded + 1}` : ''}`}
               </button>
             </form>
           </div>
         ) : (
-          // Non-recordable state: winner already set, or no open cycle
+          // Non-recordable state
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-            {currentCycle?.winner_user_id ? (
+            {!currentCycle ? (
+              <p className="text-sm text-gray-400">No open cycle to record a winner for.</p>
+            ) : slotsRemaining === 0 && slotsRecorded > 0 ? (
               <p className="text-sm text-gray-500">
-                Winner already recorded for <span className="font-medium text-gray-800">{currentCycle.month_label}</span>.
+                All {xChiti >= 2 ? `${xChiti} ` : ''}winner{xChiti >= 2 ? 's' : ''} recorded for{' '}
+                <span className="font-medium text-gray-800">{currentCycle.month_label}</span>.
               </p>
             ) : (
               <p className="text-sm text-gray-400">No open cycle to record a winner for.</p>
@@ -279,48 +341,63 @@ export default function RecordWinnerPage() {
             <div className="space-y-2">
               {pastWinners.map(c => (
                 <div key={c.cycle_id} className="bg-white rounded-2xl border border-gray-100 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
-                      {initials(c.winner!.name ?? '?')}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{c.winner!.name ?? '—'}</p>
-                        {c.is_skip_month && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium shrink-0">Skip</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400">{c.month_label}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs text-gray-400">Left behind</p>
-                      <p className="text-sm font-bold text-gray-800">
-                        {c.is_skip_month ? '—' : formatPaise(c.bid_amount ?? 0)}
-                      </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-gray-500">{c.month_label}</p>
+                    <div className="flex gap-1">
+                      {c.is_skip_month && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Skip</span>
+                      )}
+                      {c.winners.length > 1 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                          {c.winners.length}× Chiti
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  {/* For regular (non-skip) months: show bid vs winner payout breakdown */}
-                  {!c.is_skip_month && c.bid_amount !== null && c.winner_takeaway !== null && (
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="bg-gray-50 rounded-lg px-3 py-2">
-                        <p className="text-[10px] text-gray-400 mb-0.5">Bid (to basket)</p>
-                        <p className="text-xs font-bold text-gray-700">{formatPaise(c.bid_amount)}</p>
-                      </div>
-                      <div className="bg-maroon-50 rounded-lg px-3 py-2">
-                        <p className="text-[10px] text-maroon-400 mb-0.5">Winner received</p>
-                        <p className="text-xs font-bold text-maroon-700">{formatPaise(c.winner_takeaway)}</p>
-                      </div>
-                    </div>
-                  )}
+                  <div className="space-y-3">
+                    {c.winners.map(w => (
+                      <div key={w.winner_number}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
+                            {initials(w.name ?? '?')}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{w.name ?? '—'}</p>
+                            {c.winners.length > 1 && (
+                              <p className="text-[10px] text-gray-400">Winner #{w.winner_number}</p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-xs text-gray-400">Left behind</p>
+                            <p className="text-sm font-bold text-gray-800">
+                              {c.is_skip_month ? '—' : formatPaise(w.bid_amount)}
+                            </p>
+                          </div>
+                        </div>
 
-                  {/* For skip months: entire basket pays out to the designated person */}
-                  {c.is_skip_month && (
-                    <div className="mt-3 bg-amber-50 rounded-lg px-3 py-2">
-                      <p className="text-[10px] text-amber-500 mb-0.5">Basket payout (skip month)</p>
-                      <p className="text-xs font-bold text-amber-700">{formatPaise(c.winner_takeaway ?? poolAmount)}</p>
-                    </div>
-                  )}
+                        {!c.is_skip_month && (
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <div className="bg-gray-50 rounded-lg px-3 py-2">
+                              <p className="text-[10px] text-gray-400 mb-0.5">Bid (to basket)</p>
+                              <p className="text-xs font-bold text-gray-700">{formatPaise(w.bid_amount)}</p>
+                            </div>
+                            <div className="bg-maroon-50 rounded-lg px-3 py-2">
+                              <p className="text-[10px] text-maroon-400 mb-0.5">Winner received</p>
+                              <p className="text-xs font-bold text-maroon-700">{formatPaise(w.winner_takeaway)}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {c.is_skip_month && (
+                          <div className="mt-2 bg-amber-50 rounded-lg px-3 py-2">
+                            <p className="text-[10px] text-amber-500 mb-0.5">Basket payout (skip month)</p>
+                            <p className="text-xs font-bold text-amber-700">{formatPaise(w.winner_takeaway)}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>

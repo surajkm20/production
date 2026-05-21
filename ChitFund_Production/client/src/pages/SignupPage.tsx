@@ -8,7 +8,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   MOBILE_TAKEN: 'This mobile number is already registered.',
   USERNAME_TAKEN: 'This username is already taken.',
   WEAK_PASSWORD: 'Password must be at least 8 characters.',
-  INVALID_MOBILE: 'Enter a valid Indian mobile number (+91XXXXXXXXXX).',
+  INVALID_MOBILE: 'Enter a valid Indian mobile number.',
 }
 
 // Shape of the backend's response on successful signup.

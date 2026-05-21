@@ -767,8 +767,32 @@ Get full cycle detail.
 
 ---
 
+### GET `/groups/:group_id/chiti-eligibility` **[admin + member]**
+Returns the group's current X Chiti eligibility based on realized + unrealized basket value.
+
+**Response 200**
+```json
+{
+  "data": {
+    "realized":    5420000,
+    "unrealized":  15000000,
+    "total_basket": 20420000,
+    "pool_amount":  10000000,
+    "x_chiti":     2,
+    "label":       "Double Chiti",
+    "eligible":    true
+  }
+}
+```
+- `realized` = `baskets.current_balance` (actual cash).
+- `unrealized` = sum of active loan principals + sum of outstanding accrued interest across all active loans in the group.
+- `x_chiti` = `floor(total_basket / pool_amount)`. Value of 0 or 1 means `eligible: false`.
+- `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `eligible: false`.
+
+---
+
 ### POST `/groups/:group_id/cycles/:cycle_id/record-winner` **[admin]**
-Record the winning bid for a regular cycle.
+Record a winning bid for a cycle. Can be called up to `x_chiti` times per cycle (once per winner slot). Each call adds one winner row to `cycle_winners`.
 
 **Request — regular member winner (or admin winning via normal bid)**
 ```json
@@ -797,6 +821,7 @@ Record the winning bid for a regular cycle.
 {
   "data": {
     "cycle_id": "uuid",
+    "winner_number": 1,
     "winner_user_id": "uuid",
     "bid_amount": 1600000,
     "admin_commission": 500000,
@@ -806,6 +831,7 @@ Record the winning bid for a regular cycle.
   }
 }
 ```
+- `winner_number` — slot number assigned (1 for first winner, 2 for second, etc.).
 - `admin_commission` = `pool_amount × group.admin_commission_rate / 100` (offline cash; based on full pool).
 - `basket_credit` = `bid_amount − admin_commission` (net credited to basket).
 
@@ -814,6 +840,7 @@ Record the winning bid for a regular cycle.
 {
   "data": {
     "cycle_id": "uuid",
+    "winner_number": 1,
     "winner_user_id": "<admin-uuid>",
     "bid_amount": 0,
     "admin_commission": 0,
@@ -827,11 +854,12 @@ Record the winning bid for a regular cycle.
 
 **Errors:**
 - `WINNER_INELIGIBLE` — member has exhausted their share allocation (`wins_count >= share_count`) OR has an active loan in this group
+- `ALREADY_WON_THIS_CYCLE` — this user already has a winner record for this cycle
+- `CHITI_SLOTS_FULL` — all X winner slots for this cycle are already filled
 - `BID_EXCEEDS_POOL` — only when `is_admin_withdrawal = false`
 - `BID_NEGATIVE_OR_ZERO` — only when `is_admin_withdrawal = false` (regular bids must be > 0)
 - `NOT_ADMIN` — `is_admin_withdrawal: true` but `winner_user_id` is not the group admin
 - `WITHDRAWAL_ALREADY_USED` — admin has already used their special share in this group
-- `CYCLE_ALREADY_RECORDED` (use PATCH to edit)
 - `CYCLE_CLOSED`
 
 ---

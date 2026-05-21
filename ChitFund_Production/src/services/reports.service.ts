@@ -5,11 +5,11 @@
 //   npm install -D @types/pdfkit
 // Then replace sendSuccess(res, data) in the controller with file streaming.
 
-import { eq, and, desc, isNotNull, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
-  chit_groups, memberships, monthly_cycles, payments,
-  baskets, basket_transactions, loans, loan_transactions, users,
+  chit_groups, memberships, monthly_cycles, cycle_winners, payments,
+  baskets, loans, loan_transactions, users,
 } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { assertActiveMember } from './memberships.service';
@@ -26,10 +26,9 @@ export async function getGroupLedger(userId: string, group_id: string) {
 
   if (!groupRow) throw new AppError(404, 'GROUP_NOT_FOUND', 'Group not found.');
 
-  const [cycles, allPayments, basketRow] = await Promise.all([
-    db.select({ id: monthly_cycles.id, month_number: monthly_cycles.month_number, month_label: monthly_cycles.month_label, due_date: monthly_cycles.due_date, status: monthly_cycles.status, is_skip_month: monthly_cycles.is_skip_month, winner_name: users.name, bid_amount: monthly_cycles.bid_amount, winner_takeaway: monthly_cycles.winner_takeaway })
+  const [cycles, allPayments, basketRow, allWinners] = await Promise.all([
+    db.select({ id: monthly_cycles.id, month_number: monthly_cycles.month_number, month_label: monthly_cycles.month_label, due_date: monthly_cycles.due_date, status: monthly_cycles.status, is_skip_month: monthly_cycles.is_skip_month })
       .from(monthly_cycles)
-      .leftJoin(users, eq(users.id, monthly_cycles.winner_user_id))
       .where(eq(monthly_cycles.group_id, group_id))
       .orderBy(monthly_cycles.month_number),
 
@@ -41,6 +40,12 @@ export async function getGroupLedger(userId: string, group_id: string) {
 
     db.select({ current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_debited: baskets.total_debited, total_lent_out: baskets.total_lent_out, total_interest_earned: baskets.total_interest_earned })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
+
+    db.select({ cycle_id: cycle_winners.cycle_id, winner_number: cycle_winners.winner_number, winner_name: users.name, bid_amount: cycle_winners.bid_amount, winner_takeaway: cycle_winners.winner_takeaway })
+      .from(cycle_winners)
+      .innerJoin(users, eq(users.id, cycle_winners.winner_user_id))
+      .where(eq(cycle_winners.group_id, group_id))
+      .orderBy(cycle_winners.winner_number),
   ]);
 
   const paymentsByCycle = new Map<string, typeof allPayments>();
@@ -50,11 +55,19 @@ export async function getGroupLedger(userId: string, group_id: string) {
     paymentsByCycle.set(p.cycle_id, arr);
   }
 
+  const winnersByCycle = new Map<string, typeof allWinners>();
+  for (const w of allWinners) {
+    const arr = winnersByCycle.get(w.cycle_id) ?? [];
+    arr.push(w);
+    winnersByCycle.set(w.cycle_id, arr);
+  }
+
   return {
     group: groupRow,
     basket: basketRow[0] ?? null,
     cycles: cycles.map(c => ({
       ...c,
+      winners: (winnersByCycle.get(c.id) ?? []).map(w => ({ ...w, bid_amount: Number(w.bid_amount), winner_takeaway: Number(w.winner_takeaway) })),
       payments: (paymentsByCycle.get(c.id) ?? []).map(p => ({ ...p, expected_amount: Number(p.expected_amount), paid_amount: Number(p.paid_amount), share_count: Number(p.share_count) })),
     })),
   };
@@ -65,21 +78,26 @@ export async function getCycleSummary(userId: string, group_id: string, cycle_id
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
-  const [cycleRow] = await db
-    .select({ id: monthly_cycles.id, month_number: monthly_cycles.month_number, month_label: monthly_cycles.month_label, due_date: monthly_cycles.due_date, status: monthly_cycles.status, is_skip_month: monthly_cycles.is_skip_month, bid_amount: monthly_cycles.bid_amount, winner_takeaway: monthly_cycles.winner_takeaway, winner_name: users.name })
-    .from(monthly_cycles)
-    .leftJoin(users, eq(users.id, monthly_cycles.winner_user_id))
-    .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
-    .limit(1);
+  const [[cycleRow], cyclePayments, cycleWinnerRows] = await Promise.all([
+    db.select({ id: monthly_cycles.id, month_number: monthly_cycles.month_number, month_label: monthly_cycles.month_label, due_date: monthly_cycles.due_date, status: monthly_cycles.status, is_skip_month: monthly_cycles.is_skip_month })
+      .from(monthly_cycles)
+      .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
+      .limit(1),
+
+    db.select({ member_name: users.name, share_count: memberships.share_count, expected_amount: payments.expected_amount, paid_amount: payments.paid_amount, status: payments.status, paid_at: payments.paid_at, notes: payments.notes })
+      .from(payments)
+      .innerJoin(users, eq(users.id, payments.member_user_id))
+      .innerJoin(memberships, and(eq(memberships.user_id, payments.member_user_id), eq(memberships.group_id, group_id)))
+      .where(eq(payments.cycle_id, cycle_id)),
+
+    db.select({ winner_number: cycle_winners.winner_number, winner_name: users.name, bid_amount: cycle_winners.bid_amount, winner_takeaway: cycle_winners.winner_takeaway, is_admin_withdrawal: cycle_winners.is_admin_withdrawal })
+      .from(cycle_winners)
+      .innerJoin(users, eq(users.id, cycle_winners.winner_user_id))
+      .where(eq(cycle_winners.cycle_id, cycle_id))
+      .orderBy(cycle_winners.winner_number),
+  ]);
 
   if (!cycleRow) throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found.');
-
-  const cyclePayments = await db
-    .select({ member_name: users.name, share_count: memberships.share_count, expected_amount: payments.expected_amount, paid_amount: payments.paid_amount, status: payments.status, paid_at: payments.paid_at, notes: payments.notes })
-    .from(payments)
-    .innerJoin(users, eq(users.id, payments.member_user_id))
-    .innerJoin(memberships, and(eq(memberships.user_id, payments.member_user_id), eq(memberships.group_id, group_id)))
-    .where(eq(payments.cycle_id, cycle_id));
 
   const total_expected  = cyclePayments.reduce((s, p) => s + Number(p.expected_amount), 0);
   const total_paid      = cyclePayments.reduce((s, p) => s + Number(p.paid_amount), 0);
@@ -87,7 +105,7 @@ export async function getCycleSummary(userId: string, group_id: string, cycle_id
   const defaulter_count = cyclePayments.filter(p => p.status === 'Unpaid').length;
 
   return {
-    cycle: cycleRow,
+    cycle: { ...cycleRow, winners: cycleWinnerRows.map(w => ({ ...w, bid_amount: Number(w.bid_amount), winner_takeaway: Number(w.winner_takeaway) })) },
     payments: cyclePayments.map(p => ({ ...p, expected_amount: Number(p.expected_amount), paid_amount: Number(p.paid_amount), share_count: Number(p.share_count) })),
     summary: { total_expected, total_paid, paid_count, defaulter_count },
   };

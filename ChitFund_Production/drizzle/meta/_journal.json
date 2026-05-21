@@ -15,6 +15,13 @@
       "when": 1779342402830,
       "tag": "0001_little_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779360691191,
+      "tag": "0002_lame_fantastic_four",
+      "breakpoints": true
     }
   ]
 }

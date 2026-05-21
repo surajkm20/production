@@ -189,6 +189,18 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - **One-time use:** the special share can only be used once per group. Tracked via `admin_withdrawal_used` on the admin's membership row. If already used, the withdrawal option is blocked with `WITHDRAWAL_ALREADY_USED`.
   - If the admin wins without selecting withdrawal (regular bid), the normal three-way split applies and the special share remains available for a later cycle.
   - Notification sent to all members: "Admin withdrew the full pool of ₹X."
+- **F-11b** **X Chiti eligibility (display).** When `total_basket ≥ 2 × pool_amount`, the group is eligible for X Chiti where `X = floor(total_basket / pool_amount)`. The group dashboard and the Record Winner screen display an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` (X=2/3/4 respectively). The banner is hidden when X < 2.
+  - `total_basket = realized + unrealized`
+  - `realized = baskets.current_balance` (actual cash in basket)
+  - `unrealized = SUM(active loan principals) + SUM(outstanding accrued interest per active loan)` — money the basket is owed but hasn't received yet
+  - Exposed via `GET /groups/:group_id/chiti-eligibility` (admin + member).
+- **F-11c** **Multiple winners per cycle (X Chiti recording).** For eligible cycles (X ≥ 2), admin can record up to X winners in the same cycle. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
+  - Each winner has their own `bid_amount`, `admin_commission`, `basket_credit`, `winner_takeaway` computed independently using the same formulas as a regular single winner.
+  - A user can win at most once per cycle (`ALREADY_WON_THIS_CYCLE` error if attempted twice).
+  - Total recorded winners per cycle is capped at `x_chiti` at the time of recording; further calls beyond that return `CHITI_SLOTS_FULL`.
+  - Each winner occupies one "winner slot" numbered sequentially (`winner_number` 1, 2, 3…).
+  - The Record Winner screen shows X separate bid-entry blocks — one per slot — when the group is eligible. Admin fills in each winner and their bid independently.
+  - Winners list on the cycle detail and history screens shows all X winners (not just one).
 - **F-12** Admin can declare a cycle a **Skip Month** (before the cycle opens or while it's open, as long as no payments have been collected). In a skip-month cycle:
   - Members are not required to pay their contribution (their payment is auto-set to `Waived`).
   - The full pool amount is debited from the basket and paid to the winner.

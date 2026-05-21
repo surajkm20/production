@@ -28,6 +28,29 @@ export interface GroupSummary {
   closed_at?: string | null
 }
 
+export interface CycleWinner {
+  winner_number: number
+  user_id: string
+  name: string | null
+  bid_amount: number
+  admin_commission: number
+  basket_credit: number
+  winner_takeaway: number
+  is_admin_withdrawal: boolean
+  notes?: string | null
+  recorded_at?: string | null
+}
+
+export interface ChitiEligibility {
+  realized: number
+  unrealized: number
+  total_basket: number
+  pool_amount: number
+  x_chiti: number
+  label: string
+  eligible: boolean
+}
+
 export interface GroupDetail {
   group_id: string
   name: string
@@ -51,11 +74,7 @@ export interface GroupDetail {
     due_date: string
     status: 'Open' | 'Closed'
     is_skip_month: boolean
-    winner_user_id: string | null
-    bid_amount: number | null
-    admin_commission: number | null
-    basket_credit: number | null
-    winner_takeaway: number | null
+    winners: CycleWinner[]
   } | null
   basket: {
     current_balance: number
@@ -226,11 +245,7 @@ export interface CycleItem {
   due_date: string
   status: 'Open' | 'Closed' | 'Pending'
   is_skip_month: boolean
-  winner: { user_id: string; name: string | null } | null
-  bid_amount: number | null
-  admin_commission: number | null
-  basket_credit: number | null
-  winner_takeaway: number | null
+  winners: CycleWinner[]
   collected_amount: number
   expected_amount: number
   paid_count: number
@@ -255,8 +270,6 @@ export interface CycleDetail extends CycleItem {
   opened_at: string
   closed_at: string | null
   is_editable: boolean
-  recorded_by: { user_id: string; name: string | null } | null
-  recorded_at: string | null
   basket_impact: {
     balance_before: number
     balance_after: number

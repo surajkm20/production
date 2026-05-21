@@ -5,10 +5,10 @@
 //   Member — restricted to their own balance sheet; read-only on ledger / trends.
 
 import { Request, Response, NextFunction } from 'express';
-import { eq, and, isNotNull, sum, count, sql } from 'drizzle-orm';
+import { eq, and, sum, count, sql } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
-  chit_groups, memberships, monthly_cycles,
+  chit_groups, memberships, monthly_cycles, cycle_winners,
   payments, baskets, basket_transactions, loans, users,
 } from '../db/schema';
 import { AppError } from '../utils/AppError';
@@ -55,14 +55,10 @@ export async function overview(req: Request, res: Response, next: NextFunction):
         ))
         .where(eq(payments.status, 'Paid')),
 
-      // total_disbursed_to_winners — sum of winner_takeaway across all cycles
-      // that have a recorded winner (skip months and regular months alike).
-      db.select({ total: sum(monthly_cycles.winner_takeaway) })
-        .from(monthly_cycles)
-        .where(and(
-          eq(monthly_cycles.group_id, group_id),
-          isNotNull(monthly_cycles.winner_user_id),
-        )),
+      // total_disbursed_to_winners — sum of winner_takeaway across all cycle_winners rows for this group.
+      db.select({ total: sum(cycle_winners.winner_takeaway) })
+        .from(cycle_winners)
+        .where(eq(cycle_winners.group_id, group_id)),
 
       // active_loans_count — loans are on the basket, not directly on the group.
       db.select({ active_loans: count(loans.id) })
@@ -84,16 +80,11 @@ export async function overview(req: Request, res: Response, next: NextFunction):
         ))
         .where(eq(payments.status, 'Unpaid')),
 
-      // total_admin_commission — sum of commission the admin collected from all
-      // auction bids. Skip months have no bid so is_skip_month=false guards against
-      // accidentally summing a 0 stored in DB for those rows.
-      db.select({ total: sum(monthly_cycles.admin_commission) })
-        .from(monthly_cycles)
-        .where(and(
-          eq(monthly_cycles.group_id,    group_id),
-          isNotNull(monthly_cycles.winner_user_id),
-          eq(monthly_cycles.is_skip_month, false),
-        )),
+      // total_admin_commission — sum of admin_commission from cycle_winners rows
+      // that are not admin-withdrawal/skip (those have commission=0 already).
+      db.select({ total: sum(cycle_winners.admin_commission) })
+        .from(cycle_winners)
+        .where(eq(cycle_winners.group_id, group_id)),
 
       // Active loan rows — needed to compute outstanding interest in app-code,
       // since interest is derived dynamically (not stored).
@@ -164,31 +155,31 @@ export async function winnersLedger(req: Request, res: Response, next: NextFunct
 
     await assertActiveMember(group_id, userId);
 
+    // Each cycle may have multiple winners (X Chiti). Return one row per cycle_winner,
+    // annotated with the cycle's month_number/label and is_skip_month flag.
     const rows = await db
       .select({
         month_number:     monthly_cycles.month_number,
         month_label:      monthly_cycles.month_label,
-        winner_name:      users.name,
-        bid_amount:       monthly_cycles.bid_amount,
-        admin_commission: monthly_cycles.admin_commission,
-        basket_credit:    monthly_cycles.basket_credit,
-        winner_takeaway:  monthly_cycles.winner_takeaway,
         is_skip_month:    monthly_cycles.is_skip_month,
+        winner_number:    cycle_winners.winner_number,
+        winner_name:      users.name,
+        bid_amount:       cycle_winners.bid_amount,
+        admin_commission: cycle_winners.admin_commission,
+        basket_credit:    cycle_winners.basket_credit,
+        winner_takeaway:  cycle_winners.winner_takeaway,
       })
-      .from(monthly_cycles)
-      .leftJoin(users, eq(users.id, monthly_cycles.winner_user_id))
-      .where(and(
-        eq(monthly_cycles.group_id, group_id),
-        isNotNull(monthly_cycles.winner_user_id),
-      ))
-      .orderBy(monthly_cycles.month_number);
+      .from(cycle_winners)
+      .innerJoin(monthly_cycles, eq(monthly_cycles.id, cycle_winners.cycle_id))
+      .innerJoin(users, eq(users.id, cycle_winners.winner_user_id))
+      .where(eq(cycle_winners.group_id, group_id))
+      .orderBy(monthly_cycles.month_number, cycle_winners.winner_number);
 
     sendSuccess(res, rows.map(r => ({
       month_number:    r.month_number,
       month_label:     r.month_label,
-      winner_name:     r.winner_name ?? null,
-      // Skip months have bid_amount=0 in DB but the business concept is "no bid";
-      // return null so charts and UIs don't render a misleading ₹0 bar.
+      winner_number:   r.winner_number,
+      winner_name:     r.winner_name,
       bid_amount:       r.is_skip_month ? null : r.bid_amount,
       admin_commission: r.is_skip_month ? null : r.admin_commission,
       basket_credit:    r.is_skip_month ? null : r.basket_credit,
@@ -254,12 +245,12 @@ export async function memberBalanceSheet(req: Request, res: Response, next: Next
             eq(payments.status,         'Paid'),
           )),
 
-        // Total received as winner — sum of winner_takeaway on cycles they won.
-        db.select({ total: sum(monthly_cycles.winner_takeaway) })
-          .from(monthly_cycles)
+        // Total received as winner — sum of winner_takeaway across all cycle_winners rows for this user.
+        db.select({ total: sum(cycle_winners.winner_takeaway) })
+          .from(cycle_winners)
           .where(and(
-            eq(monthly_cycles.group_id,     group_id),
-            eq(monthly_cycles.winner_user_id, target_user_id),
+            eq(cycle_winners.group_id,      group_id),
+            eq(cycle_winners.winner_user_id, target_user_id),
           )),
 
         // Active loans outstanding — principal not yet repaid.
@@ -330,22 +321,25 @@ export async function bidTrend(req: Request, res: Response, next: NextFunction):
 
     await assertActiveMember(group_id, userId);
 
-    const rows = await db
-      .select({
-        month_number:  monthly_cycles.month_number,
-        bid_amount:    monthly_cycles.bid_amount,
-        is_skip_month: monthly_cycles.is_skip_month,
-      })
-      .from(monthly_cycles)
-      .where(eq(monthly_cycles.group_id, group_id))
-      .orderBy(monthly_cycles.month_number);
+    // For X Chiti cycles with multiple winners, sum their bid_amounts per cycle.
+    const [cycleRows, winnerAggs] = await Promise.all([
+      db.select({ month_number: monthly_cycles.month_number, is_skip_month: monthly_cycles.is_skip_month, id: monthly_cycles.id })
+        .from(monthly_cycles)
+        .where(eq(monthly_cycles.group_id, group_id))
+        .orderBy(monthly_cycles.month_number),
 
-    sendSuccess(res, rows.map(r => ({
+      db.select({ cycle_id: cycle_winners.cycle_id, total_bid: sum(cycle_winners.bid_amount) })
+        .from(cycle_winners)
+        .where(eq(cycle_winners.group_id, group_id))
+        .groupBy(cycle_winners.cycle_id),
+    ]);
+
+    const bidMap = new Map(winnerAggs.map(r => [r.cycle_id, Number(r.total_bid ?? 0)]));
+
+    sendSuccess(res, cycleRows.map(r => ({
       month_number:  r.month_number,
       is_skip_month: r.is_skip_month,
-      // Skip months: bid_amount was set to 0 in DB (satisfies NOT NULL) but the
-      // business meaning is "no bid occurred" — return null for chart correctness.
-      bid_amount: r.is_skip_month ? null : (r.bid_amount ?? null),
+      bid_amount: r.is_skip_month ? null : (bidMap.get(r.id) ?? null),
     })));
   } catch (err) {
     next(err);

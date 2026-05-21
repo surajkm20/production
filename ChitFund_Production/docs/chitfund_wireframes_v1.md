@@ -256,31 +256,26 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
 
 **Layout, top to bottom:**
 1. **Header bar** — back, "Record month outcome", cycle label (e.g., "Apr 2026") on right.
-2. **Outcome toggle** — two cards side-by-side: "Regular month" (default selected) vs "Skip month". Selecting "Skip month" reshapes the form below.
-3. **Winner picker** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count`. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins (e.g., "Priya S — 2 of 3 wins remaining"). The admin's own name appears with a "(you)" suffix.
-4. **(When admin selects themselves) Admin withdrawal toggle** — a toggle or checkbox labeled "Use special share (admin withdrawal)". When ON: bid input is hidden and the withdrawal math preview is shown. When OFF: bid input is shown and the normal math preview applies. If the admin has already used their special share (`admin_withdrawal_used = true`), the toggle is permanently disabled with a note: "Special share already used".
-5. **(Regular month — withdrawal toggle OFF, or any non-admin winner) Winning bid amount** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
-6. **Math preview panel** (purple-tinted, live-updates as admin types):
+2. **(When eligible) X Chiti eligibility banner** — amber/gold card shown at the top when `x_chiti ≥ 2`. Example: `"SunRise group is eligible for Double Chiti"`. Sub-text: `"Total basket ₹2,04,200 · Pool ₹1,00,000 · 2 winners this cycle"`. Hidden when `x_chiti < 2`.
+3. **Outcome toggle** — two cards side-by-side: "Regular month" (default selected) vs "Skip month". Selecting "Skip month" reshapes the form below.
+4. **(Regular month — X Chiti eligible) Winner slots** — when `x_chiti ≥ 2`, the form shows X numbered bid-entry blocks stacked vertically, e.g. "Winner 1", "Winner 2". Each block has its own winner picker + bid amount input + math preview. Admin can fill them in any order. Blocks not yet filled show dimmed placeholder text. When `x_chiti = 1`, only a single block (no numbering) is shown — the original UX.
+5. **Winner picker (per block)** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count` AND not already picked in another block this cycle. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins. The admin's own name appears with a "(you)" suffix.
+6. **(When admin selects themselves) Admin withdrawal toggle (per block)** — a toggle labeled "Use special share (admin withdrawal)". When ON: bid input is hidden and the withdrawal math preview is shown. Disabled with a note if already used.
+7. **(Regular month — withdrawal OFF) Winning bid amount (per block)** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
+8. **Math preview panel (per block)** (purple-tinted, live-updates as admin types):
    - **Regular member winner OR admin winning via normal bid:**
      - Pool amount: ₹1,00,000.
      - Winning bid (sacrifice): ₹16,000 (from input).
      - Admin commission (5% of pool): ₹5,000 — "Admin keeps this in cash".
      - Goes to basket: ₹11,000 (bid − commission).
      - Suresh takes home: ₹84,000 (pool − bid).
-     - Basket after this month: ₹38,000 → ₹49,000.
-     - All three split lines always shown even when `admin_commission_rate = 0` (shows ₹0) so members can verify the math.
-   - **Admin withdrawal (toggle ON):** Replace the regular preview with a distinct panel:
-     - "Admin withdrawal — full pool (special share)"
-     - Admin takes home: ₹1,00,000 (100% of pool).
-     - Commission: ₹0 · Basket: ₹0 (nothing goes to basket).
-     - Basket after this month: ₹38,000 → ₹38,000 (unchanged).
-6. **(Skip month only) Skip-month math preview** — different content:
-   - "Basket has ₹38,000. Need ₹1,00,000."
-   - If insufficient: red banner blocking save.
-   - If sufficient: shows "Pool ₹1,00,000 debited from basket".
-7. **Notes field** — optional. Placeholder: "e.g. bid happened on Apr 26, 7 PM. Ramesh bid ₹14,000 (runner-up)".
-8. **Warning banner** — "Saving will mark Suresh as having won and notify all members. You can edit within 24 hours."
-9. **Action bar** — Cancel / Save winner (filled primary).
+     - Basket after this winner: shows running basket balance after each block.
+     - All three split lines always shown even when `admin_commission_rate = 0`.
+   - **Admin withdrawal (toggle ON):** "Admin withdrawal — full pool (special share)". Admin takes ₹1,00,000. Commission: ₹0 · Basket: ₹0.
+9. **(Skip month only) Skip-month math preview** — "Basket has ₹38,000. Need ₹1,00,000." Red banner if insufficient; "Pool ₹1,00,000 debited from basket" if sufficient.
+10. **Notes field** — optional, per block. Placeholder: "e.g. bid happened on Apr 26, 7 PM. Runner-up: Ramesh ₹14,000".
+11. **Warning banner** — "Saving will mark [winners] as having won and notify all members."
+12. **Action bar** — Cancel / Save winner(s) (filled primary). The Save button is disabled until at least one block is fully filled (winner + bid).
 
 **Data needed:**
 ```
@@ -288,24 +283,28 @@ For the cycle being recorded:
 - cycle_id, month_label, pool_amount
 
 Eligible winners list:
-- For each membership in this group: { user_id, name, share_count, wins_count, is_eligible, role, admin_withdrawal_used }
+- For each membership: { user_id, name, share_count, wins_count, is_eligible, role, admin_withdrawal_used }
+
+X Chiti eligibility:
+- GET /groups/:group_id/chiti-eligibility → { x_chiti, label, eligible, total_basket, realized, unrealized }
 
 Basket state:
-- current_balance (needed to gate skip-month)
+- current_balance (for skip-month gating and running basket preview)
 ```
 
 **Actions:**
 - Toggle between Regular / Skip month → reshapes form.
-- Type bid amount → math preview updates client-side.
-- Save (Regular bid, any winner including admin without toggle) → `POST .../record-winner` with `{winner_user_id, bid_amount, notes}`.
-- Save (Admin withdrawal, toggle ON) → same endpoint with `{winner_user_id: <admin-id>, bid_amount: 0, is_admin_withdrawal: true, notes}`. Server validates admin identity and one-time use.
-- Save (Skip) → `POST /groups/:group_id/cycles/:cycle_id/declare-skip-month` with `{winner_user_id, notes}`. App validates basket sufficient.
-- After save → redirect to admin dashboard.
+- Type bid amount in any block → math preview for that block updates client-side. Running basket balance updates across all blocks.
+- Save (Regular bid, any winner including admin without toggle) → `POST .../record-winner` once per filled block, sequentially.
+- Save (Admin withdrawal, toggle ON) → same endpoint with `{winner_user_id: <admin-id>, bid_amount: 0, is_admin_withdrawal: true, notes}`.
+- Save (Skip) → `POST /groups/:group_id/cycles/:cycle_id/declare-skip-month` with `{winner_user_id, notes}`.
+- After all saves → redirect to admin dashboard.
 
 **API endpoints used:**
+- `GET /groups/:group_id/chiti-eligibility` — X Chiti banner + slot count.
 - `GET /groups/:group_id/members?eligible_to_win=true` — winner picker options.
 - `GET /groups/:group_id/basket` — for skip-month gating.
-- `POST .../record-winner` or `POST .../declare-skip-month`.
+- `POST .../record-winner` (called once per winner slot) or `POST .../declare-skip-month`.
 
 ---
 

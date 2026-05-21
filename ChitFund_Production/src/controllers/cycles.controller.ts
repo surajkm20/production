@@ -6,6 +6,14 @@ import { Request, Response, NextFunction } from 'express';
 import { sendSuccess } from '../utils/response';
 import * as CyclesService from '../services/cycles.service';
 
+export async function getChitiEligibility(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const group_id = req.params.group_id as string;
+    const result = await CyclesService.getChitiEligibility(req.user!.userId, group_id);
+    sendSuccess(res, result);
+  } catch (err) { next(err); }
+}
+
 export async function listCycles(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const group_id = req.params.group_id as string;
