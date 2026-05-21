@@ -198,7 +198,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - Exposed via `GET /groups/:group_id/chiti-eligibility` (admin + member).
 - **F-11c** **Multiple winners per cycle (X Chiti recording).** For eligible cycles (X ≥ 2), admin can record up to X winners in the same cycle. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
   - Each winner has their own `bid_amount`, `admin_commission`, `basket_credit`, `winner_takeaway` computed independently using the same formulas as a regular single winner.
-  - A user can win at most once per cycle (`ALREADY_WON_THIS_CYCLE` error if attempted twice).
+  - A member with multiple shares may win more than one slot within the same cycle, consuming one share per slot. They are excluded once `wins_count >= share_count` (`WINNER_INELIGIBLE` error).
   - Total recorded winners per cycle is capped at `x_chiti` at the time of recording; further calls beyond that return `CHITI_SLOTS_FULL`.
   - Each winner occupies one "winner slot" numbered sequentially (`winner_number` 1, 2, 3…).
   - The Record Winner screen shows X separate bid-entry blocks — one per slot — when the group is eligible. Admin fills in each winner and their bid independently.

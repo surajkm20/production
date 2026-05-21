@@ -123,7 +123,7 @@ A cycle mode where more than one winner is recorded in the same month, enabled w
   - `x_chiti = 3` → Triple Chiti (basket >= 2 × pool_amount), and so on.
 - `total_basket = realized (basket balance) + unrealized (active loan principals + outstanding accrued interest)`.
 - The X Chiti eligibility banner is shown on the Record Winner screen only when `x_chiti ≥ 2`.
-- Each winner is recorded as a separate `cycle_winners` row with their own bid, commission, basket credit, and takeaway. A member can win at most once per cycle regardless of their share count.
+- Each winner is recorded as a separate `cycle_winners` row with their own bid, commission, basket credit, and takeaway. A member with multiple shares can win more than one slot within the same cycle, as long as they have remaining share allocations (`wins_count < share_count`).
 
 ### Eligible Winner
 A member who can be selected as winner for the current cycle. Must satisfy:

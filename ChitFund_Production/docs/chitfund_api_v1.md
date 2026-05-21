@@ -855,7 +855,6 @@ Record a winning bid for a cycle. Can be called up to `x_chiti` times per cycle 
 
 **Errors:**
 - `WINNER_INELIGIBLE` — member has exhausted their share allocation (`wins_count >= share_count`) OR has an active loan in this group
-- `ALREADY_WON_THIS_CYCLE` — this user already has a winner record for this cycle
 - `CHITI_SLOTS_FULL` — all X winner slots for this cycle are already filled
 - `BID_EXCEEDS_POOL` — only when `is_admin_withdrawal = false`
 - `BID_NEGATIVE_OR_ZERO` — only when `is_admin_withdrawal = false` (regular bids must be > 0)

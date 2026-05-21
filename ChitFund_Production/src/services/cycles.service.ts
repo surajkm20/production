@@ -359,10 +359,6 @@ export async function recordWinner(
   if (!cycle)                    throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
   if (cycle.status === 'Closed') throw new AppError(409, 'CYCLE_CLOSED',    'Cycle is already closed.');
 
-  // Check duplicate winner
-  const alreadyWon = existingWinnersRows.some(w => w.winner_user_id === winner_user_id);
-  if (alreadyWon) throw new AppError(409, 'ALREADY_WON_THIS_CYCLE', 'This member has already won a slot in this cycle.');
-
   // Compute X Chiti cap
   const realized   = Number(basket.current_balance);
   const pool       = Number(group.pool_amount);

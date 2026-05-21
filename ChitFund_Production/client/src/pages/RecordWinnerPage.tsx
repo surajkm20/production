@@ -91,9 +91,8 @@ export default function RecordWinnerPage() {
 
   const winnerTakeaway = bid > 0 && bid < poolAmount ? poolAmount - bid : null
 
-  // Members who haven't won this cycle yet
-  const alreadyWonIds  = new Set((currentCycle?.winners ?? []).map(w => w.user_id))
-  const eligibleMembers = members.filter(m => m.is_eligible_to_win && !alreadyWonIds.has(m.user_id))
+  // Members eligible to win: wins_count < share_count (backend tracks this via is_eligible_to_win)
+  const eligibleMembers = members.filter(m => m.is_eligible_to_win)
 
   const pastWinners = cycles
     .filter(c => (c.winners?.length ?? 0) > 0)
@@ -212,7 +211,7 @@ export default function RecordWinnerPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
 
-              {/* Winner dropdown — only shows eligible members not yet won this cycle */}
+              {/* Winner dropdown — shows all eligible members (wins_count < share_count) */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Winner</label>
                 <select
