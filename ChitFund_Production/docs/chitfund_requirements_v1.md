@@ -167,7 +167,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - Once cycle 1 has started the group is locked — join requests via invitation code are blocked. Admin can still add members directly (F-2) with the force-add confirmation flow.
 - **F-3** Admin can remove a member (only allowed before the cycle starts, OR with a special "force remove" flag that's logged). Removing mid-cycle needs a confirmation flow.
 - **F-4** Admin can edit group name and non-financial settings. Financial settings (amount, member count) are locked once cycle 1 starts.
-- **F-5** Admin can close the group when all cycles are complete.
+- **F-5** Admin can close the group when all cycles are complete (no open cycles, no outstanding loans). **Auto-close:** when closing a cycle causes every active member's `wins_count` to equal their `share_count` (all shares exhausted) AND no active loans remain, the group is automatically closed as part of the same `POST .../close` call — no separate group-close action is needed. If loans are still outstanding when all shares are exhausted, the admin must repay them and then close the group manually.
 
 ### 5.2 Payment tracking (Admin)
 - **F-6** For each open monthly cycle, admin sees a list of all members with a Paid / Unpaid toggle.
@@ -189,10 +189,11 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - **One-time use:** the special share can only be used once per group. Tracked via `admin_withdrawal_used` on the admin's membership row. If already used, the withdrawal option is blocked with `WITHDRAWAL_ALREADY_USED`.
   - If the admin wins without selecting withdrawal (regular bid), the normal three-way split applies and the special share remains available for a later cycle.
   - Notification sent to all members: "Admin withdrew the full pool of ₹X."
-- **F-11b** **X Chiti eligibility (display).** When `total_basket ≥ 2 × pool_amount`, the group is eligible for X Chiti where `X = floor(total_basket / pool_amount)`. The group dashboard and the Record Winner screen display an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` (X=2/3/4 respectively). The banner is hidden when X < 2.
+- **F-11b** **X Chiti eligibility (display).** `X = max(1, floor(total_basket / pool_amount))`. When X ≥ 2, the group is eligible for X Chiti. The Record Winner screen displays an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` (X=2/3/4 respectively). The banner is hidden when X < 2 (i.e., normal single-winner cycle).
   - `total_basket = realized + unrealized`
   - `realized = baskets.current_balance` (actual cash in basket)
   - `unrealized = SUM(active loan principals) + SUM(outstanding accrued interest per active loan)` — money the basket is owed but hasn't received yet
+  - `x_chiti` is always ≥ 1; a value of 1 means a regular single-winner cycle.
   - Exposed via `GET /groups/:group_id/chiti-eligibility` (admin + member).
 - **F-11c** **Multiple winners per cycle (X Chiti recording).** For eligible cycles (X ≥ 2), admin can record up to X winners in the same cycle. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
   - Each winner has their own `bid_amount`, `admin_commission`, `basket_credit`, `winner_takeaway` computed independently using the same formulas as a regular single winner.

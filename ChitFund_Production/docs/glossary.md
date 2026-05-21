@@ -112,6 +112,19 @@ How many shares a member holds in the group. Affects how much they pay per cycle
 ### Wins Count (`wins_count`)
 How many times a member has won so far. A member is ineligible to win again once `wins_count >= share_count`.
 
+When every active member's `wins_count` reaches their `share_count`, all shares are exhausted. Closing the cycle at that point triggers an **automatic group closure** (provided no active loans remain).
+
+### X Chiti
+A cycle mode where more than one winner is recorded in the same month, enabled when the basket has grown large enough to fund multiple payouts.
+
+- `x_chiti = max(1, floor(total_basket / pool_amount))`. Always ≥ 1.
+  - `x_chiti = 1` → normal single-winner cycle.
+  - `x_chiti = 2` → Double Chiti (two winners this cycle).
+  - `x_chiti = 3` → Triple Chiti, and so on.
+- `total_basket = realized (basket balance) + unrealized (active loan principals + outstanding accrued interest)`.
+- The X Chiti eligibility banner is shown on the Record Winner screen only when `x_chiti ≥ 2`.
+- Each winner is recorded as a separate `cycle_winners` row with their own bid, commission, basket credit, and takeaway. A member can win at most once per cycle regardless of their share count.
+
 ### Eligible Winner
 A member who can be selected as winner for the current cycle. Must satisfy:
 1. `wins_count < share_count` (has at least one un-won share remaining), **AND**
@@ -161,6 +174,8 @@ When the chit closes, the remaining basket balance is distributed to all members
 member_share = (basket_balance × member.share_count) / total_shares
 ```
 Recorded as `CLOSURE_SPLIT` ledger entries.
+
+Group closure happens either manually (admin calls close-group) or **automatically** when closing a cycle exhausts all member shares and no active loans remain.
 
 ---
 

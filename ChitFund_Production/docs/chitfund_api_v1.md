@@ -786,8 +786,9 @@ Returns the group's current X Chiti eligibility based on realized + unrealized b
 ```
 - `realized` = `baskets.current_balance` (actual cash).
 - `unrealized` = sum of active loan principals + sum of outstanding accrued interest across all active loans in the group.
-- `x_chiti` = `floor(total_basket / pool_amount)`. Value of 0 or 1 means `eligible: false`.
-- `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `eligible: false`.
+- `x_chiti` = `max(1, floor(total_basket / pool_amount))`. Always ≥ 1. Value of 1 means normal single-winner cycle; 2+ means X Chiti eligible.
+- `eligible` = `x_chiti >= 1`. Always `true` for an active group with a basket.
+- `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `x_chiti < 2`.
 
 ---
 
@@ -912,11 +913,23 @@ Edit a previously-recorded winner. Allowed within 24h of recording.
 ---
 
 ### POST `/groups/:group_id/cycles/:cycle_id/close` **[admin]**
-Manually close a cycle (auto-closes when all payments settled, but admin can force-close).
+Close a cycle. Requires all payments settled (no `Unpaid` rows) and at least one winner recorded (skipped for skip-month cycles).
 
-**Response 200** — cycle with status `Closed`.
+**Response 200**
+```json
+{
+  "data": {
+    "cycle_id":     "uuid",
+    "status":       "Closed",
+    "closed_at":    "2026-05-01T10:00:00Z",
+    "group_closed": false
+  }
+}
+```
+- `group_closed` — `true` when closing this cycle exhausted all member shares (every active member's `wins_count` reached `share_count`) **and** no active loans remain. When `true` the group's `status` is also set to `Closed` in the same operation. Clients should treat this as a terminal state and navigate away from the group dashboard.
+- If active loans are still outstanding when all shares are exhausted, `group_closed` is `false`; the admin must repay loans and then call `POST /groups/:group_id/close` manually.
 
-**Errors:** `PAYMENTS_OUTSTANDING`.
+**Errors:** `PAYMENTS_OUTSTANDING`, `WINNER_NOT_RECORDED`.
 
 ---
 
