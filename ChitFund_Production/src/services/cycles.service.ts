@@ -76,7 +76,7 @@ export async function getChitiEligibility(userId: string, group_id: string) {
   }, 0);
 
   const total_basket = realized + unrealized;
-  const x_chiti     = Math.floor(total_basket / pool);
+  const x_chiti     = Math.max(1, Math.floor(total_basket / pool));
   const eligible     = x_chiti >= 2;
 
   return {
