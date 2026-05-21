@@ -145,6 +145,7 @@ The current net cash available in the basket. Increases with bid credits and loa
 |---|---|---|
 | `CREDIT_DISCOUNT` | Credit | Regular cycle closes — `basket_credit` added |
 | `DEBIT_SKIP_MONTH` | Debit | Basket funds the winner of a skip-month cycle |
+| `DEBIT_X_CHITI` | Debit | Basket funds the pool payout for winner slot 2+ in an X Chiti cycle |
 | `LOAN_DISBURSED` | Debit | Admin gives a loan to a member |
 | `LOAN_REPAID` | Credit | Borrower repays principal |
 | `INTEREST_ACCRUED` | Credit | Monthly interest earned on an active loan |

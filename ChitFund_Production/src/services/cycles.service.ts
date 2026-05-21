@@ -414,7 +414,8 @@ export async function recordWinner(
     admin_commission     = Math.round(pool * commission_rate / 100);
     basket_credit        = bid_amount - admin_commission;
     winner_takeaway      = pool - bid_amount;
-    basket_balance_after = realized + basket_credit;
+    // For slot > 1 the basket funds the payout, so deduct pool_amount and then credit back basket_credit
+    basket_balance_after = realized + basket_credit - (nextSlot > 1 ? pool : 0);
   }
 
   await db.transaction(async (tx) => {
@@ -436,6 +437,19 @@ export async function recordWinner(
       await tx.update(baskets)
         .set({ current_balance: basket_balance_after })
         .where(eq(baskets.id, basket.id));
+
+      if (nextSlot > 1) {
+        await tx.insert(basket_transactions).values({
+          basket_id:            basket.id,
+          cycle_id,
+          txn_type:             'DEBIT_X_CHITI',
+          amount:               pool,
+          direction:            'D',
+          counterparty_user_id: winner_user_id,
+          notes:                `X Chiti payout — winner ${nextSlot}`,
+          created_by:           userId,
+        });
+      }
 
       await tx.insert(basket_transactions).values({
         basket_id:            basket.id,

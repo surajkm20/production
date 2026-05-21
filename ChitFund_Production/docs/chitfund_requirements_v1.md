@@ -134,6 +134,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **Transaction types:**
   - `CREDIT_DISCOUNT` — basket credit from a regular cycle (= bid_amount − admin_commission). Admin commission is computed on pool_amount and collected offline — it never enters the basket.
   - `DEBIT_SKIP_MONTH` — basket pays the winner of a skip-month cycle.
+  - `DEBIT_X_CHITI` — basket funds the pool payout for winner slot 2+ in an X Chiti cycle (debit of `pool_amount`; followed by a `CREDIT_DISCOUNT` for that winner's `basket_credit`).
   - `LOAN_DISBURSED` — loan given out to a member (debit).
   - `LOAN_REPAID` — principal repayment from a borrower (credit).
   - `INTEREST_ACCRUED` — monthly interest earned on an active loan (credit).
