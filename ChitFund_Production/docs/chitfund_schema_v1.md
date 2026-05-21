@@ -1,6 +1,6 @@
 # ChitFund App — Database Schema (v1)
 
-**Status:** Draft v11 (admin withdrawal added — when admin wins: all bid fields stored as 0, no basket transaction; chk_bid_consistency still satisfied with zeros)
+**Status:** Draft v12 (admin withdrawal refined — admin_withdrawal_used boolean on memberships tracks one-time special share use; explicit flag at record time)
 **Database:** PostgreSQL 14+
 **Last updated:** 2026-05-20
 
@@ -185,8 +185,9 @@ CREATE TABLE memberships (
     group_id        UUID NOT NULL REFERENCES chit_groups(id),
     user_id         UUID NOT NULL REFERENCES users(id),
     role            VARCHAR(20) NOT NULL,               -- 'Admin' | 'Member'
-    share_count     SMALLINT NOT NULL DEFAULT 1,        -- how many shares this person holds in the group
-    wins_count      SMALLINT NOT NULL DEFAULT 0,        -- how many times this person has won so far
+    share_count              SMALLINT NOT NULL DEFAULT 1,     -- how many shares this person holds in the group
+    wins_count               SMALLINT NOT NULL DEFAULT 0,     -- how many times this person has won so far
+    admin_withdrawal_used    BOOLEAN NOT NULL DEFAULT FALSE,  -- true once admin uses their special share (one-time per group)
     joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     status          VARCHAR(20) NOT NULL DEFAULT 'Active', -- 'Active' | 'Inactive'
     deactivated_at  TIMESTAMPTZ,
@@ -211,6 +212,7 @@ CREATE UNIQUE INDEX idx_one_admin_per_group
 **Notes:**
 - `share_count` lets one person hold multiple shares in the same group. They pay `monthly_contribution × share_count` per month and are eligible to win up to `share_count` times.
 - `wins_count` tracks how many of their shares have already won. Eligibility to win requires both `wins_count < share_count` AND no active loan for this member in this group (enforced in app code at `recordWinner` / `declareSkipMonth`).
+- `admin_withdrawal_used` — boolean, default `false`. Set to `true` when the admin uses their **special share** (admin withdrawal). The admin has exactly one special share counted within their `share_count`. When `is_admin_withdrawal=true` is sent to `record-winner`, this is checked and then flipped. Always `false` for non-admin members.
 - The unique constraint on `(group_id, user_id)` means the same person is one row in this table even if they hold multiple shares — they're not duplicated.
 - Sum of `share_count` across all Active memberships in a group should equal the group's `total_shares`. Enforced in app code (since memberships are added incrementally).
 

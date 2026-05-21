@@ -1,6 +1,6 @@
 # ChitFund App — UI Wireframes (v1)
 
-**Status:** Draft v11 (admin withdrawal added — Screen 5 hides bid input when admin selected as winner; Screen 11 shows distinct admin outcome card)
+**Status:** Draft v12 (admin withdrawal refined — Screen 5 shows toggle for withdrawal vs regular bid when admin is selected; one-time-use guard shown; Screen 11 distinct outcome card)
 **Scope:** 11 screens that anchor the API design
 **Last updated:** 2026-05-20
 
@@ -258,9 +258,10 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
 1. **Header bar** — back, "Record month outcome", cycle label (e.g., "Apr 2026") on right.
 2. **Outcome toggle** — two cards side-by-side: "Regular month" (default selected) vs "Skip month". Selecting "Skip month" reshapes the form below.
 3. **Winner picker** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count`. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins (e.g., "Priya S — 2 of 3 wins remaining"). The admin's own name appears with a "(you)" suffix.
-4. **(Regular month only, non-admin winner) Winning bid amount** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won." **Hidden when the admin selects themselves as winner** (admin withdrawal path — no bid is entered).
-5. **Math preview panel** (purple-tinted, live-updates as admin types):
-   - **Regular member winner:**
+4. **(When admin selects themselves) Admin withdrawal toggle** — a toggle or checkbox labeled "Use special share (admin withdrawal)". When ON: bid input is hidden and the withdrawal math preview is shown. When OFF: bid input is shown and the normal math preview applies. If the admin has already used their special share (`admin_withdrawal_used = true`), the toggle is permanently disabled with a note: "Special share already used".
+5. **(Regular month — withdrawal toggle OFF, or any non-admin winner) Winning bid amount** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
+6. **Math preview panel** (purple-tinted, live-updates as admin types):
+   - **Regular member winner OR admin winning via normal bid:**
      - Pool amount: ₹1,00,000.
      - Winning bid (sacrifice): ₹16,000 (from input).
      - Admin commission (5% of pool): ₹5,000 — "Admin keeps this in cash".
@@ -268,8 +269,8 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
      - Suresh takes home: ₹84,000 (pool − bid).
      - Basket after this month: ₹38,000 → ₹49,000.
      - All three split lines always shown even when `admin_commission_rate = 0` (shows ₹0) so members can verify the math.
-   - **Admin withdrawal (admin selects themselves):** Replace the regular preview with a distinct panel:
-     - "Admin withdrawal — full pool"
+   - **Admin withdrawal (toggle ON):** Replace the regular preview with a distinct panel:
+     - "Admin withdrawal — full pool (special share)"
      - Admin takes home: ₹1,00,000 (100% of pool).
      - Commission: ₹0 · Basket: ₹0 (nothing goes to basket).
      - Basket after this month: ₹38,000 → ₹38,000 (unchanged).
@@ -287,7 +288,7 @@ For the cycle being recorded:
 - cycle_id, month_label, pool_amount
 
 Eligible winners list:
-- For each membership in this group: { user_id, name, share_count, wins_count, is_eligible }
+- For each membership in this group: { user_id, name, share_count, wins_count, is_eligible, role, admin_withdrawal_used }
 
 Basket state:
 - current_balance (needed to gate skip-month)
@@ -296,8 +297,8 @@ Basket state:
 **Actions:**
 - Toggle between Regular / Skip month → reshapes form.
 - Type bid amount → math preview updates client-side.
-- Save (Regular, non-admin winner) → `POST /groups/:group_id/cycles/:cycle_id/record-winner` with `{winner_user_id, bid_amount, notes}`.
-- Save (Admin withdrawal) → same endpoint with `{winner_user_id: <admin-id>, bid_amount: 0, notes}`. Server auto-detects admin winner and applies withdrawal logic.
+- Save (Regular bid, any winner including admin without toggle) → `POST .../record-winner` with `{winner_user_id, bid_amount, notes}`.
+- Save (Admin withdrawal, toggle ON) → same endpoint with `{winner_user_id: <admin-id>, bid_amount: 0, is_admin_withdrawal: true, notes}`. Server validates admin identity and one-time use.
 - Save (Skip) → `POST /groups/:group_id/cycles/:cycle_id/declare-skip-month` with `{winner_user_id, notes}`. App validates basket sufficient.
 - After save → redirect to admin dashboard.
 

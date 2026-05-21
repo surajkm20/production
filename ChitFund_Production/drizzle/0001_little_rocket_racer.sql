@@ -1,0 +1,1 @@
+ALTER TABLE "memberships" ADD COLUMN "admin_withdrawal_used" boolean DEFAULT false NOT NULL;

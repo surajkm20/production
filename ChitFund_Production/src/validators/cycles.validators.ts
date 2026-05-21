@@ -8,9 +8,10 @@ import { z } from 'zod';
 // business-rule checks (> 0, ≤ pool_amount) that depend on DB state, so those
 // stay in the service and are not duplicated here.
 export const recordWinnerSchema = z.object({
-  winner_user_id: z.string().uuid(),
-  bid_amount:     z.number().int().min(0),
-  notes:          z.string().optional(),
+  winner_user_id:       z.string().uuid(),
+  bid_amount:           z.number().int().min(0),
+  is_admin_withdrawal:  z.boolean().optional().default(false),
+  notes:                z.string().optional(),
 });
 
 // ─── POST /cycles/:cycle_id/declare-skip-month ────────────────────────────────

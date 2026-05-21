@@ -1,6 +1,6 @@
 # ChitFund Management App — Requirements (v1)
 
-**Status:** Draft v12 (admin withdrawal added — when admin wins, bid=0, commission=0, basket_credit=0, winner_takeaway=full pool; no basket transaction)
+**Status:** Draft v13 (admin withdrawal refined — explicit opt-in flag at record time; one-time use per group tracked via admin_withdrawal_used; admin can still win via regular bid)
 **Owner:** Suraj
 **Last updated:** 2026-05-20
 
@@ -182,11 +182,12 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - **Basket credit** = bid_amount − admin_commission (net amount credited to basket after admin's cut).
   - **Winner takeaway** = pool_amount − bid_amount (what the winner actually receives).
   Admin confirms and the basket_credit is recorded as a `CREDIT_DISCOUNT` ledger entry.
-- **F-11a** **Admin withdrawal.** When the admin selects themselves as the winner:
-  - The bid amount input is hidden — no bid is required.
-  - The admin receives **100% of the pool** (`winner_takeaway = pool_amount`). No sacrifice, no commission, nothing to basket.
-  - `bid_amount`, `admin_commission`, and `basket_credit` are all stored as 0 in the DB (satisfies `chk_bid_consistency`; no basket transaction is created).
-  - Auto-detected server-side: when `winner_user_id` equals the admin's `user_id`, the backend activates this special path without any extra flag in the request.
+- **F-11a** **Admin withdrawal (special share).** The admin holds ONE special share within their regular `share_count`. When the admin selects themselves as winner AND explicitly opts into the withdrawal:
+  - The admin toggles "Admin withdrawal" at record time — the bid amount input is hidden.
+  - The admin receives **100% of the pool** (`winner_takeaway = pool_amount`). No bid sacrifice, no commission, nothing to basket.
+  - `bid_amount`, `admin_commission`, and `basket_credit` are stored as 0; no basket transaction is created.
+  - **One-time use:** the special share can only be used once per group. Tracked via `admin_withdrawal_used` on the admin's membership row. If already used, the withdrawal option is blocked with `WITHDRAWAL_ALREADY_USED`.
+  - If the admin wins without selecting withdrawal (regular bid), the normal three-way split applies and the special share remains available for a later cycle.
   - Notification sent to all members: "Admin withdrew the full pool of ₹X."
 - **F-12** Admin can declare a cycle a **Skip Month** (before the cycle opens or while it's open, as long as no payments have been collected). In a skip-month cycle:
   - Members are not required to pay their contribution (their payment is auto-set to `Waived`).
@@ -311,7 +312,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 | 17 | Payment due day | Day of month (1–28) set at group creation. Days 29–31 blocked. Applies uniformly to contributions AND loan interest every cycle. Default suggestion: 10. |
 | 18 | Admin share count at creation | Admin selects their own share count at group creation (min 1, max total_shares). Defaults to 1. Adjustable via the members screen before cycle 1 starts. |
 | 19 | Member self-join flow | Via invitation code: member submits a join request with a requested share count → admin approves / approves-with-change / rejects. No immediate self-add. Code is locked once cycle 1 starts. |
-| 20 | Admin withdrawal | When admin wins the chit: bid=0, commission=0, basket_credit=0, winner_takeaway=full pool_amount. No basket transaction. Auto-detected server-side via winner membership role. No request flag needed. |
+| 20 | Admin withdrawal | Admin has ONE special share (counted within their regular share_count). Withdrawal is an explicit opt-in flag at record time (`is_admin_withdrawal: true`). One-time use per group, tracked via `admin_withdrawal_used` on the membership. Admin can still win other shares via normal bid. |
 
 ---
 

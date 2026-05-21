@@ -8,6 +8,13 @@
       "when": 1778947025982,
       "tag": "0000_milky_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779342402830,
+      "tag": "0001_little_rocket_racer",
+      "breakpoints": true
     }
   ]
 }

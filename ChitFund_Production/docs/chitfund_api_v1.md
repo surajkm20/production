@@ -1,6 +1,6 @@
 # ChitFund App — API Specification (v1)
 
-**Status:** Draft v10 (admin withdrawal added — when winner is group admin, bid_amount=0, no commission, no basket transaction, full pool takeaway)
+**Status:** Draft v11 (admin withdrawal refined — explicit is_admin_withdrawal flag; one-time use per group; admin can win via regular bid without using the special share)
 **Style:** REST over HTTPS
 **Base URL:** `https://api.chitfund.app/v1`
 **Auth:** JWT (access token in `Authorization: Bearer <token>` header)
@@ -770,7 +770,7 @@ Get full cycle detail.
 ### POST `/groups/:group_id/cycles/:cycle_id/record-winner` **[admin]**
 Record the winning bid for a regular cycle.
 
-**Request — regular member winner**
+**Request — regular member winner (or admin winning via normal bid)**
 ```json
 {
   "winner_user_id": "uuid",
@@ -779,15 +779,18 @@ Record the winning bid for a regular cycle.
 }
 ```
 
-**Request — admin withdrawal** (admin selects themselves as winner)
+**Request — admin withdrawal (special share, one-time per group)**
 ```json
 {
   "winner_user_id": "<admin-uuid>",
   "bid_amount": 0,
+  "is_admin_withdrawal": true,
   "notes": "Admin taking the chit this month."
 }
 ```
-- When `winner_user_id` is the group admin, the server activates admin withdrawal regardless of `bid_amount`. Sending `bid_amount: 0` is the convention; any value is ignored server-side for the admin winner.
+- `is_admin_withdrawal` defaults to `false`. Must be `true` to activate the withdrawal path.
+- `winner_user_id` must be the group admin. Sending this flag for a non-admin winner returns `NOT_ADMIN`.
+- The admin's special share is **one-time per group** — `WITHDRAWAL_ALREADY_USED` is returned if the admin has already used it.
 
 **Response 200 — regular member winner** (e.g., pool=₹1,00,000, bid=₹16,000, rate=5%)
 ```json
@@ -824,8 +827,10 @@ Record the winning bid for a regular cycle.
 
 **Errors:**
 - `WINNER_INELIGIBLE` — member has exhausted their share allocation (`wins_count >= share_count`) OR has an active loan in this group
-- `BID_EXCEEDS_POOL` — only for non-admin winners
-- `BID_NEGATIVE_OR_ZERO` — only for non-admin winners (bid_amount must be > 0 for regular members)
+- `BID_EXCEEDS_POOL` — only when `is_admin_withdrawal = false`
+- `BID_NEGATIVE_OR_ZERO` — only when `is_admin_withdrawal = false` (regular bids must be > 0)
+- `NOT_ADMIN` — `is_admin_withdrawal: true` but `winner_user_id` is not the group admin
+- `WITHDRAWAL_ALREADY_USED` — admin has already used their special share in this group
 - `CYCLE_ALREADY_RECORDED` (use PATCH to edit)
 - `CYCLE_CLOSED`
 
@@ -1604,6 +1609,8 @@ Basket balance month by month (for charting).
 | `SHARES_EXCEEDED` | 409 | Would push total over total_shares |
 | `WINS_EXCEED_SHARES` | 409 | Reducing share_count below wins_count |
 | `WINNER_INELIGIBLE` | 409 | wins_count >= share_count |
+| `NOT_ADMIN` | 400 | is_admin_withdrawal=true but winner is not the group admin |
+| `WITHDRAWAL_ALREADY_USED` | 409 | Admin has already used their special share in this group |
 | `CYCLE_ALREADY_RECORDED` | 409 | Use PATCH instead |
 | `CYCLE_CLOSED` | 409 | Cycle is closed; no edits |
 | `EDIT_WINDOW_EXPIRED` | 409 | Past 24h edit window |

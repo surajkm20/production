@@ -3,7 +3,7 @@
 // One row per (group, user) pair — share_count folds multiple shares into a single row.
 // A unique partial index enforces exactly one active admin per group.
 
-import { pgTable, uuid, varchar, timestamp, smallint, text, unique, uniqueIndex, index, check } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, smallint, boolean, text, unique, uniqueIndex, index, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users';
 import { chit_groups } from './groups';
@@ -15,7 +15,8 @@ export const memberships = pgTable('memberships', {
   role:           varchar('role', { length: 20 }).notNull(),         // 'Admin' | 'Member'
   share_count:            smallint('share_count').notNull().default(1),
   requested_share_count:  smallint('requested_share_count'),                     // null for admin-added members
-  wins_count:             smallint('wins_count').notNull().default(0),
+  wins_count:                  smallint('wins_count').notNull().default(0),
+  admin_withdrawal_used:       boolean('admin_withdrawal_used').notNull().default(false),
   status:                 varchar('status', { length: 20 }).notNull().default('Active'), // 'Pending' | 'Active' | 'Inactive'
   joined_at:      timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   deactivated_at: timestamp('deactivated_at', { withTimezone: true }),

@@ -206,12 +206,12 @@ export async function recordWinner(
   userId:   string,
   group_id: string,
   cycle_id: string,
-  data:     { winner_user_id: string; bid_amount: number; notes?: string },
+  data:     { winner_user_id: string; bid_amount: number; is_admin_withdrawal?: boolean; notes?: string },
 ) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
-  const { winner_user_id, bid_amount, notes } = data;
+  const { winner_user_id, bid_amount, is_admin_withdrawal = false, notes } = data;
 
   const [cycleRows, basketRows, winnerMemberRows, winnerActiveLoanRows] = await Promise.all([
     db.select({ id: monthly_cycles.id, status: monthly_cycles.status, is_skip_month: monthly_cycles.is_skip_month, winner_user_id: monthly_cycles.winner_user_id, pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate, month_label: monthly_cycles.month_label })
@@ -223,7 +223,7 @@ export async function recordWinner(
     db.select({ id: baskets.id, current_balance: baskets.current_balance })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
-    db.select({ share_count: memberships.share_count, wins_count: memberships.wins_count, role: memberships.role })
+    db.select({ share_count: memberships.share_count, wins_count: memberships.wins_count, role: memberships.role, admin_withdrawal_used: memberships.admin_withdrawal_used })
       .from(memberships)
       .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, winner_user_id), eq(memberships.status, 'Active')))
       .limit(1),
@@ -246,14 +246,18 @@ export async function recordWinner(
   if (!winner || Number(winner.wins_count) >= Number(winner.share_count)) {
     throw new AppError(409, 'WINNER_INELIGIBLE', 'This member is not eligible to win (already won their share allocation).');
   }
-  const hasActiveLoan     = !!winnerActiveLoanRows[0];
-  const is_admin_winner   = winner.role === 'Admin';
-  const pool_amount_num   = Number(cycle.pool_amount);
-  const commission_rate   = parseFloat(String(cycle.admin_commission_rate));
+  const hasActiveLoan   = !!winnerActiveLoanRows[0];
+  const pool_amount_num = Number(cycle.pool_amount);
+  const commission_rate = parseFloat(String(cycle.admin_commission_rate));
 
-  // Admin withdraws the full pool — no bid, no commission, nothing to basket
+  if (is_admin_withdrawal) {
+    if (winner.role !== 'Admin')       throw new AppError(400, 'NOT_ADMIN',             'Admin withdrawal can only be used when the winner is the group admin.');
+    if (winner.admin_withdrawal_used)  throw new AppError(409, 'WITHDRAWAL_ALREADY_USED', 'The admin withdrawal (special share) has already been used for this group.');
+  }
+
+  // Admin withdrawal: full pool to admin, no commission, nothing to basket
   let stored_bid: number, admin_commission: number, basket_credit: number, winner_takeaway: number, basket_balance_after: number;
-  if (is_admin_winner) {
+  if (is_admin_withdrawal) {
     stored_bid           = 0;
     admin_commission     = 0;
     basket_credit        = 0;
@@ -274,7 +278,7 @@ export async function recordWinner(
       .set({ winner_user_id, bid_amount: stored_bid, admin_commission, basket_credit, winner_takeaway, ...(notes ? { notes } : {}) })
       .where(eq(monthly_cycles.id, cycle_id));
 
-    if (!is_admin_winner) {
+    if (!is_admin_withdrawal) {
       await tx.update(baskets)
         .set({ current_balance: basket_balance_after })
         .where(eq(baskets.id, basket.id));
@@ -292,7 +296,10 @@ export async function recordWinner(
     }
 
     await tx.update(memberships)
-      .set({ wins_count: Number(winner.wins_count) + 1 })
+      .set({
+        wins_count: Number(winner.wins_count) + 1,
+        ...(is_admin_withdrawal ? { admin_withdrawal_used: true } : {}),
+      })
       .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, winner_user_id)));
   });
 
@@ -323,7 +330,7 @@ export async function recordWinner(
 
   const winnerName = winnerRow?.name ?? 'A member';
   const title      = `Winner announced — ${cycle.month_label}`;
-  const body       = is_admin_winner
+  const body       = is_admin_withdrawal
     ? `${winnerName} (admin) withdrew the full pool of ${paiseToRupeeDisplay(pool_amount_num)}.`
     : `${winnerName} won with a bid of ${paiseToRupeeDisplay(stored_bid)}.`;
 
