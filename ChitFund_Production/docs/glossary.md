@@ -117,10 +117,10 @@ When every active member's `wins_count` reaches their `share_count`, all shares 
 ### X Chiti
 A cycle mode where more than one winner is recorded in the same month, enabled when the basket has grown large enough to fund multiple payouts.
 
-- `x_chiti = max(1, floor(total_basket / pool_amount))`. Always ≥ 1.
-  - `x_chiti = 1` → normal single-winner cycle.
-  - `x_chiti = 2` → Double Chiti (two winners this cycle).
-  - `x_chiti = 3` → Triple Chiti, and so on.
+- `x_chiti = floor(total_basket / pool_amount) + 1`. Always ≥ 1.
+  - `x_chiti = 1` → normal single-winner cycle (basket < pool_amount).
+  - `x_chiti = 2` → Double Chiti (basket >= pool_amount).
+  - `x_chiti = 3` → Triple Chiti (basket >= 2 × pool_amount), and so on.
 - `total_basket = realized (basket balance) + unrealized (active loan principals + outstanding accrued interest)`.
 - The X Chiti eligibility banner is shown on the Record Winner screen only when `x_chiti ≥ 2`.
 - Each winner is recorded as a separate `cycle_winners` row with their own bid, commission, basket credit, and takeaway. A member can win at most once per cycle regardless of their share count.

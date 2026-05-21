@@ -1,6 +1,6 @@
 // Business logic for monthly cycle management.
 // Bid/winner data lives in cycle_winners (supports X Chiti: multiple winners per cycle).
-// X Chiti eligibility: x_chiti = floor(total_basket / pool_amount),
+// X Chiti eligibility: x_chiti = floor(total_basket / pool_amount) + 1,
 //   total_basket = realized (current_balance) + unrealized (outstanding loan principals + accrued interest owed).
 
 import { eq, and, desc, sum, count, sql, inArray, gt } from 'drizzle-orm';
@@ -76,8 +76,8 @@ export async function getChitiEligibility(userId: string, group_id: string) {
   }, 0);
 
   const total_basket = realized + unrealized;
-  const x_chiti     = Math.max(1, Math.floor(total_basket / pool));
-  const eligible     = x_chiti >= 1;
+  const x_chiti     = Math.floor(total_basket / pool) + 1;
+  const eligible     = x_chiti >= 2;
 
   return {
     realized,
@@ -383,7 +383,7 @@ export async function recordWinner(
     return acc + Number(loan.principal) + computeOutstandingInterest(elapsed, Number(loan.principal), Number(loan.monthly_interest_rate), Number(loan.total_interest_paid));
   }, 0);
 
-  const x_chiti     = Math.max(1, Math.floor((realized + unrealized) / pool));
+  const x_chiti     = Math.floor((realized + unrealized) / pool) + 1;
   const nextSlot    = existingWinnersRows.length + 1;
 
   if (nextSlot > x_chiti) throw new AppError(409, 'CHITI_SLOTS_FULL', `All ${x_chiti} winner slot(s) for this cycle are already filled.`);

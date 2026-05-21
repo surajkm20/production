@@ -786,8 +786,8 @@ Returns the group's current X Chiti eligibility based on realized + unrealized b
 ```
 - `realized` = `baskets.current_balance` (actual cash).
 - `unrealized` = sum of active loan principals + sum of outstanding accrued interest across all active loans in the group.
-- `x_chiti` = `max(1, floor(total_basket / pool_amount))`. Always ≥ 1. Value of 1 means normal single-winner cycle; 2+ means X Chiti eligible.
-- `eligible` = `x_chiti >= 1`. Always `true` for an active group with a basket.
+- `x_chiti` = `floor(total_basket / pool_amount) + 1`. Always ≥ 1. Value of 1 means normal single-winner cycle; 2+ means X Chiti eligible.
+- `eligible` = `x_chiti >= 2`. `true` when `total_basket >= pool_amount`.
 - `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `x_chiti < 2`.
 
 ---
