@@ -321,7 +321,11 @@ export default function AdminDashboardPage() {
     setClosingCycle(true)
     setCloseCycleError(null)
     try {
-      await api.post(`/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/close`, {})
+      const result = await api.post<{ group_closed: boolean }>(`/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/close`, {})
+      if (result.group_closed) {
+        navigate(`/groups/${groupId}`)
+        return
+      }
       await load()  // refresh everything — the cycle status and group state have changed
     } catch (err) {
       setCloseCycleError(err instanceof ApiError ? err.message : 'Failed to close cycle.')

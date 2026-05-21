@@ -77,7 +77,7 @@ export async function getChitiEligibility(userId: string, group_id: string) {
 
   const total_basket = realized + unrealized;
   const x_chiti     = Math.max(1, Math.floor(total_basket / pool));
-  const eligible     = x_chiti >= 2;
+  const eligible     = x_chiti >= 1;
 
   return {
     realized,
@@ -934,5 +934,34 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
     data: { month_label: cycle.month_label },
   });
 
-  return { cycle_id, status: 'Closed', closed_at: closedAt };
+  // Auto-close the group when every active member has exhausted their shares
+  const [remainingWinner] = await db
+    .select({ user_id: memberships.user_id })
+    .from(memberships)
+    .where(and(
+      eq(memberships.group_id, group_id),
+      eq(memberships.status, 'Active'),
+      sql`${memberships.wins_count} < ${memberships.share_count}`,
+    ))
+    .limit(1);
+
+  if (!remainingWinner) {
+    const [activeLoan] = await db
+      .select({ id: loans.id })
+      .from(loans)
+      .innerJoin(baskets, eq(baskets.id, loans.basket_id))
+      .where(and(eq(baskets.group_id, group_id), eq(loans.status, 'Active')))
+      .limit(1);
+
+    if (!activeLoan) {
+      const groupClosedAt = new Date();
+      await db.update(chit_groups)
+        .set({ status: 'Closed', closed_at: groupClosedAt, updated_at: groupClosedAt })
+        .where(eq(chit_groups.id, group_id));
+      await insertActivity({ group_id, event_type: 'GROUP_CLOSED', actor_id: userId });
+      return { cycle_id, status: 'Closed', closed_at: closedAt, group_closed: true };
+    }
+  }
+
+  return { cycle_id, status: 'Closed', closed_at: closedAt, group_closed: false };
 }

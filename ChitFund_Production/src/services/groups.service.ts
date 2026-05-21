@@ -100,8 +100,8 @@ async function fetchGroupDetail(userId: string, group_id: string) {
   const currentCycleWinners = currentCycle
     ? await db.select({
         winner_number:    cycle_winners.winner_number,
-        winner_user_id:   cycle_winners.winner_user_id,
-        winner_name:      users.name,
+        user_id:          cycle_winners.winner_user_id,
+        name:             users.name,
         bid_amount:       cycle_winners.bid_amount,
         admin_commission: cycle_winners.admin_commission,
         basket_credit:    cycle_winners.basket_credit,

@@ -145,7 +145,7 @@ export default function RecordWinnerPage() {
       <div className="flex-1 overflow-y-auto pb-8 space-y-3 pt-3 px-3">
 
         {/* X Chiti eligibility banner */}
-        {eligibility && eligibility.x_chiti >= 2 && (
+        {eligibility && eligibility.x_chiti >= 1 && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
             <div className="flex items-start gap-2">
               <span className="text-amber-500 text-base leading-none mt-0.5">★</span>
