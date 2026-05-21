@@ -7,6 +7,7 @@
 //   POST  /groups/:group_id/start              [admin] open cycle 1
 //   POST  /groups/:group_id/close              [admin] close the group + trigger closure split
 //   POST  /groups/:group_id/rotate-invitation-code  [admin]
+//   DELETE /groups/:group_id                        [admin] force-delete group + all data
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
@@ -29,4 +30,5 @@ groupsRouter.patch('/:group_id',          requireMember, requireAdmin, validate(
 groupsRouter.post('/:group_id/start',     requireMember, requireAdmin,                groups.startGroup);
 groupsRouter.post('/:group_id/close',     requireMember, requireAdmin,                groups.closeGroup);
 groupsRouter.post('/:group_id/rotate-invitation-code', requireMember, requireAdmin,   groups.rotateInvitationCode);
+groupsRouter.delete('/:group_id',                     requireMember, requireAdmin,    groups.forceDeleteGroup);
 groupsRouter.get('/:group_id/activity',               requireMember,                  groups.getGroupActivity);

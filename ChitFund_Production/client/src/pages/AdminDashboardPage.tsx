@@ -33,7 +33,7 @@ function formatActivityTime(iso: string): string {
 
 // ─── Three-dot menu ───────────────────────────────────────────────────────────
 
-function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup }: { onRename: () => void; onRotateCode: () => void; onCloseGroup: () => void }) {
+function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup, onForceDelete }: { onRename: () => void; onRotateCode: () => void; onCloseGroup: () => void; onForceDelete: () => void }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -58,6 +58,7 @@ function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup }: { onRename: () =
             { label: 'Rename group',     action: () => { onRename();       setOpen(false) } },
             { label: 'Rotate invite code', action: () => { onRotateCode(); setOpen(false) } },
             { label: 'Close group',      action: () => { onCloseGroup();   setOpen(false) }, danger: true },
+            { label: 'Force delete',     action: () => { onForceDelete();  setOpen(false) }, danger: true },
           ].map(item => (
             <button
               key={item.label}
@@ -135,6 +136,59 @@ function CloseGroupModal({ groupId, groupName, onClose, onClosed }: {
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>
           <button onClick={handleClose} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-sm font-semibold text-white transition">
             {loading ? 'Closing…' : 'Yes, close group'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Force delete confirmation modal ─────────────────────────────────────────
+
+function ForceDeleteModal({ groupId, groupName, onClose, onDeleted }: {
+  groupId: string; groupName: string; onClose: () => void; onDeleted: () => void
+}) {
+  const [confirm,  setConfirm]  = useState('')
+  const [loading,  setLoading]  = useState(false)
+  const [error,    setError]    = useState<string | null>(null)
+
+  async function handleDelete() {
+    setLoading(true)
+    setError(null)
+    try {
+      await api.delete(`/groups/${groupId}`)
+      onDeleted()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete group.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+        <p className="text-base font-bold text-gray-900 mb-1">Force delete "{groupName}"?</p>
+        <p className="text-xs text-red-600 mb-4">
+          This permanently deletes the group and ALL data — cycles, payments, winners, basket, loans. This cannot be undone.
+        </p>
+        <p className="text-xs text-gray-500 mb-1">Type the group name to confirm:</p>
+        <input
+          type="text"
+          value={confirm}
+          onChange={e => setConfirm(e.target.value)}
+          placeholder={groupName}
+          className="w-full px-3.5 py-2.5 mb-4 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+        />
+        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>
+          <button
+            onClick={handleDelete}
+            disabled={loading || confirm !== groupName}
+            className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-sm font-semibold text-white transition"
+          >
+            {loading ? 'Deleting…' : 'Delete forever'}
           </button>
         </div>
       </div>
@@ -243,7 +297,8 @@ export default function AdminDashboardPage() {
   const [closingCycle, setClosingCycle] = useState(false)
   const [closeCycleError, setCloseCycleError] = useState<string | null>(null)
   const [activity, setActivity] = useState<ActivityItem[]>([])
-  const [showCloseGroup, setShowCloseGroup] = useState(false)
+  const [showCloseGroup,   setShowCloseGroup]   = useState(false)
+  const [showForceDelete,  setShowForceDelete]  = useState(false)
 
   // load() runs when the component mounts or when groupId changes (e.g., navigating between groups)
   useEffect(() => { load() }, [groupId])
@@ -376,7 +431,7 @@ export default function AdminDashboardPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </button>
-        <ThreeDotMenu onRename={() => setShowRename(true)} onRotateCode={handleRotateCode} onCloseGroup={() => setShowCloseGroup(true)} />
+        <ThreeDotMenu onRename={() => setShowRename(true)} onRotateCode={handleRotateCode} onCloseGroup={() => setShowCloseGroup(true)} onForceDelete={() => setShowForceDelete(true)} />
       </div>
 
       <div className="flex-1 overflow-y-auto pb-20">
@@ -545,6 +600,15 @@ export default function AdminDashboardPage() {
           groupName={group.name}
           onClose={() => setShowCloseGroup(false)}
           onClosed={() => navigate('/dashboard', { replace: true })}
+        />
+      )}
+
+      {showForceDelete && (
+        <ForceDeleteModal
+          groupId={group.group_id}
+          groupName={group.name}
+          onClose={() => setShowForceDelete(false)}
+          onDeleted={() => navigate('/dashboard', { replace: true })}
         />
       )}
     </div>

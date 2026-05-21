@@ -7,7 +7,7 @@
 import { randomBytes } from 'crypto';
 import { eq, and, lt, gt, desc, ilike, sum, count, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
-import { chit_groups, memberships, baskets, monthly_cycles, cycle_winners, payments, loans, users, notifications } from '../db/schema';
+import { chit_groups, memberships, baskets, monthly_cycles, cycle_winners, payments, loans, loan_transactions, basket_transactions, group_activity, pending_admin_transfers, users, notifications } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { encodeCursor, decodeCursor } from '../utils/pagination';
 import { assertActiveMember } from './memberships.service';
@@ -681,4 +681,38 @@ export async function rotateInvitationCode(userId: string, group_id: string) {
     .where(eq(chit_groups.id, group_id));
 
   return { invitation_code: newCode, invitation_code_expires_at: expiresAt.toISOString() };
+}
+
+// ─── forceDeleteGroup ─────────────────────────────────────────────────────────
+export async function forceDeleteGroup(userId: string, group_id: string) {
+  const caller = await assertActiveMember(group_id, userId);
+  if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Only the group admin can delete the group.');
+
+  await db.transaction(async (tx) => {
+    const [basketRows, cycleRows] = await Promise.all([
+      tx.select({ id: baskets.id }).from(baskets).where(eq(baskets.group_id, group_id)),
+      tx.select({ id: monthly_cycles.id }).from(monthly_cycles).where(eq(monthly_cycles.group_id, group_id)),
+    ]);
+    const basketIds = basketRows.map(b => b.id);
+    const cycleIds  = cycleRows.map(c => c.id);
+
+    const loanIds = basketIds.length
+      ? (await tx.select({ id: loans.id }).from(loans).where(inArray(loans.basket_id, basketIds))).map(l => l.id)
+      : [];
+
+    if (cycleIds.length)  await tx.delete(cycle_winners).where(inArray(cycle_winners.cycle_id, cycleIds));
+    if (cycleIds.length)  await tx.delete(payments).where(inArray(payments.cycle_id, cycleIds));
+    if (loanIds.length)   await tx.delete(loan_transactions).where(inArray(loan_transactions.loan_id, loanIds));
+    if (basketIds.length) await tx.delete(basket_transactions).where(inArray(basket_transactions.basket_id, basketIds));
+    if (loanIds.length)   await tx.delete(loans).where(inArray(loans.basket_id, basketIds));
+    if (cycleIds.length)  await tx.delete(monthly_cycles).where(eq(monthly_cycles.group_id, group_id));
+    if (basketIds.length) await tx.delete(baskets).where(eq(baskets.group_id, group_id));
+                          await tx.delete(pending_admin_transfers).where(eq(pending_admin_transfers.group_id, group_id));
+                          await tx.delete(memberships).where(eq(memberships.group_id, group_id));
+                          await tx.delete(notifications).where(eq(notifications.group_id, group_id));
+                          await tx.delete(group_activity).where(eq(group_activity.group_id, group_id));
+                          await tx.delete(chit_groups).where(eq(chit_groups.id, group_id));
+  });
+
+  return { deleted: true, group_id };
 }

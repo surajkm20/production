@@ -71,6 +71,14 @@ export async function rotateInvitationCode(req: Request, res: Response, next: Ne
   } catch (err) { next(err); }
 }
 
+export async function forceDeleteGroup(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const group_id = req.params.group_id as string;
+    const result = await GroupsService.forceDeleteGroup(req.user!.userId, group_id);
+    sendSuccess(res, result);
+  } catch (err) { next(err); }
+}
+
 export async function getGroupActivity(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const group_id = req.params.group_id as string;
