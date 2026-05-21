@@ -53,15 +53,16 @@ export async function listMembers(
 
   const rows = await db
     .select({
-      membership_id: memberships.id,
-      user_id:       memberships.user_id,
-      name:          users.name,
-      mobile_number: users.mobile_number,
-      role:          memberships.role,
-      share_count:   memberships.share_count,
-      wins_count:    memberships.wins_count,
-      status:        memberships.status,
-      joined_at:     memberships.joined_at,
+      membership_id:          memberships.id,
+      user_id:                memberships.user_id,
+      name:                   users.name,
+      mobile_number:          users.mobile_number,
+      role:                   memberships.role,
+      share_count:            memberships.share_count,
+      wins_count:             memberships.wins_count,
+      admin_withdrawal_used:  memberships.admin_withdrawal_used,
+      status:                 memberships.status,
+      joined_at:              memberships.joined_at,
     })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.user_id))

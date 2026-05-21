@@ -14,13 +14,14 @@ export default function RecordWinnerPage() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
-  const [winnerId,    setWinnerId]    = useState('')
-  const [bidRupees,   setBidRupees]   = useState('')
-  const [notes,       setNotes]       = useState('')
-  const [submitting,  setSubmitting]  = useState(false)
-  const [formError,   setFormError]   = useState<string | null>(null)
-  const [successMsg,  setSuccessMsg]  = useState<string | null>(null)
-  const [warnings,    setWarnings]    = useState<string[]>([])
+  const [winnerId,          setWinnerId]          = useState('')
+  const [bidRupees,         setBidRupees]         = useState('')
+  const [isAdminWithdrawal, setIsAdminWithdrawal] = useState(false)
+  const [notes,             setNotes]             = useState('')
+  const [submitting,        setSubmitting]         = useState(false)
+  const [formError,         setFormError]         = useState<string | null>(null)
+  const [successMsg,        setSuccessMsg]        = useState<string | null>(null)
+  const [warnings,          setWarnings]          = useState<string[]>([])
 
   useEffect(() => { load() }, [groupId])
 
@@ -47,28 +48,27 @@ export default function RecordWinnerPage() {
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    if (!group?.current_cycle || !winnerId || bid <= 0) return
+    if (!group?.current_cycle || !winnerId) return
+    if (!isAdminWithdrawal && bid <= 0) return
     setSubmitting(true)
     setFormError(null)
     setSuccessMsg(null)
     setWarnings([])
     try {
-      // API call: POST /v1/groups/:groupId/cycles/:cycleId/record-winner
-      // bid is in paise (see conversion below); backend validates bid < poolAmount
       const result = await api.post<{ warnings?: string[] }>(
         `/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/record-winner`,
         {
-          winner_user_id: winnerId,
-          bid_amount: bid,
+          winner_user_id:      winnerId,
+          bid_amount:          isAdminWithdrawal ? 0 : bid,
+          is_admin_withdrawal: isAdminWithdrawal,
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         },
       )
       setSuccessMsg('Winner recorded successfully.')
-      // Backend may return warnings (e.g., "member already won before") — show them as amber banners
       if (result.warnings?.length) setWarnings(result.warnings)
-      // Reset form and reload to reflect the updated cycle state
       setWinnerId('')
       setBidRupees('')
+      setIsAdminWithdrawal(false)
       setNotes('')
       await load()
     } catch (err) {
@@ -78,22 +78,21 @@ export default function RecordWinnerPage() {
     }
   }
 
-  // Rupees → paise conversion (same pattern as CreateGroupPage)
-  const bid             = Math.round(parseFloat(bidRupees) * 100) || 0
-  const poolAmount      = group?.pool_amount ?? 0
-  // winnerTakeaway: what the winner actually takes home = pool - bid (bid stays in basket)
-  // Only valid when bid is > 0 and less than the pool
-  const winnerTakeaway  = bid > 0 && bid < poolAmount ? poolAmount - bid : null
+  const bid            = Math.round(parseFloat(bidRupees) * 100) || 0
+  const poolAmount     = group?.pool_amount ?? 0
+  const winnerTakeaway = bid > 0 && bid < poolAmount ? poolAmount - bid : null
 
   const currentCycle    = group?.current_cycle
-  // canRecord: must be an open cycle with no winner yet
   const canRecord       = !!currentCycle && currentCycle.status === 'Open' && !currentCycle.winner_user_id
-  // Backend computes eligibility (member hasn't won all their shares yet); we just filter the list
   const eligibleMembers = members.filter(m => m.is_eligible_to_win)
-  // Past winners: cycles that have a winner recorded, sorted newest first
   const pastWinners     = cycles
     .filter(c => c.winner !== null)
     .sort((a, b) => b.month_number - a.month_number)
+
+  // Admin withdrawal helpers
+  const selectedMember       = members.find(m => m.user_id === winnerId)
+  const selectedIsAdmin      = selectedMember?.role === 'Admin'
+  const withdrawalAlreadyUsed = selectedMember?.admin_withdrawal_used ?? false
 
   // ── loading / error ──────────────────────────────────────────────────────────
 
@@ -158,7 +157,7 @@ export default function RecordWinnerPage() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Winner</label>
                 <select
                   value={winnerId}
-                  onChange={e => setWinnerId(e.target.value)}
+                  onChange={e => { setWinnerId(e.target.value); setIsAdminWithdrawal(false); setBidRupees('') }}
                   required
                   className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-maroon-500"
                 >
@@ -175,35 +174,65 @@ export default function RecordWinnerPage() {
                 )}
               </div>
 
-              {/* Bid amount — user types rupees, we convert to paise */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Winning bid — amount left behind (₹)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">₹</span>
-                  <input
-                    type="number"
-                    value={bidRupees}
-                    onChange={e => setBidRupees(e.target.value)}
-                    placeholder="16,000"
-                    min="1"
-                    step="1"
-                    required
-                    className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500"
-                  />
+              {/* Admin withdrawal toggle — only shown when admin is selected */}
+              {selectedIsAdmin && winnerId && (
+                <div className={`rounded-lg border px-3 py-3 ${withdrawalAlreadyUsed ? 'border-gray-200 bg-gray-50' : 'border-maroon-200 bg-maroon-50'}`}>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isAdminWithdrawal}
+                      disabled={withdrawalAlreadyUsed}
+                      onChange={e => { setIsAdminWithdrawal(e.target.checked); setBidRupees('') }}
+                      className="w-4 h-4 accent-maroon-600"
+                    />
+                    <div>
+                      <p className="text-xs font-semibold text-gray-800">Use special share (admin withdrawal)</p>
+                      {withdrawalAlreadyUsed
+                        ? <p className="text-xs text-gray-400 mt-0.5">Already used — special share claimed</p>
+                        : <p className="text-xs text-gray-500 mt-0.5">Admin takes 100% of the pool. No commission, nothing to basket. One-time use.</p>
+                      }
+                    </div>
+                  </label>
+                  {isAdminWithdrawal && (
+                    <div className="mt-3 rounded-lg bg-white border border-maroon-100 px-3 py-2 text-xs text-maroon-700 space-y-0.5">
+                      <p>Admin withdrawal — full pool</p>
+                      <p>Takes home: <span className="font-semibold">{formatPaise(poolAmount)}</span></p>
+                      <p className="text-gray-400">Commission ₹0 · Basket ₹0 · Basket unchanged</p>
+                    </div>
+                  )}
                 </div>
-                {/* Live preview: as user types, show how the bid splits into basket vs winner payout */}
-                {winnerTakeaway !== null && (
-                  <div className="mt-2 bg-maroon-50 rounded-lg px-3 py-2 text-xs text-maroon-700 space-y-0.5">
-                    <p>Bid left behind → basket: <span className="font-semibold">{formatPaise(bid)}</span></p>
-                    <p>Winner receives: <span className="font-semibold">{formatPaise(winnerTakeaway)}</span></p>
+              )}
+
+              {/* Bid amount — hidden for admin withdrawal */}
+              {!isAdminWithdrawal && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Winning bid — amount left behind (₹)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">₹</span>
+                    <input
+                      type="number"
+                      value={bidRupees}
+                      onChange={e => setBidRupees(e.target.value)}
+                      placeholder="16,000"
+                      min="1"
+                      step="1"
+                      required
+                      className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500"
+                    />
                   </div>
-                )}
-                {bid >= poolAmount && bid > 0 && (
-                  <p className="text-xs text-red-600 mt-1">Bid cannot exceed the pool amount ({formatPaise(poolAmount)}).</p>
-                )}
-              </div>
+                  {winnerTakeaway !== null && (
+                    <div className="mt-2 bg-maroon-50 rounded-lg px-3 py-2 text-xs text-maroon-700 space-y-0.5">
+                      <p>Bid left behind → basket: <span className="font-semibold">{formatPaise(bid)}</span></p>
+                      <p>Winner receives: <span className="font-semibold">{formatPaise(winnerTakeaway)}</span></p>
+                    </div>
+                  )}
+                  {bid >= poolAmount && bid > 0 && (
+                    <p className="text-xs text-red-600 mt-1">Bid cannot exceed the pool amount ({formatPaise(poolAmount)}).</p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Notes <span className="text-gray-400">(optional)</span></label>
@@ -216,10 +245,9 @@ export default function RecordWinnerPage() {
                 />
               </div>
 
-              {/* Submit disabled unless: winner selected, bid > 0, bid < pool */}
               <button
                 type="submit"
-                disabled={submitting || !winnerId || bid <= 0 || bid >= poolAmount}
+                disabled={submitting || !winnerId || (!isAdminWithdrawal && (bid <= 0 || bid >= poolAmount))}
                 className="w-full py-2.5 rounded-xl bg-maroon-600 hover:bg-maroon-700 disabled:opacity-60 text-sm font-semibold text-white transition"
               >
                 {submitting ? 'Recording…' : 'Confirm winner'}

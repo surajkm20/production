@@ -121,6 +121,7 @@ export interface Member {
   role: 'Admin' | 'Member'
   share_count: number
   wins_count: number
+  admin_withdrawal_used: boolean
   status: string
   joined_at: string
   is_eligible_to_win: boolean
