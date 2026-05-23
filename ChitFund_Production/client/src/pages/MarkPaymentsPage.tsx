@@ -60,6 +60,12 @@ export default function MarkPaymentsPage() {
       setGroup(g)
       setCycles(cycleList)
 
+      // Redirect away if group is closed — this page has no read-only value for closed groups
+      if (g.status === 'Closed') {
+        navigate(`/groups/${groupId}`, { replace: true })
+        return
+      }
+
       // Find the current open cycle to default-select it
       const currentCycleId = g.current_cycle?.cycle_id
       const defaultIdx = currentCycleId

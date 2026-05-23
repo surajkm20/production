@@ -145,6 +145,11 @@ export async function recordAdjustment(
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
+  const [groupRow] = await db.select({ status: chit_groups.status })
+    .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1);
+  if (!groupRow) throw new AppError(404, 'GROUP_NOT_FOUND', 'Group not found.');
+  if (groupRow.status === 'Closed') throw new AppError(409, 'GROUP_CLOSED', 'This group is closed.');
+
   const { direction, amount, notes } = data;
 
   const [basketRow] = await db
@@ -219,6 +224,11 @@ export async function disburseLoan(
 ) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+
+  const [groupClosedRow] = await db.select({ status: chit_groups.status })
+    .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1);
+  if (!groupClosedRow) throw new AppError(404, 'GROUP_NOT_FOUND', 'Group not found.');
+  if (groupClosedRow.status === 'Closed') throw new AppError(409, 'GROUP_CLOSED', 'This group is closed.');
 
   const { borrower_user_id, principal, expected_close_date, notes } = data;
 

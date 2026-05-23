@@ -33,7 +33,7 @@ function formatActivityTime(iso: string): string {
 
 // ─── Three-dot menu ───────────────────────────────────────────────────────────
 
-function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup, onForceDelete }: { onRename: () => void; onRotateCode: () => void; onCloseGroup: () => void; onForceDelete: () => void }) {
+function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup, onForceDelete, isClosed }: { onRename: () => void; onRotateCode: () => void; onCloseGroup: () => void; onForceDelete: () => void; isClosed: boolean }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -45,6 +45,15 @@ function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup, onForceDelete }: {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  const items = [
+    { label: 'Rename group', action: () => { onRename(); setOpen(false) } },
+    ...(!isClosed ? [
+      { label: 'Rotate invite code', action: () => { onRotateCode(); setOpen(false) } },
+      { label: 'Close group', action: () => { onCloseGroup(); setOpen(false) }, danger: true },
+    ] : []),
+    { label: 'Force delete', action: () => { onForceDelete(); setOpen(false) }, danger: true },
+  ]
+
   return (
     <div ref={ref} className="relative">
       <button onClick={() => setOpen(v => !v)} className="p-2 text-gray-500 hover:text-gray-700 transition">
@@ -54,12 +63,7 @@ function ThreeDotMenu({ onRename, onRotateCode, onCloseGroup, onForceDelete }: {
       </button>
       {open && (
         <div className="absolute right-0 top-9 w-48 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden">
-          {[
-            { label: 'Rename group',     action: () => { onRename();       setOpen(false) } },
-            { label: 'Rotate invite code', action: () => { onRotateCode(); setOpen(false) } },
-            { label: 'Close group',      action: () => { onCloseGroup();   setOpen(false) }, danger: true },
-            { label: 'Force delete',     action: () => { onForceDelete();  setOpen(false) }, danger: true },
-          ].map(item => (
+          {items.map(item => (
             <button
               key={item.label}
               onClick={item.action}
@@ -412,6 +416,7 @@ export default function AdminDashboardPage() {
   }
 
   const cycle = group.current_cycle
+  const isClosed = group.status === 'Closed'
   // pending = how much is still owed this month (null if no payments data yet)
   const pending = summary ? summary.total_expected - summary.total_paid : null
 
@@ -431,7 +436,7 @@ export default function AdminDashboardPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </button>
-        <ThreeDotMenu onRename={() => setShowRename(true)} onRotateCode={handleRotateCode} onCloseGroup={() => setShowCloseGroup(true)} onForceDelete={() => setShowForceDelete(true)} />
+        <ThreeDotMenu onRename={() => setShowRename(true)} onRotateCode={handleRotateCode} onCloseGroup={() => setShowCloseGroup(true)} onForceDelete={() => setShowForceDelete(true)} isClosed={isClosed} />
       </div>
 
       <div className="flex-1 overflow-y-auto pb-20">
@@ -461,7 +466,10 @@ export default function AdminDashboardPage() {
         <div className="bg-white px-4 pt-4 pb-5">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-lg font-bold text-gray-900">{group.name}</h1>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-maroon-100 text-maroon-700 font-medium">Admin</span>
+            {isClosed
+              ? <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">Closed</span>
+              : <span className="text-xs px-2 py-0.5 rounded-full bg-maroon-100 text-maroon-700 font-medium">Admin</span>
+            }
           </div>
           <p className="text-xs text-gray-400 mb-3">
             {group.people_count} people · {group.total_shares} shares · {formatPaise(group.monthly_contribution)}/share · Pool {formatPaise(group.pool_amount)}
@@ -542,19 +550,31 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* Quick actions grid */}
-        <div className="mx-3 mt-3">
-          <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">QUICK ACTIONS</p>
-          <div className="grid grid-cols-2 gap-2">
-            <ActionButton icon="💳" label="Mark payments" onClick={() => navigate(`/groups/${groupId}/payments`)} />
-            <ActionButton icon="🏆" label="Record winner" onClick={() => navigate(`/groups/${groupId}/record-winner`)} />
-            <ActionButton icon="🔔" label="Remind defaulters" onClick={handleRemindDefaulters} loading={reminding} />
-            <ActionButton icon="🧺" label="Basket & loans" onClick={() => navigate(`/groups/${groupId}/basket`)} />
+        {/* Quick actions grid — hidden for closed groups */}
+        {isClosed ? (
+          <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+              <span className="text-base">🔒</span>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700">This group is closed</p>
+              <p className="text-xs text-gray-400 mt-0.5">All operations are disabled</p>
+            </div>
           </div>
-          {remindMsg && (
-            <p className="text-xs text-center mt-2 text-maroon-600 font-medium">{remindMsg}</p>
-          )}
-        </div>
+        ) : (
+          <div className="mx-3 mt-3">
+            <p className="text-xs font-semibold text-gray-400 tracking-widest mb-2 px-1">QUICK ACTIONS</p>
+            <div className="grid grid-cols-2 gap-2">
+              <ActionButton icon="💳" label="Mark payments" onClick={() => navigate(`/groups/${groupId}/payments`)} />
+              <ActionButton icon="🏆" label="Record winner" onClick={() => navigate(`/groups/${groupId}/record-winner`)} />
+              <ActionButton icon="🔔" label="Remind defaulters" onClick={handleRemindDefaulters} loading={reminding} />
+              <ActionButton icon="🧺" label="Basket & loans" onClick={() => navigate(`/groups/${groupId}/basket`)} />
+            </div>
+            {remindMsg && (
+              <p className="text-xs text-center mt-2 text-maroon-600 font-medium">{remindMsg}</p>
+            )}
+          </div>
+        )}
 
         {/* Recent activity feed */}
         <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-100 p-4">

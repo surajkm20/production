@@ -5,7 +5,7 @@
 
 import { eq, and, desc, inArray, gte } from 'drizzle-orm';
 import { db } from '../config/db';
-import { memberships, monthly_cycles, payments, users, notifications } from '../db/schema';
+import { chit_groups, memberships, monthly_cycles, payments, users, notifications } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { paiseToRupeeDisplay } from '../utils/money';
 import { assertActiveMember } from './memberships.service';
@@ -243,6 +243,11 @@ export async function remindDefaulters(
 ) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+
+  const [groupRow] = await db.select({ status: chit_groups.status })
+    .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1);
+  if (!groupRow) throw new AppError(404, 'GROUP_NOT_FOUND', 'Group not found.');
+  if (groupRow.status === 'Closed') throw new AppError(409, 'GROUP_CLOSED', 'This group is closed.');
 
   const [cycleRow] = await db
     .select({ id: monthly_cycles.id, month_label: monthly_cycles.month_label })

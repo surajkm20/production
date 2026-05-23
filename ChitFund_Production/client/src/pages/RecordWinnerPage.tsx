@@ -36,6 +36,13 @@ export default function RecordWinnerPage() {
         api.get<Member[]>(`/groups/${groupId}/members`),
       ])
       setGroup(g)
+
+      // Redirect away if group is closed — no winner can be recorded on a closed group
+      if (g.status === 'Closed') {
+        navigate(`/groups/${groupId}`, { replace: true })
+        return
+      }
+
       setCycles(cycleList)
       setMembers(memberList)
       // eligibility is non-critical — don't block page load if it fails

@@ -344,7 +344,7 @@ export async function recordWinner(
       .where(eq(cycle_winners.cycle_id, cycle_id))
       .orderBy(cycle_winners.winner_number),
 
-    db.select({ pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate })
+    db.select({ pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate, status: chit_groups.status })
       .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
 
     db.select({ month_number: monthly_cycles.month_number })
@@ -358,8 +358,10 @@ export async function recordWinner(
   const basket = basketRows[0];
   const group  = groupRows[0];
 
-  if (!cycle)                    throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
-  if (cycle.status === 'Closed') throw new AppError(409, 'CYCLE_CLOSED',    'Cycle is already closed.');
+  if (!group)                     throw new AppError(404, 'GROUP_NOT_FOUND', 'Group not found.');
+  if (group.status === 'Closed')  throw new AppError(409, 'GROUP_CLOSED',    'This group is closed.');
+  if (!cycle)                     throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
+  if (cycle.status === 'Closed')  throw new AppError(409, 'CYCLE_CLOSED',    'Cycle is already closed.');
 
   // Compute X Chiti cap
   const realized   = Number(basket.current_balance);

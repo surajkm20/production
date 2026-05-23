@@ -575,6 +575,7 @@ export default function BasketPage() {
   }
 
   const isAdmin = group.my_membership.role === 'Admin'
+  const isClosed = group.status === 'Closed'
   const backPath = isAdmin ? `/groups/${groupId}` : `/groups/${groupId}/member`
 
   return (
@@ -592,6 +593,14 @@ export default function BasketPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto pb-8">
+
+        {/* Closed-group read-only banner */}
+        {isClosed && (
+          <div className="mx-3 mt-3 px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl flex items-center gap-2">
+            <span className="text-base">🔒</span>
+            <p className="text-xs text-gray-500 font-medium">This group is closed — basket is read-only.</p>
+          </div>
+        )}
 
         {/* Balance card */}
         <div className="mx-3 mt-3 bg-maroon-600 rounded-2xl p-5 text-white">
@@ -628,7 +637,7 @@ export default function BasketPage() {
               <button
                 key={a.label}
                 onClick={a.onClick}
-                disabled={a.disabled}
+                disabled={a.disabled || isClosed}
                 className="flex flex-col items-center justify-center gap-1 py-3 bg-white rounded-xl border border-gray-100 text-gray-700 hover:bg-maroon-50 hover:border-maroon-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
                 <span className="text-lg">{a.icon}</span>
