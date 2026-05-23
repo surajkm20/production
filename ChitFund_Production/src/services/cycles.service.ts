@@ -954,9 +954,6 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
 
       const currentBalance = Number(basketRows?.current_balance ?? 0);
       const pool            = Number(group.pool_amount);
-      const commissionRate  = parseFloat(String(group.admin_commission_rate));
-      const adminCommission = Math.round(pool * commissionRate / 100);
-      const total_needed    = pool + adminCommission;
 
       const activeMembers = await tx
         .select({ user_id: memberships.user_id, share_count: memberships.share_count, name: users.name })
@@ -968,8 +965,10 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
 
       if (currentBalance > 0) {
         // ── Basket has funds: seed/update payments with basket-offset reduced amounts ──
-        const basket_contribution  = Math.min(currentBalance, total_needed);
-        const remaining_to_collect = Math.max(0, total_needed - basket_contribution);
+        // Admin commission always comes from the winner's bid savings — members only need to
+        // collectively fund pool_amount. Do not include admin_commission in total_needed.
+        const basket_contribution  = Math.min(currentBalance, pool);
+        const remaining_to_collect = Math.max(0, pool - basket_contribution);
         const total_shares         = Number(group.total_shares);
 
         const sortedMembers = [...activeMembers].sort((a, b) => {
@@ -1020,7 +1019,7 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
             txn_type:   'DEBIT_FINAL_CYCLE_OFFSET',
             amount:     basket_contribution,
             direction:  'D',
-            notes:      `Basket offset for cycle ${nextMonthNumber}: covers ${basket_contribution} of ${total_needed} (pool ${pool} + commission ${adminCommission})`,
+            notes:      `Basket offset for cycle ${nextMonthNumber}: covers ${basket_contribution} of pool ${pool}`,
             created_by: userId,
           });
         }
