@@ -50,10 +50,22 @@ function AddMemberModal({
     setError(null)
     setLoading(true)
     try {
+      // Normalise mobile: strip spaces, then auto-prepend +91 for bare Indian numbers.
+      // Accepts: 9876543210 | 919876543210 | +919876543210 | +91 98765 43210
+      let rawMobile = mobile.replace(/\s+/g, '')
+      if (!rawMobile.startsWith('+')) {
+        if (/^91[6-9]\d{9}$/.test(rawMobile)) {
+          rawMobile = '+' + rawMobile          // 91XXXXXXXXXX → +91XXXXXXXXXX
+        } else if (/^[6-9]\d{9}$/.test(rawMobile)) {
+          rawMobile = '+91' + rawMobile        // XXXXXXXXXX   → +91XXXXXXXXXX
+        }
+        // anything else passed as-is and rejected by backend
+      }
+
       // API call: POST /v1/groups/:groupId/members
       const result = await api.post<{ membership_id: string; user_id: string }>(
         `/groups/${groupId}/members`,
-        { name: name.trim(), mobile_number: mobile.replace(/\s+/g, ''), share_count: shareCount },
+        { name: name.trim(), mobile_number: rawMobile, share_count: shareCount },
       )
       // Build a local Member object from the response + the form values.
       // We don't re-fetch the list — the parent just appends this object to its state.
@@ -61,7 +73,7 @@ function AddMemberModal({
         membership_id: result.membership_id,
         user_id: result.user_id,
         name: name.trim(),
-        mobile_number: mobile.replace(/\s+/g, ''),
+        mobile_number: rawMobile,
         role: 'Member',
         share_count: shareCount,
         wins_count: 0,
@@ -97,7 +109,7 @@ function AddMemberModal({
             type="tel"
             value={mobile}
             onChange={e => setMobile(e.target.value)}
-            placeholder="+919876543210"
+            placeholder="9876543210"
             required
             className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
           />

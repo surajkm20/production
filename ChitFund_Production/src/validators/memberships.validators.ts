@@ -4,11 +4,25 @@
 import { z } from 'zod';
 
 // ─── POST /groups/:group_id/members ───────────────────────────────────────────
-// mobile_number regex mirrors the E.164 check in addMember service so the
-// error is surfaced before any DB work rather than inside the transaction.
+// Normalises mobile_number before validation:
+//   9876543210      → +919876543210  (bare 10-digit Indian number)
+//   919876543210    → +919876543210  (91-prefixed without +)
+//   +919876543210   → +919876543210  (already correct, left unchanged)
+// Anything else is rejected with a clear error.
+const normaliseMobile = z
+  .string()
+  .transform((val) => {
+    const stripped = val.replace(/\s+/g, '');
+    if (stripped.startsWith('+')) return stripped;            // already has +, pass through
+    if (/^91[6-9]\d{9}$/.test(stripped)) return '+' + stripped; // 91XXXXXXXXXX → +91XXXXXXXXXX
+    if (/^[6-9]\d{9}$/.test(stripped)) return '+91' + stripped; // XXXXXXXXXX   → +91XXXXXXXXXX
+    return stripped; // unrecognised — pass through and let .regex() reject it
+  })
+  .pipe(z.string().regex(/^\+91[6-9]\d{9}$/, 'mobile_number must be a valid 10-digit Indian number (e.g. 9876543210 or +919876543210)'));
+
 export const addMemberSchema = z.object({
   name:          z.string().min(1).max(100),
-  mobile_number: z.string().regex(/^\+\d{10,15}$/, 'mobile_number must be in E.164 format (e.g. +919812345678)'),
+  mobile_number: normaliseMobile,
   share_count:   z.number().int().min(1).optional(),
 });
 
