@@ -185,20 +185,8 @@ export default function HistoryPage() {
     Closed:  cycles.filter(c => c.status === 'Closed').length,
   }
 
-  // Payment-free month detection: the last N future cycles saved by X Chiti.
-  // xChitiBonus = extra winner slots above cycles-run = payment-free months earned.
-  // Only truly-future cycles (no payments seeded yet) qualify — the current active Open
-  // cycle always has payments seeded and is never payment-free.
-  const closedCycles      = cycles.filter(c => c.status === 'Closed')
-  const totalSlotsWon     = closedCycles.reduce((sum, c) => sum + c.winners.length, 0)
-  const cyclesWithWinners = closedCycles.filter(c => c.winners.length > 0).length
-  const xChitiBonus       = Math.max(0, totalSlotsWon - cyclesWithWinners)
-  // Only cycles with no payments seeded (total_count === 0) are candidates for payment-free.
-  // The current active Open cycle always has payments seeded (total_count > 0) and must never
-  // be treated as payment-free even when xChitiBonus >= 1.
-  const unclosedCycles    = cycles.filter(c => c.status !== 'Closed' && c.total_count === 0).sort((a, b) => a.month_number - b.month_number)
-  // The LAST xChitiBonus unclosed cycles (by month_number) are payment-free
-  const paymentFreeIds    = new Set(unclosedCycles.slice(-xChitiBonus).map(c => c.cycle_id))
+  // A cycle is "payment-free" if and only if is_skip_month === true (set by the backend
+  // when the admin declares a skip month). No client-side heuristic needed.
 
   const cycle     = group?.current_cycle
   const monthNum  = cycle?.month_number ?? 0
@@ -309,7 +297,7 @@ export default function HistoryPage() {
               <CycleRow
                 key={cycle.cycle_id}
                 cycle={cycle}
-                isPaymentFree={paymentFreeIds.has(cycle.cycle_id)}
+                isPaymentFree={cycle.is_skip_month}
                 // Pass role via navigate state so CycleDetailPage knows if admin actions should be shown
                 onClick={() => navigate(`/groups/${groupId}/history/${cycle.cycle_id}`, {
                   state: { role: group?.my_membership?.role ?? 'Member', groupName: group?.name }
