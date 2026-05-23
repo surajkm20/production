@@ -317,7 +317,7 @@ export default function MemberDashboardPage() {
         <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-100 p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-semibold text-gray-700">Your payment history</p>
-            <button className="text-xs text-maroon-600 font-medium">View all</button>
+            <button onClick={() => navigate(`/groups/${groupId}/history`)} className="text-xs text-maroon-600 font-medium">View all</button>
           </div>
           {paymentHistory.length === 0 ? (
             <p className="text-xs text-gray-400 text-center py-4">No payment history yet.</p>
