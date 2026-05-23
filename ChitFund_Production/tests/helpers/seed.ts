@@ -51,6 +51,7 @@ export async function createGroup(adminToken: string, overrides: Partial<{
   payment_due_day: number;
   admin_commission_rate: number;
   monthly_interest_rate: number;
+  admin_share_count: number;
 }> = {}) {
   const res = await request(app)
     .post('/v1/groups')
@@ -65,6 +66,7 @@ export async function createGroup(adminToken: string, overrides: Partial<{
       payment_due_day:       overrides.payment_due_day       ?? 10,
       admin_commission_rate: overrides.admin_commission_rate ?? 0,
       monthly_interest_rate: overrides.monthly_interest_rate ?? 5,
+      ...(overrides.admin_share_count != null ? { admin_share_count: overrides.admin_share_count } : {}),
     });
 
   if (res.status !== 201) {

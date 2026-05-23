@@ -96,6 +96,8 @@ export interface CycleSummary {
   paid_count: number
   unpaid_count: number
   waived_count: number
+  basket_contribution: number
+  is_final_cycle: boolean
 }
 
 export interface PaginatedResponse<T> {
@@ -270,6 +272,9 @@ export interface CycleDetail extends CycleItem {
   opened_at: string
   closed_at: string | null
   is_editable: boolean
+  is_final_cycle: boolean
+  basket_contribution: number
+  waived_count: number
   basket_impact: {
     balance_before: number
     balance_after: number

@@ -177,7 +177,7 @@ export async function listCycles(userId: string, group_id: string, filters: { st
 export async function getCycle(userId: string, group_id: string, cycle_id: string) {
   await assertActiveMember(group_id, userId);
 
-  const [cycleRows, paymentRows, cycleTxnRows, basketRows, winnerRows] = await Promise.all([
+  const [cycleRows, paymentRows, cycleTxnRows, basketRows, winnerRows, groupRows] = await Promise.all([
     db.select({
       id: monthly_cycles.id, month_number: monthly_cycles.month_number,
       month_label: monthly_cycles.month_label, due_date: monthly_cycles.due_date,
@@ -203,6 +203,7 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
 
     db.select({
       id: basket_transactions.id,
+      txn_type: basket_transactions.txn_type,
       amount: basket_transactions.amount, direction: basket_transactions.direction,
       created_at: basket_transactions.created_at, created_by: basket_transactions.created_by,
       basket_id: basket_transactions.basket_id,
@@ -212,7 +213,7 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
     .where(and(
       eq(baskets.group_id, group_id),
       eq(basket_transactions.cycle_id, cycle_id),
-      inArray(basket_transactions.txn_type, ['CREDIT_DISCOUNT', 'DEBIT_SKIP_MONTH']),
+      inArray(basket_transactions.txn_type, ['CREDIT_DISCOUNT', 'DEBIT_SKIP_MONTH', 'DEBIT_FINAL_CYCLE_OFFSET']),
     ))
     .orderBy(basket_transactions.created_at)
     .limit(1),
@@ -236,13 +237,23 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
     .innerJoin(users, eq(users.id, cycle_winners.winner_user_id))
     .where(eq(cycle_winners.cycle_id, cycle_id))
     .orderBy(cycle_winners.winner_number),
+
+    db.select({ total_months: chit_groups.total_months })
+      .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
   ]);
 
   const cycleRow = cycleRows[0];
   if (!cycleRow) throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
 
-  const cycleTxn = cycleTxnRows[0] ?? null;
-  const basket   = basketRows[0]   ?? null;
+  const cycleTxn   = cycleTxnRows[0] ?? null;
+  const basket     = basketRows[0]   ?? null;
+  const totalMonths = Number(groupRows[0]?.total_months ?? 0);
+  const is_final_cycle = totalMonths > 0 && cycleRow.month_number === totalMonths;
+
+  // basket_contribution is the DEBIT_FINAL_CYCLE_OFFSET amount if this is the final cycle
+  const basket_contribution = (is_final_cycle && cycleTxn?.txn_type === 'DEBIT_FINAL_CYCLE_OFFSET')
+    ? Number(cycleTxn.amount)
+    : 0;
 
   let basket_impact = null;
   if (cycleTxn && basket) {
@@ -270,6 +281,7 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
   const collected_amount = paymentRows.reduce((s, p) => s + (p.status === 'Paid' ? Number(p.paid_amount) : 0), 0);
   const paid_count       = paymentRows.filter(p => p.status === 'Paid').length;
   const total_count      = paymentRows.length;
+  const waived_count     = paymentRows.filter(p => p.status === 'Waived').length;
 
   return {
     cycle_id:      cycleRow.id,
@@ -278,6 +290,7 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
     due_date:      cycleRow.due_date,
     status:        cycleRow.status,
     is_skip_month: cycleRow.is_skip_month,
+    is_final_cycle,
     winners: winnerRows.map(w => ({
       winner_number:       w.winner_number,
       user_id:             w.winner_user_id,
@@ -295,8 +308,10 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
     closed_at:  cycleRow.closed_at,
     is_editable,
     basket_impact,
+    basket_contribution,
     collected_amount,
     paid_count,
+    waived_count,
     total_count,
     payments: paymentRows,
   };
@@ -889,7 +904,13 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       .innerJoin(users, eq(users.id, payments.member_user_id))
       .where(and(eq(payments.cycle_id, cycle_id), eq(payments.status, 'Unpaid'))),
 
-    db.select({ monthly_contribution: chit_groups.monthly_contribution })
+    db.select({
+      monthly_contribution: chit_groups.monthly_contribution,
+      pool_amount: chit_groups.pool_amount,
+      admin_commission_rate: chit_groups.admin_commission_rate,
+      total_months: chit_groups.total_months,
+      total_shares: chit_groups.total_shares,
+    })
       .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
 
     db.select({ id: cycle_winners.id })
@@ -909,12 +930,14 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
     throw new AppError(409, 'WINNER_NOT_RECORDED', 'Record the bid winner before closing this cycle.');
   }
 
+  const group = groupRows[0];
   const closedAt = new Date();
+  const nextMonthNumber = Number(cycle.month_number) + 1;
+  const isSeedingFinalCycle = nextMonthNumber === Number(group.total_months);
 
   await db.transaction(async (tx) => {
     await tx.update(monthly_cycles).set({ status: 'Closed', closed_at: closedAt }).where(eq(monthly_cycles.id, cycle_id));
 
-    const nextMonthNumber = Number(cycle.month_number) + 1;
     const [nextCycle] = await tx
       .select({ id: monthly_cycles.id })
       .from(monthly_cycles)
@@ -925,18 +948,86 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       const [alreadyExists] = await tx.select({ id: payments.id }).from(payments).where(eq(payments.cycle_id, nextCycle.id)).limit(1);
       if (!alreadyExists) {
         const activeMembers = await tx
-          .select({ user_id: memberships.user_id, share_count: memberships.share_count })
+          .select({ user_id: memberships.user_id, share_count: memberships.share_count, name: users.name })
           .from(memberships)
+          .innerJoin(users, eq(users.id, memberships.user_id))
           .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active')));
 
-        const contribution = Number(groupRows[0].monthly_contribution);
-        await tx.insert(payments).values(
-          activeMembers.map(m => ({
-            cycle_id:        nextCycle.id,
-            member_user_id:  m.user_id,
-            expected_amount: contribution * Number(m.share_count),
-          })),
-        );
+        if (isSeedingFinalCycle) {
+          // ── Final cycle: seed payments with basket-offset reduced amounts ──────
+          const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance })
+            .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
+
+          const pool              = Number(group.pool_amount);
+          const commissionRate    = parseFloat(String(group.admin_commission_rate));
+          const adminCommission   = Math.round(pool * commissionRate / 100);
+          const total_needed      = pool + adminCommission;
+          const currentBalance    = Number(basketRows.current_balance);
+          const basket_contribution = Math.min(currentBalance, total_needed);
+          const remaining_to_collect = Math.max(0, total_needed - basket_contribution);
+          const total_shares      = Number(group.total_shares);
+
+          // Sort members: highest share_count first, then alphabetically by name for tie-breaking
+          const sortedMembers = [...activeMembers].sort((a, b) => {
+            const shareDiff = Number(b.share_count) - Number(a.share_count);
+            if (shareDiff !== 0) return shareDiff;
+            return a.name.localeCompare(b.name);
+          });
+
+          // Compute floored amounts per member
+          const memberAmounts = sortedMembers.map(m => ({
+            user_id:    m.user_id,
+            share_count: Number(m.share_count),
+            amount:      remaining_to_collect === 0
+              ? 0
+              : Math.floor(remaining_to_collect * Number(m.share_count) / total_shares),
+          }));
+
+          // Add residual paisa to the member with the most shares (first in sorted order)
+          if (remaining_to_collect > 0 && memberAmounts.length > 0) {
+            const allocatedSum = memberAmounts.reduce((s, m) => s + m.amount, 0);
+            const residual = remaining_to_collect - allocatedSum;
+            if (residual > 0) memberAmounts[0].amount += residual;
+          }
+
+          // Seed payment rows
+          await tx.insert(payments).values(
+            memberAmounts.map(m => ({
+              cycle_id:        nextCycle.id,
+              member_user_id:  m.user_id,
+              expected_amount: m.amount,
+              status:          m.amount === 0 ? 'Waived' : 'Unpaid',
+            })),
+          );
+
+          // Debit basket immediately for the offset amount (only if > 0)
+          if (basket_contribution > 0) {
+            const newBalance = currentBalance - basket_contribution;
+            await tx.update(baskets)
+              .set({ current_balance: newBalance })
+              .where(eq(baskets.id, basketRows.id));
+
+            await tx.insert(basket_transactions).values({
+              basket_id:  basketRows.id,
+              cycle_id:   nextCycle.id,
+              txn_type:   'DEBIT_FINAL_CYCLE_OFFSET',
+              amount:     basket_contribution,
+              direction:  'D',
+              notes:      `Final cycle basket offset: covers ${basket_contribution} of ${total_needed} needed (pool ${pool} + commission ${adminCommission})`,
+              created_by: userId,
+            });
+          }
+        } else {
+          // ── Regular cycle: seed with standard per-share contribution ──────────
+          const contribution = Number(group.monthly_contribution);
+          await tx.insert(payments).values(
+            activeMembers.map(m => ({
+              cycle_id:        nextCycle.id,
+              member_user_id:  m.user_id,
+              expected_amount: contribution * Number(m.share_count),
+            })),
+          );
+        }
       }
     }
   });

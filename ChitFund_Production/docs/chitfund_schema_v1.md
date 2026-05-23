@@ -1,8 +1,8 @@
 # ChitFund App — Database Schema (v1)
 
-**Status:** Draft v12 (admin withdrawal refined — admin_withdrawal_used boolean on memberships tracks one-time special share use; explicit flag at record time)
+**Status:** Draft v13 (final-cycle reduced contributions — DEBIT_FINAL_CYCLE_OFFSET transaction type added; payments.expected_amount seeded with reduced amounts at penultimate cycle close)
 **Database:** PostgreSQL 14+
-**Last updated:** 2026-05-20
+**Last updated:** 2026-05-23
 
 ---
 
@@ -319,6 +319,14 @@ CREATE INDEX idx_payments_status ON payments(cycle_id, status);
 **Notes:**
 - One payment row **per person per cycle**, not per share. A 2-share holder appears as a single row with `expected_amount = monthly_contribution × 2`.
 - For skip-months, all rows start with `expected_amount = 0` and `status = 'Waived'`.
+- **Final-cycle seeding (month_number = total_months):** when the penultimate cycle is closed, the system seeds all final-cycle payment rows with reduced `expected_amount` values. Formula:
+  - `total_needed = pool_amount + (pool_amount × admin_commission_rate / 100)`
+  - `basket_contribution = min(basket.current_balance, total_needed)`
+  - `remaining_to_collect = max(0, total_needed − basket_contribution)`
+  - Each member's `expected_amount = floor(remaining_to_collect × share_count / total_shares)`
+  - Residual paisa (from floor rounding) is added to the member with the highest share_count (first alphabetically on tie).
+  - If `remaining_to_collect = 0`: all rows seeded with `expected_amount = 0` and `status = 'Waived'`.
+  - A `DEBIT_FINAL_CYCLE_OFFSET` basket transaction (direction `'D'`) is created for `basket_contribution` (only if > 0).
 - `paid_amount` allows partial payments in the future (not in v1 UI, but the column is here so we don't need migration later).
 
 ---
@@ -365,13 +373,14 @@ CREATE TABLE basket_transactions (
     created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT chk_txn_type CHECK (txn_type IN (
-        'CREDIT_DISCOUNT',      -- discount from a regular cycle
-        'DEBIT_SKIP_MONTH',     -- basket pays winner of skip-month
-        'LOAN_DISBURSED',       -- loan given out (debit)
-        'LOAN_REPAID',          -- principal repaid (credit)
-        'INTEREST_ACCRUED',     -- interest earned (credit)
-        'CLOSURE_SPLIT',        -- final split per member at closure (debit)
-        'ADJUSTMENT'            -- manual correction with notes
+        'CREDIT_DISCOUNT',           -- discount from a regular cycle
+        'DEBIT_SKIP_MONTH',          -- basket pays winner of skip-month
+        'DEBIT_FINAL_CYCLE_OFFSET',  -- basket contribution toward final cycle (pool_amount + admin_commission, capped at balance)
+        'LOAN_DISBURSED',            -- loan given out (debit)
+        'LOAN_REPAID',               -- principal repaid (credit)
+        'INTEREST_ACCRUED',          -- interest earned (credit)
+        'CLOSURE_SPLIT',             -- final split per member at closure (debit)
+        'ADJUSTMENT'                 -- manual correction with notes
     )),
     CONSTRAINT chk_direction CHECK (direction IN ('C', 'D')),
     CONSTRAINT chk_amount_positive CHECK (amount > 0)

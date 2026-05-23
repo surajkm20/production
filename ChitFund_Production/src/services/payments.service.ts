@@ -5,7 +5,7 @@
 
 import { eq, and, desc, inArray, gte } from 'drizzle-orm';
 import { db } from '../config/db';
-import { chit_groups, memberships, monthly_cycles, payments, users, notifications } from '../db/schema';
+import { chit_groups, memberships, monthly_cycles, payments, users, notifications, baskets, basket_transactions } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { paiseToRupeeDisplay } from '../utils/money';
 import { assertActiveMember } from './memberships.service';
@@ -22,16 +22,21 @@ export async function listPayments(
 ) {
   await assertActiveMember(group_id, userId);
 
-  const [cycleRow] = await db
-    .select({ id: monthly_cycles.id, status: monthly_cycles.status })
-    .from(monthly_cycles)
-    .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
-    .limit(1);
+  const [[cycleRow], [groupRow]] = await Promise.all([
+    db.select({ id: monthly_cycles.id, status: monthly_cycles.status, month_number: monthly_cycles.month_number })
+      .from(monthly_cycles)
+      .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
+      .limit(1),
+    db.select({ total_months: chit_groups.total_months })
+      .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
+  ]);
 
   if (!cycleRow) throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
 
-  const allPayments = await db
-    .select({
+  const is_final_cycle = groupRow && cycleRow.month_number === Number(groupRow.total_months);
+
+  const [allPayments, offsetTxnRows] = await Promise.all([
+    db.select({
       id: payments.id, member_user_id: payments.member_user_id, member_name: users.name,
       share_count: memberships.share_count, expected_amount: payments.expected_amount,
       paid_amount: payments.paid_amount, status: payments.status,
@@ -40,13 +45,27 @@ export async function listPayments(
     .from(payments)
     .innerJoin(users, eq(users.id, payments.member_user_id))
     .innerJoin(memberships, and(eq(memberships.user_id, payments.member_user_id), eq(memberships.group_id, group_id)))
-    .where(eq(payments.cycle_id, cycle_id));
+    .where(eq(payments.cycle_id, cycle_id)),
+
+    is_final_cycle
+      ? db.select({ amount: basket_transactions.amount })
+          .from(basket_transactions)
+          .innerJoin(baskets, eq(baskets.id, basket_transactions.basket_id))
+          .where(and(
+            eq(baskets.group_id, group_id),
+            eq(basket_transactions.cycle_id, cycle_id),
+            eq(basket_transactions.txn_type, 'DEBIT_FINAL_CYCLE_OFFSET'),
+          ))
+          .limit(1)
+      : Promise.resolve([]),
+  ]);
 
   const total_expected = allPayments.reduce((s, p) => s + Number(p.expected_amount), 0);
   const total_paid     = allPayments.reduce((s, p) => s + Number(p.paid_amount),     0);
   const paid_count     = allPayments.filter(p => p.status === 'Paid').length;
   const unpaid_count   = allPayments.filter(p => p.status === 'Unpaid').length;
   const waived_count   = allPayments.filter(p => p.status === 'Waived').length;
+  const basket_contribution = offsetTxnRows[0] ? Number(offsetTxnRows[0].amount) : 0;
 
   const { status = 'all' } = filters;
   const dbStatus = status === 'paid' ? 'Paid' : status === 'unpaid' ? 'Unpaid' : status === 'waived' ? 'Waived' : null;
@@ -59,7 +78,7 @@ export async function listPayments(
       paid_amount: Number(p.paid_amount), status: p.status, paid_at: p.paid_at,
       marked_by: p.marked_by, notes: p.notes,
     })),
-    summary: { total_expected, total_paid, paid_count, unpaid_count, waived_count },
+    summary: { total_expected, total_paid, paid_count, unpaid_count, waived_count, basket_contribution, is_final_cycle: !!is_final_cycle },
   };
 }
 

@@ -1,8 +1,8 @@
 # ChitFund Management App — Requirements (v1)
 
-**Status:** Draft v13 (admin withdrawal refined — explicit opt-in flag at record time; one-time use per group tracked via admin_withdrawal_used; admin can still win via regular bid)
+**Status:** Draft v14 (final-cycle reduced contributions — basket offsets the pool + admin commission; payments seeded at reduced amounts and auto-Waived when basket covers everything)
 **Owner:** Suraj
-**Last updated:** 2026-05-20
+**Last updated:** 2026-05-23
 
 ---
 
@@ -120,9 +120,10 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - On a skip month: `pool_amount` is debited from the basket and paid to the winner.
 
 ### 4.5 Payment
-- payment_id, cycle_id, member_user_id, expected_amount (= monthly_contribution × member's share_count for regular cycles; 0 for skip-month cycles), paid_amount, status (Paid / Unpaid / Waived), paid_at (timestamp), marked_by (admin user_id), notes (optional), created_at, updated_at.
-- **Waived** status = this cycle is a skip-month; no payment needed from members.
+- payment_id, cycle_id, member_user_id, expected_amount (= monthly_contribution × member's share_count for regular cycles; 0 for skip-month cycles; reduced amount for final cycles — see §5.2 F-6a), paid_amount, status (Paid / Unpaid / Waived), paid_at (timestamp), marked_by (admin user_id), notes (optional), created_at, updated_at.
+- **Waived** status = this cycle is a skip-month OR the member's share of the final cycle is fully covered by the basket (expected_amount = 0 and status auto-set to Waived at seeding time).
 - One payment row per member per cycle, regardless of share_count (shares are folded into expected_amount).
+- **Final-cycle seeding:** when the last cycle opens (month_number = total_months), payments are seeded with reduced expected_amounts computed from the basket offset. See §5.2 F-6a for the formula. The basket is debited immediately for the offset portion.
 - **Audit log** for every edit (who changed what, when, old → new value).
 
 ### 4.6 Basket (communal kitty)
@@ -175,6 +176,30 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **F-7** Marking Paid auto-stamps the current date & time (admin can override the date if collected earlier).
 - **F-8** Admin can add a free-text note per payment (e.g. "paid in two installments", "received via Ramesh").
 - **F-9** Admin can edit/undo a payment entry. Every edit is logged in an audit trail.
+- **F-6a** **Final Cycle Reduced Contributions.** When the last cycle (month_number = total_months) is opened (i.e., when `POST /groups/:group_id/start` first processes cycles, or when the previous cycle is closed and this is the last), the system automatically seeds payments with reduced amounts using the basket balance to offset contributions:
+
+  **Computation:**
+  ```
+  total_needed         = pool_amount + admin_commission_for_cycle
+  admin_commission_for_cycle = pool_amount × admin_commission_rate / 100
+  basket_contribution  = min(basket.current_balance, total_needed)
+  remaining_to_collect = max(0, total_needed − basket_contribution)
+  ```
+
+  **Per-member seeding:**
+  - Each member's reduced expected_amount = `floor(remaining_to_collect × member.share_count / total_shares)`
+  - The member with the highest share_count (or first alphabetically on tie) absorbs the residual paisa so the sum equals `remaining_to_collect` exactly.
+  - If `remaining_to_collect = 0`: all payment rows are seeded with `expected_amount = 0` and `status = 'Waived'` (no cash needed from anyone).
+  - If `remaining_to_collect > 0`: payments are seeded with the computed reduced amounts, `status = 'Unpaid'` as normal.
+
+  **Basket debit:**
+  - A `FINAL_CYCLE_OFFSET` basket transaction (type `DEBIT_FINAL_CYCLE_OFFSET`, direction `'D'`) is created immediately for `basket_contribution`, debiting the basket at the time payments are seeded.
+  - If `basket_contribution = 0` (basket is empty), no basket transaction is created.
+
+  **Trigger:** seeding fires automatically when the previous (N−1th) cycle is closed via `POST .../close`, if the cycle being closed is `month_number = total_months − 1`. The final cycle's payments are always seeded at close of the penultimate cycle (not earlier).
+
+  **Admin view:** the cycle detail screen shows the basket contribution amount and the reduced expected_amount per member. Members see their own reduced expected_amount.
+
 - **F-10** Admin records the winner for the month from a dropdown of **eligible members** — those where `wins_count < share_count` AND who have no active loan in this group. If the admin selects themselves as the winner, the **admin withdrawal** flow is triggered (see F-11a).
 
 ### 5.3 Bidding, Basket & Loans (Admin)
@@ -295,6 +320,9 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **Chit closure with outstanding loans:** blocked. Admin must collect all outstanding loans before the group can be marked Closed.
 - **Chit closure split rounding:** final basket balance may not divide evenly among members — residual paisa is added to the last member or rounded per standard rules (documented in closure report).
 - **Winner doesn't pay back future contributions:** winner is still a regular member and owes contributions for all remaining cycles. Failure is treated same as any other defaulter.
+- **Final cycle basket offset covers everything:** if `basket_contribution >= total_needed` (basket has more than pool + admin commission), `remaining_to_collect = 0`, all payments are seeded at 0 and auto-Waived. The basket is only debited by `total_needed`, not the full balance. Any surplus stays in the basket for the closure-split.
+- **Final cycle basket is empty:** `basket_contribution = 0`, `remaining_to_collect = total_needed`. Each member pays their normal share plus the admin commission share. The basket is not debited (no transaction created).
+- **Residual paisa in final-cycle split:** `floor()` division may leave 1–(total_shares−1) paise unaccounted. This residual is added to the member with the most shares (or the first alphabetically on a share-count tie) so the total collected equals `remaining_to_collect` exactly.
 - **Invalid payment due day (29–31):** group creation is blocked if `payment_due_day` is 29, 30, or 31. Admin must choose a day between 1 and 28. The typical default is 10.
 - **Join request exceeds remaining capacity:** blocked at submission time. The user sees how many shares are still unfilled and must request ≤ that number.
 - **Admin approves with a share count override that exceeds remaining capacity:** blocked with a `SHARES_EXCEEDED` error; admin must enter a valid count.
@@ -327,6 +355,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 | 18 | Admin share count at creation | Admin selects their own share count at group creation (min 1, max total_shares). Defaults to 1. Adjustable via the members screen before cycle 1 starts. |
 | 19 | Member self-join flow | Via invitation code: member submits a join request with a requested share count → admin approves / approves-with-change / rejects. No immediate self-add. Code is locked once cycle 1 starts. |
 | 20 | Admin withdrawal | Admin has ONE special share (counted within their regular share_count). Withdrawal is an explicit opt-in flag at record time (`is_admin_withdrawal: true`). One-time use per group, tracked via `admin_withdrawal_used` on the membership. Admin can still win other shares via normal bid. |
+| 21 | Final-cycle offset formula | `total_needed = pool_amount + admin_commission_for_cycle`. Basket covers `min(basket_balance, total_needed)`. Admin commission is NOT waived and NOT separate — it is included in total_needed. Remaining collected from members proportional to share_count. Member with most shares absorbs residual paisa. If remaining ≤ 0, all payments are seeded at 0 and auto-Waived. Basket is debited by `basket_contribution = min(basket_balance, total_needed)` immediately at final-cycle payment seeding time. |
 
 ---
 

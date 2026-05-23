@@ -336,11 +336,35 @@ export default function CycleDetailPage() {
           </div>
         )}
 
+        {/* ── Final cycle basket offset banner ──────────────────────────────── */}
+        {cycle.is_final_cycle && cycle.basket_contribution > 0 && (
+          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-4">
+            <p className="text-[11px] font-semibold text-teal-600 tracking-widest mb-2">FINAL CYCLE — BASKET OFFSET</p>
+            <p className="text-xs text-teal-800 leading-relaxed">
+              The basket contributed <span className="font-semibold">{formatPaise(cycle.basket_contribution)}</span> toward
+              this cycle's pool + admin commission.
+              {cycle.waived_count === cycle.payments.length && cycle.payments.length > 0
+                ? ' The full amount is covered — no member needs to pay.'
+                : ` Members pay reduced contributions.`}
+            </p>
+          </div>
+        )}
+        {cycle.is_final_cycle && cycle.basket_contribution === 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+            <p className="text-[11px] font-semibold text-amber-600 tracking-widest mb-2">FINAL CYCLE</p>
+            <p className="text-xs text-amber-800 leading-relaxed">
+              This is the last cycle. The basket had no balance to offset contributions — members pay the full share including the admin commission portion.
+            </p>
+          </div>
+        )}
+
         {/* ── Payments list for this cycle ──────────────────────────────────── */}
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50">
             <p className="text-[11px] font-semibold text-gray-400 tracking-widest">
-              PAYMENTS ({paidCount}/{totalCount} paid)
+              {cycle.is_final_cycle
+                ? `PAYMENTS (${paidCount}/${cycle.payments.filter(p => p.status !== 'Waived').length} paid, ${cycle.waived_count} waived)`
+                : `PAYMENTS (${paidCount}/${totalCount} paid)`}
             </p>
           </div>
 

@@ -1,10 +1,10 @@
 # ChitFund App — API Specification (v1)
 
-**Status:** Draft v11 (admin withdrawal refined — explicit is_admin_withdrawal flag; one-time use per group; admin can win via regular bid without using the special share)
+**Status:** Draft v12 (final-cycle reduced contributions — basket offsets pool_amount + admin_commission; DEBIT_FINAL_CYCLE_OFFSET transaction type added; payments seeded with reduced amounts at penultimate cycle close)
 **Style:** REST over HTTPS
 **Base URL:** `https://api.chitfund.app/v1`
 **Auth:** JWT (access token in `Authorization: Bearer <token>` header)
-**Last updated:** 2026-05-20
+**Last updated:** 2026-05-23
 
 ---
 
@@ -962,10 +962,14 @@ List all payments for a cycle.
     "total_paid": 8000000,
     "paid_count": 8,
     "unpaid_count": 2,
-    "waived_count": 0
+    "waived_count": 0,
+    "basket_contribution": 0,
+    "is_final_cycle": false
   }
 }
 ```
+
+**Final cycle behavior:** When `is_final_cycle = true`, `expected_amount` per member is the reduced amount after the basket offset (see requirements F-6a). `basket_contribution` is the amount the basket contributed toward the pool + admin commission for this cycle. If `basket_contribution >= pool_amount + admin_commission`, all payments are `Waived` with `expected_amount = 0`. The basket is debited by `basket_contribution` at payment seeding time (when the penultimate cycle closes), not at payment marking time.
 
 ---
 
@@ -1139,6 +1143,18 @@ List ledger entries.
 ```
 
 **Authorization:** members get only entries that involve them (their loans, their closure split). Admins see all.
+
+**Transaction types reference:**
+| `txn_type` | Direction | Description |
+|---|---|---|
+| `CREDIT_DISCOUNT` | C | Basket credit from a regular cycle bid (= bid_amount − admin_commission) |
+| `DEBIT_SKIP_MONTH` | D | Basket pays winner of a skip-month cycle (= pool_amount) |
+| `DEBIT_FINAL_CYCLE_OFFSET` | D | Basket contribution toward the final cycle (= min(basket_balance, pool_amount + admin_commission_for_cycle)). Created when the penultimate cycle closes. |
+| `LOAN_DISBURSED` | D | Loan disbursed to a member |
+| `LOAN_REPAID` | C | Loan principal repaid by borrower |
+| `INTEREST_ACCRUED` | C | Monthly interest on an active loan |
+| `CLOSURE_SPLIT` | D | Final basket balance distributed to members at group closure |
+| `ADJUSTMENT` | C or D | Manual correction with mandatory notes |
 
 ---
 
@@ -1657,6 +1673,7 @@ Basket balance month by month (for charting).
 | `BASKET_INSUFFICIENT` | 409 | Basket balance < required |
 | `PAYMENTS_ALREADY_COLLECTED` | 409 | Can't skip-month after collections |
 | `PAYMENTS_OUTSTANDING` | 409 | Cycle has unpaid; can't close |
+| `FINAL_CYCLE_ALREADY_SEEDED` | 409 | Final cycle payments already seeded (idempotency guard) |
 | `LOANS_OUTSTANDING` | 409 | Group has active loans; can't close |
 | `CYCLES_PENDING` | 409 | Not all cycles closed; can't close group |
 | `LOAN_CLOSED` | 409 | Loan already repaid/written off |

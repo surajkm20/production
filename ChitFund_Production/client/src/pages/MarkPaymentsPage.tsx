@@ -155,13 +155,16 @@ export default function MarkPaymentsPage() {
 
   // Pure function: derive a CycleSummary from the current payments array.
   // Called after every optimistic toggle so the totals in the summary bar stay in sync.
+  // basket_contribution and is_final_cycle come from the server; preserve from current summary.
   function recalcSummary(ps: Payment[]): CycleSummary {
     return {
-      total_expected: ps.reduce((s, p) => s + p.expected_amount, 0),
-      total_paid:     ps.filter(p => p.status === 'Paid').reduce((s, p) => s + p.expected_amount, 0),
-      paid_count:     ps.filter(p => p.status === 'Paid').length,
-      unpaid_count:   ps.filter(p => p.status === 'Unpaid').length,
-      waived_count:   ps.filter(p => p.status === 'Waived').length,
+      total_expected:      ps.reduce((s, p) => s + p.expected_amount, 0),
+      total_paid:          ps.filter(p => p.status === 'Paid').reduce((s, p) => s + p.expected_amount, 0),
+      paid_count:          ps.filter(p => p.status === 'Paid').length,
+      unpaid_count:        ps.filter(p => p.status === 'Unpaid').length,
+      waived_count:        ps.filter(p => p.status === 'Waived').length,
+      basket_contribution: summary?.basket_contribution ?? 0,
+      is_final_cycle:      summary?.is_final_cycle ?? false,
     }
   }
 
@@ -282,6 +285,31 @@ export default function MarkPaymentsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
             </button>
+          </div>
+        )}
+
+        {/* Final cycle basket offset banner */}
+        {summary?.is_final_cycle && (
+          <div className={`mx-3 mt-3 rounded-2xl p-3.5 border ${
+            summary.basket_contribution > 0
+              ? 'bg-teal-50 border-teal-200'
+              : 'bg-amber-50 border-amber-200'
+          }`}>
+            <p className={`text-[11px] font-semibold tracking-widest mb-1 ${
+              summary.basket_contribution > 0 ? 'text-teal-600' : 'text-amber-600'
+            }`}>FINAL CYCLE</p>
+            {summary.basket_contribution > 0 ? (
+              <p className="text-xs leading-relaxed text-teal-800">
+                Basket contributed <span className="font-semibold">{formatPaise(summary.basket_contribution)}</span> toward this month's pool + commission.
+                {summary.waived_count > 0 && summary.waived_count === (summary.paid_count + summary.unpaid_count + summary.waived_count)
+                  ? ' All contributions are covered — no one needs to pay.'
+                  : ' Members pay reduced contributions.'}
+              </p>
+            ) : (
+              <p className="text-xs leading-relaxed text-amber-800">
+                Last cycle. No basket balance available — members pay the full amount including admin commission share.
+              </p>
+            )}
           </div>
         )}
 
