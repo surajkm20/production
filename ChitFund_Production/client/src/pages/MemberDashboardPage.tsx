@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
-import type { GroupDetail, Member, Payment, PaymentListResponse, MemberPaymentHistoryItem, User } from '../types/api'
+import type { GroupDetail, Member, Payment, PaymentListResponse, MemberPaymentHistoryItem, User, MemberWin } from '../types/api'
 import GroupNavBar from '../components/GroupNavBar'
 
 function StatusPill({ status }: { status: 'Paid' | 'Unpaid' | 'Waived' }) {
@@ -30,6 +30,7 @@ export default function MemberDashboardPage() {
   const [adminName, setAdminName] = useState<string>('')
 
   const [paymentHistory, setPaymentHistory] = useState<MemberPaymentHistoryItem[]>([])
+  const [myWins, setMyWins] = useState<MemberWin[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,6 +54,7 @@ export default function MemberDashboardPage() {
       const parallelFetches: Promise<unknown>[] = [
         api.get<Member[]>(`/groups/${groupId}/members`),
         api.get<MemberPaymentHistoryItem[]>(`/groups/${groupId}/members/${me.user_id}/payments?limit=3`),
+        api.getMemberWins(groupId!, me.user_id),
       ]
       if (g.current_cycle) {
         // Only add this fetch if there's an active cycle to look up
@@ -66,17 +68,17 @@ export default function MemberDashboardPage() {
       const results = await Promise.all(parallelFetches)
       const members = results[0] as Member[]
       const history = results[1] as MemberPaymentHistoryItem[]
+      const wins    = results[2] as MemberWin[]
       setPaymentHistory(history)
+      setMyWins(wins)
 
       // Find the admin by role — shown as "Admin: Suraj" in the group header
       const admin = members.find(m => m.role === 'Admin')
       if (admin) setAdminName(admin.name)
 
-      // Find the winner's name for the current cycle
-
-      // Extract this member's own payment from the cycle payments list (results[2] if it was fetched)
-      if (g.current_cycle && results[2]) {
-        const paymentsRes = results[2] as PaymentListResponse
+      // Extract this member's own payment from the cycle payments list (results[3] if it was fetched)
+      if (g.current_cycle && results[3]) {
+        const paymentsRes = results[3] as PaymentListResponse
         const mine = paymentsRes.data.find(p => p.member_user_id === me.user_id)
         setMyPayment(mine ?? null)
       }
@@ -168,6 +170,28 @@ export default function MemberDashboardPage() {
           )}
         </div>
 
+        {/* My Shares card */}
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 mx-3 mt-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">My Shares</p>
+          <div className="flex divide-x divide-gray-100">
+            <div className="flex-1 flex flex-col items-center pr-3">
+              <span className="text-2xl font-bold text-gray-900">{group.my_membership.share_count}</span>
+              <span className="text-xs text-gray-400 mt-0.5">shares</span>
+            </div>
+            <div className="flex-1 flex flex-col items-center px-3">
+              <span className="text-2xl font-bold text-gray-900">{group.my_membership.wins_count}</span>
+              <span className="text-xs text-gray-400 mt-0.5">won</span>
+            </div>
+            <div className="flex-1 flex flex-col items-center pl-3">
+              <span className="text-2xl font-bold text-gray-900">{group.my_membership.share_count - group.my_membership.wins_count}</span>
+              <span className="text-xs text-gray-400 mt-0.5">remaining</span>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-3">
+            Monthly payment: {formatPaise(group.monthly_contribution * group.my_membership.share_count)}
+          </p>
+        </div>
+
         {/* This member's payment status for the current cycle */}
         {cycle && (
           <div className="mx-3 mt-3 bg-white rounded-2xl p-4 border border-gray-100">
@@ -236,6 +260,38 @@ export default function MemberDashboardPage() {
             )}
           </div>
         )}
+
+        {/* My Winning History */}
+        <div className="bg-purple-50 border border-purple-100 rounded-2xl mx-3 mt-3 p-4">
+          <p className="text-sm font-semibold text-gray-700 mb-3">My Winning History</p>
+          {myWins.length === 0 ? (
+            <p className="text-xs text-gray-400">No wins yet — your turn will come!</p>
+          ) : (
+            <>
+              <div className="divide-y divide-purple-100">
+                {myWins.map((w, i) => (
+                  <div key={i} className="py-2.5">
+                    <p className="text-sm text-gray-800">
+                      Month {w.month_label}
+                      {w.winner_number > 1 && (
+                        <span className="text-xs text-gray-500 ml-1">(winner #{w.winner_number})</span>
+                      )}
+                      {w.is_admin_withdrawal && (
+                        <span className="text-xs text-gray-400 ml-1">(admin withdrawal)</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Bid {formatPaise(w.bid_amount)} · Took home {formatPaise(w.winner_takeaway)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 font-medium mt-2 pt-2 border-t border-purple-100">
+                Total received: {formatPaise(myWins.reduce((s, w) => s + w.winner_takeaway, 0))}
+              </p>
+            </>
+          )}
+        </div>
 
         {/* Group basket — shows member's projected share if the group closed today */}
         {group.basket && (

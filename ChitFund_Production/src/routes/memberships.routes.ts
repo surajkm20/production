@@ -28,6 +28,8 @@ membershipsRouter.post('/:group_id/members/:membership_id/transfer-admin', requi
 membershipsRouter.post('/:group_id/transfer-admin/:transfer_id/confirm',   authenticate, validate(confirmTransferAdminSchema), memberships.confirmTransferAdmin);
 membershipsRouter.post('/:group_id/members/:membership_id/remind',         requireAdmin, validate(remindMemberSchema), memberships.remindMember);
 
+membershipsRouter.get('/:group_id/members/:user_id/wins',    authenticate, requireMember, memberships.getMemberWins);
+
 // Join request management (admin only)
 membershipsRouter.get('/:group_id/join-requests',                                              requireAdmin,                                  memberships.listJoinRequests);
 membershipsRouter.post('/:group_id/join-requests/:membership_id/approve',  requireAdmin, validate(approveJoinRequestSchema), memberships.approveJoinRequest);

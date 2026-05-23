@@ -4,9 +4,9 @@
 // soft-deactivate with audit log, two-step OTP admin transfer flow.
 
 import { randomBytes } from 'crypto';
-import { eq, and, ilike, sum, gt, isNull } from 'drizzle-orm';
+import { eq, and, ilike, sum, gt, isNull, asc } from 'drizzle-orm';
 import { db } from '../config/db';
-import { chit_groups, memberships, payments, monthly_cycles, users, notifications, pending_admin_transfers } from '../db/schema';
+import { chit_groups, memberships, payments, monthly_cycles, cycle_winners, users, notifications, pending_admin_transfers } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import * as otpService from './otp.service';
 import { insertActivity } from './activity.service';
@@ -533,6 +533,36 @@ export async function rejectJoinRequest(
   });
 
   return { membership_id, status: 'Inactive' };
+}
+
+// ─── getMemberWins ───────────────────────────────────────────────────────────
+export async function getMemberWins(callerId: string, groupId: string, targetUserId: string) {
+  const caller = await assertActiveMember(groupId, callerId);
+
+  if (callerId !== targetUserId && caller.role !== 'Admin') {
+    throw new AppError(403, 'FORBIDDEN', 'Only an admin can view another member\'s win history.');
+  }
+
+  const rows = await db
+    .select({
+      month_number:        monthly_cycles.month_number,
+      month_label:         monthly_cycles.month_label,
+      winner_number:       cycle_winners.winner_number,
+      bid_amount:          cycle_winners.bid_amount,
+      admin_commission:    cycle_winners.admin_commission,
+      basket_credit:       cycle_winners.basket_credit,
+      winner_takeaway:     cycle_winners.winner_takeaway,
+      is_admin_withdrawal: cycle_winners.is_admin_withdrawal,
+    })
+    .from(cycle_winners)
+    .innerJoin(monthly_cycles, eq(monthly_cycles.id, cycle_winners.cycle_id))
+    .where(and(
+      eq(cycle_winners.group_id,       groupId),
+      eq(cycle_winners.winner_user_id, targetUserId),
+    ))
+    .orderBy(asc(monthly_cycles.month_number));
+
+  return rows;
 }
 
 // ─── remindMember ────────────────────────────────────────────────────────────

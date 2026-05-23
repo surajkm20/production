@@ -84,6 +84,17 @@ export async function rejectJoinRequest(req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 }
 
+export async function getMemberWins(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const result = await MembershipsService.getMemberWins(
+      req.user!.userId,
+      req.params.group_id as string,
+      req.params.user_id  as string,
+    )
+    sendSuccess(res, result)
+  } catch (err) { next(err) }
+}
+
 export async function remindMember(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const group_id      = req.params.group_id      as string;

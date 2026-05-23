@@ -580,8 +580,8 @@ export default function MembersPage() {
           </div>
         )}
 
-        {/* Add new person section — hidden once cycle starts */}
-        {!groupLocked && (
+        {/* Add new person section — admin only, hidden once cycle starts */}
+        {group.my_membership.role === 'Admin' && !groupLocked && (
           <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-100 p-4">
             <p className="text-sm font-semibold text-gray-700 mb-3">Add a new person</p>
             <div className="flex gap-2">
@@ -607,7 +607,8 @@ export default function MembersPage() {
           </div>
         )}
 
-        {/* Invite code — always visible so admin can copy and share manually */}
+        {/* Invite code — visible to admin only */}
+        {group.my_membership.role === 'Admin' && (
         <div className="mx-3 mt-3 bg-maroon-600 rounded-2xl p-4 text-white">
           <p className="text-xs text-maroon-200 mb-2 font-medium">INVITE CODE</p>
           <div className="flex items-center justify-between gap-3">
@@ -626,6 +627,7 @@ export default function MembersPage() {
             ) : null
           })()}
         </div>
+        )}
 
         {startError && (
           <p className="text-sm text-red-600 text-center mt-3 px-4">{startError}</p>

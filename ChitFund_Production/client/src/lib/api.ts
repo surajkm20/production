@@ -65,4 +65,7 @@ export const api = {
 
   getChitiEligibility: (groupId: string) =>
     request<import('../types/api').ChitiEligibility>(`/groups/${groupId}/chiti-eligibility`),
+
+  getMemberWins: (groupId: string, userId: string) =>
+    request<import('../types/api').MemberWin[]>(`/groups/${groupId}/members/${userId}/wins`),
 }

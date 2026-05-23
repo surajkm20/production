@@ -278,3 +278,14 @@ export interface CycleDetail extends CycleItem {
   } | null
   payments: CycleDetailPayment[]
 }
+
+export interface MemberWin {
+  month_number: number
+  month_label: string
+  winner_number: number
+  bid_amount: number
+  admin_commission: number
+  basket_credit: number
+  winner_takeaway: number
+  is_admin_withdrawal: boolean
+}
