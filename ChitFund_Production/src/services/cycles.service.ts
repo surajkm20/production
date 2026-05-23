@@ -428,6 +428,7 @@ export async function recordWinner(
     stored_bid           = bid_amount;
     admin_commission     = Math.round(pool * commission_rate / 100);
     basket_credit        = bid_amount - admin_commission;
+    if (basket_credit < 0)      throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${admin_commission} paise).`);
     winner_takeaway      = pool - bid_amount;
     // For slot > 1 the basket funds the payout, so deduct pool_amount and then credit back basket_credit
     basket_balance_after = realized + basket_credit - (nextSlot > 1 ? pool : 0);
@@ -713,6 +714,7 @@ export async function updateCycle(
   const pool              = Number(group.pool_amount);
   const new_commission    = Math.round(pool * commission_rate / 100);
   const new_basket_credit = new_bid - new_commission;
+  if (new_basket_credit < 0)                    throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${new_commission} paise).`);
   const old_basket_credit = Number(winnerW.basket_credit);
   const credit_delta      = new_basket_credit - old_basket_credit;
   const new_takeaway      = pool - new_bid;
@@ -807,6 +809,7 @@ export async function correctClosedCycle(
     const commission_rate   = parseFloat(String(group.admin_commission_rate));
     const new_commission    = Math.round(pool * commission_rate / 100);
     const new_basket_credit = new_bid - new_commission;
+    if (new_basket_credit < 0)            throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${new_commission} paise).`);
     const new_takeaway      = pool - new_bid;
     const old_basket_credit = Number(firstWinner.basket_credit);
     const credit_delta      = new_basket_credit - old_basket_credit;
