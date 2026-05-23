@@ -635,30 +635,80 @@ export default function AnalyticsPage() {
           <div className="mx-4">
             <SectionLabel>Bid trend</SectionLabel>
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <div className="space-y-2.5">
-                {bidTrend
-                  .filter(b => b.bid_amount !== null || b.is_skip_month)
-                  .map(b => (
-                    <div key={b.month_number} className="flex items-center gap-3">
-                      <span className="text-[11px] text-gray-400 w-7 shrink-0 font-medium">M{b.month_number}</span>
-                      {b.is_skip_month ? (
-                        <span className="text-[11px] text-amber-500 italic flex-1">Skip month</span>
-                      ) : (
-                        <>
-                          <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                            <div
-                              className="h-full bg-maroon-500 rounded-full transition-all"
-                              style={{ width: `${maxBid > 0 ? Math.round((b.bid_amount! / maxBid) * 100) : 0}%` }}
-                            />
+              {/* Legend */}
+              {actualWinners.some((_, __, arr) => {
+                const counts = new Map<number, number>()
+                arr.forEach(w => counts.set(w.month_number, (counts.get(w.month_number) ?? 0) + 1))
+                return [...counts.values()].some(c => c > 1)
+              }) && (
+                <div className="flex items-center gap-3 text-[10px] text-gray-400 mb-3">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-maroon-500 inline-block" />Normal bid</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />X Chiti 2nd bid</span>
+                </div>
+              )}
+              {(() => {
+                // Group winners by month so multi-winner cycles can render split bars
+                const winnersByMonth = new Map<number, WinnerRow[]>()
+                actualWinners.forEach(w => {
+                  const arr = winnersByMonth.get(w.month_number) ?? []
+                  arr.push(w)
+                  winnersByMonth.set(w.month_number, arr)
+                })
+                // maxBid is already the max total per cycle from bidTrend (sums multi-bids)
+                return (
+                  <div className="space-y-3">
+                    {bidTrend
+                      .filter(b => b.bid_amount !== null || b.is_skip_month)
+                      .map(b => {
+                        const cycleWinners = winnersByMonth.get(b.month_number) ?? []
+                        const isXChiti = cycleWinners.length > 1
+                        return (
+                          <div key={b.month_number} className="flex items-start gap-3">
+                            {/* Month label */}
+                            <span className="text-[11px] text-gray-400 w-7 shrink-0 font-medium pt-0.5">M{b.month_number}</span>
+
+                            {b.is_skip_month ? (
+                              <span className="text-[11px] text-amber-500 italic flex-1 pt-0.5">Skip month</span>
+                            ) : isXChiti ? (
+                              /* X Chiti: stacked bars, one per winner */
+                              <div className="flex-1 space-y-1.5">
+                                {cycleWinners.map((w, i) => (
+                                  <div key={i} className="flex items-center gap-2">
+                                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full transition-all ${i === 0 ? 'bg-maroon-500' : 'bg-teal-400'}`}
+                                        style={{ width: `${maxBid > 0 ? Math.round(((w.bid_amount ?? 0) / maxBid) * 100) : 0}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[11px] tabular-nums font-medium w-20 text-right shrink-0 text-gray-600">
+                                      {formatPaise(w.bid_amount ?? 0)}
+                                    </span>
+                                  </div>
+                                ))}
+                                <span className="inline-flex items-center text-[10px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
+                                  {cycleWinners.length} bids · X Chiti
+                                </span>
+                              </div>
+                            ) : (
+                              /* Normal single bid */
+                              <>
+                                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden mt-0.5">
+                                  <div
+                                    className="h-full bg-maroon-500 rounded-full transition-all"
+                                    style={{ width: `${maxBid > 0 ? Math.round((b.bid_amount! / maxBid) * 100) : 0}%` }}
+                                  />
+                                </div>
+                                <span className="text-[11px] text-gray-600 font-medium w-20 text-right shrink-0 tabular-nums">
+                                  {formatPaise(b.bid_amount!)}
+                                </span>
+                              </>
+                            )}
                           </div>
-                          <span className="text-[11px] text-gray-600 font-medium w-20 text-right shrink-0 tabular-nums">
-                            {formatPaise(b.bid_amount!)}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  ))}
-              </div>
+                        )
+                      })}
+                  </div>
+                )
+              })()}
             </div>
           </div>
         )}
