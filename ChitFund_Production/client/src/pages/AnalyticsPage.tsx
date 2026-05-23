@@ -96,21 +96,20 @@ function BidFlowCard({
   totalBasketCredit,
   totalAdminCommission,
   currentBasketBalance,
-  totalLentOut,
+  totalLentOut: _totalLentOut,
   totalInterestEarned,
   activeLoansPrincipal,
   totalOutstandingInterest,
 }: BidFlowCardProps) {
-  // Percentage bars
-  const basketPct  = totalBidMoney > 0 ? Math.round((totalBasketCredit   / totalBidMoney) * 100) : 0
-  const commPct    = totalBidMoney > 0 ? Math.round((totalAdminCommission / totalBidMoney) * 100) : 0
+  // Percentage bars (bid split — basket credit vs commission)
+  const basketPct = totalBidMoney > 0 ? Math.round((totalBasketCredit   / totalBidMoney) * 100) : 0
+  const commPct   = totalBidMoney > 0 ? Math.round((totalAdminCommission / totalBidMoney) * 100) : 0
 
-  // Basket sub-split
-  const loansPrincipal = totalLentOut   // principal ever lent
-  const interest       = totalInterestEarned
-  const basketTotal    = totalBasketCredit + totalInterestEarned
-  const cashPct        = basketTotal > 0 ? Math.round((currentBasketBalance  / basketTotal) * 100) : 0
-  const loanPct        = basketTotal > 0 ? Math.round((loansPrincipal + interest) / basketTotal * 100) : 0
+  // Effective basket total = liquid cash + deployed principal + accrued (unrealized) interest
+  // Interest already collected is embedded inside currentBasketBalance.
+  const effectiveBasketTotal = currentBasketBalance + activeLoansPrincipal + totalOutstandingInterest
+  const cashPct = effectiveBasketTotal > 0 ? Math.round((currentBasketBalance / effectiveBasketTotal) * 100) : 0
+  const loanPct = effectiveBasketTotal > 0 ? Math.round((activeLoansPrincipal  / effectiveBasketTotal) * 100) : 0
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -163,69 +162,61 @@ function BidFlowCard({
                 <p className="text-[11px] text-gray-400">Goes into the group pool</p>
               </div>
             </div>
-            <p className="text-sm font-bold text-maroon-600 tabular-nums">{formatPaise(totalBasketCredit)}</p>
+            <p className="text-sm font-bold text-maroon-600 tabular-nums">{formatPaise(effectiveBasketTotal)}</p>
           </div>
 
-          {/* Level 3 — Basket sub-split (cash + loans) */}
-          {totalBasketCredit > 0 && (
+          {/* Level 3 — Basket sub-split (cash + active loans + accrued interest) */}
+          {effectiveBasketTotal > 0 && (
             <div className="ml-4 bg-gray-50 rounded-xl p-3 space-y-2.5">
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Basket breakdown</p>
 
-              {/* Mini bar for cash vs loans */}
-              {basketTotal > 0 && (
-                <div className="flex h-2 rounded-full overflow-hidden gap-0.5 mb-1">
-                  <div className="bg-emerald-500 rounded-l-full" style={{ width: `${cashPct}%` }} />
-                  <div className="bg-blue-400 rounded-r-full" style={{ width: `${loanPct}%` }} />
-                </div>
-              )}
+              {/* Mini bar: cash / loans principal / accrued interest */}
+              <div className="flex h-2 rounded-full overflow-hidden gap-0.5 mb-1">
+                <div className="bg-emerald-500 rounded-l-full" style={{ width: `${cashPct}%` }} />
+                <div className="bg-blue-400" style={{ width: `${loanPct}%` }} />
+                <div className="bg-amber-400 rounded-r-full" style={{ width: `${100 - cashPct - loanPct}%` }} />
+              </div>
 
               <div className="space-y-2">
-                {/* Available cash */}
+                {/* Available cash (includes already-collected interest) */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500" />
                     <div>
                       <p className="text-xs text-gray-600">Available balance</p>
-                      <p className="text-[10px] text-gray-400">Liquid cash in basket</p>
+                      <p className="text-[10px] text-gray-400">
+                        Liquid cash{totalInterestEarned > 0 ? ` · incl. ${formatPaise(totalInterestEarned)} interest collected` : ''}
+                      </p>
                     </div>
                   </div>
                   <p className="text-xs font-semibold text-emerald-600 tabular-nums">{formatPaise(currentBasketBalance)}</p>
                 </div>
 
-                {/* Loans deployed */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-blue-400" />
-                    <div>
-                      <p className="text-xs text-gray-600">Lent out (loans)</p>
-                      <p className="text-[10px] text-gray-400">Principal deployed</p>
-                    </div>
-                  </div>
-                  <p className="text-xs font-semibold text-blue-600 tabular-nums">{formatPaise(loansPrincipal)}</p>
-                </div>
-
-                {/* Interest earned */}
-                {totalInterestEarned > 0 && (
+                {/* Active loans — principal outstanding */}
+                {activeLoansPrincipal > 0 && (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-blue-200" />
+                      <span className="w-2 h-2 rounded-full bg-blue-400" />
                       <div>
-                        <p className="text-xs text-gray-600">Interest collected</p>
-                        <p className="text-[10px] text-gray-400">Loan interest returned</p>
+                        <p className="text-xs text-gray-600">Active loans (principal)</p>
+                        <p className="text-[10px] text-gray-400">Deployed, will return to basket</p>
                       </div>
                     </div>
-                    <p className="text-xs font-semibold text-blue-400 tabular-nums">+{formatPaise(totalInterestEarned)}</p>
+                    <p className="text-xs font-semibold text-blue-600 tabular-nums">{formatPaise(activeLoansPrincipal)}</p>
                   </div>
                 )}
 
-                {/* Outstanding (unrealized) */}
-                {(activeLoansPrincipal + totalOutstandingInterest) > 0 && (
-                  <div className="border-t border-gray-200 pt-2 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500">Outstanding (unrealized)</p>
-                      <p className="text-[10px] text-gray-400">Principal + accrued interest not yet collected</p>
+                {/* Accrued interest — unrealized, owed to basket */}
+                {totalOutstandingInterest > 0 && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-400" />
+                      <div>
+                        <p className="text-xs text-gray-600">Accrued interest (unrealized)</p>
+                        <p className="text-[10px] text-gray-400">Owed to basket, not yet collected</p>
+                      </div>
                     </div>
-                    <p className="text-xs font-semibold text-amber-600 tabular-nums">{formatPaise(activeLoansPrincipal + totalOutstandingInterest)}</p>
+                    <p className="text-xs font-semibold text-amber-600 tabular-nums">+{formatPaise(totalOutstandingInterest)}</p>
                   </div>
                 )}
               </div>
