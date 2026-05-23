@@ -178,15 +178,13 @@ function BidFlowCard({
               </div>
 
               <div className="space-y-2">
-                {/* Available cash (includes already-collected interest) */}
+                {/* Available cash */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500" />
                     <div>
                       <p className="text-xs text-gray-600">Available balance</p>
-                      <p className="text-[10px] text-gray-400">
-                        Liquid cash{totalInterestEarned > 0 ? ` · incl. ${formatPaise(totalInterestEarned)} interest collected` : ''}
-                      </p>
+                      <p className="text-[10px] text-gray-400">Liquid cash in basket</p>
                     </div>
                   </div>
                   <p className="text-xs font-semibold text-emerald-600 tabular-nums">{formatPaise(currentBasketBalance)}</p>
@@ -219,6 +217,48 @@ function BidFlowCard({
                     <p className="text-xs font-semibold text-amber-600 tabular-nums">+{formatPaise(totalOutstandingInterest)}</p>
                   </div>
                 )}
+              </div>
+
+              {/* Source breakdown — where basket money came from */}
+              <div className="border-t border-gray-200 pt-2.5 mt-0.5 space-y-2">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Where it came from</p>
+
+                {/* Bid-origin money */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-purple-500" />
+                    <div>
+                      <p className="text-xs text-gray-600">Regular basket</p>
+                      <p className="text-[10px] text-gray-400">From member bids</p>
+                    </div>
+                  </div>
+                  <p className="text-xs font-semibold text-purple-700 tabular-nums">{formatPaise(totalBasketCredit)}</p>
+                </div>
+
+                {/* Interest-origin money (collected + accrued) */}
+                {(totalInterestEarned + totalOutstandingInterest) > 0 && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-teal-500" />
+                      <div>
+                        <p className="text-xs text-gray-600">Interest earned</p>
+                        <p className="text-[10px] text-gray-400">
+                          {formatPaise(totalInterestEarned)} collected
+                          {totalOutstandingInterest > 0 ? ` + ${formatPaise(totalOutstandingInterest)} accrued` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-xs font-semibold text-teal-600 tabular-nums">
+                      {formatPaise(totalInterestEarned + totalOutstandingInterest)}
+                    </p>
+                  </div>
+                )}
+
+                {/* Total basket — sum of sources */}
+                <div className="flex items-center justify-between border-t border-dashed border-gray-200 pt-2">
+                  <p className="text-xs font-semibold text-gray-700">Total basket</p>
+                  <p className="text-xs font-bold text-gray-900 tabular-nums">{formatPaise(effectiveBasketTotal)}</p>
+                </div>
               </div>
             </div>
           )}
