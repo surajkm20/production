@@ -24,7 +24,9 @@ function chitiLabel(x: number): string {
   return `${x}× Chiti`;
 }
 
-// outstanding interest for a loan: cycles_elapsed × monthly_interest − total_interest_paid
+// outstanding interest for a loan: interest starts from the cycle AFTER disbursement.
+// cycles_elapsed = currentMonth - disbursement_month_number (0 in the disbursement cycle itself).
+// total_accrued = cycles_elapsed × monthly_interest; outstanding = total_accrued − total_interest_paid
 function computeOutstandingInterest(cyclesElapsed: number, principal: number, rate: number, totalInterestPaid: number): number {
   const monthlyInterest = Math.round(principal * rate / 100);
   return Math.max(0, cyclesElapsed * monthlyInterest - totalInterestPaid);
@@ -68,7 +70,7 @@ export async function getChitiEligibility(userId: string, group_id: string) {
   const currentMonth = currentCycleRows[0]?.month_number ?? 1;
 
   const unrealized = activeLoans.reduce((acc, loan) => {
-    const cyclesElapsed = Math.max(0, currentMonth - Number(loan.disbursement_month_number) + 1);
+    const cyclesElapsed = Math.max(0, currentMonth - Number(loan.disbursement_month_number));
     const outstandingInterest = computeOutstandingInterest(
       cyclesElapsed, Number(loan.principal), Number(loan.monthly_interest_rate), Number(loan.total_interest_paid),
     );
@@ -375,7 +377,7 @@ export async function recordWinner(
   .where(and(eq(baskets.group_id, group_id), eq(loans.status, 'Active')));
 
   const unrealized = activeLoans.reduce((acc, loan) => {
-    const elapsed = Math.max(0, currentMonth - Number(loan.disbursement_month_number) + 1);
+    const elapsed = Math.max(0, currentMonth - Number(loan.disbursement_month_number));
     return acc + Number(loan.principal) + computeOutstandingInterest(elapsed, Number(loan.principal), Number(loan.monthly_interest_rate), Number(loan.total_interest_paid));
   }, 0);
 

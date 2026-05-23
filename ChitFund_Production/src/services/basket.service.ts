@@ -414,7 +414,7 @@ export async function listLoans(
   const currentMonth = cycleRow?.current_month ?? 0;
 
   return rows.map(r => {
-    const cyclesElapsed = Math.max(0, currentMonth - r.disbursement_month_number + 1);
+    const cyclesElapsed = Math.max(0, currentMonth - r.disbursement_month_number);
     return {
       ...r,
       outstanding_interest: r.status === 'Active'
@@ -466,7 +466,7 @@ export async function getLoan(userId: string, group_id: string, loan_id: string)
     .orderBy(desc(loan_transactions.created_at));
 
   const currentMonth = cycleRow?.current_month ?? 0;
-  const cyclesElapsed = Math.max(0, currentMonth - loanRow.disbursement_month_number + 1);
+  const cyclesElapsed = Math.max(0, currentMonth - loanRow.disbursement_month_number);
   const outstanding_interest = loanRow.status === 'Active'
     ? computeOutstandingInterest(cyclesElapsed, Number(loanRow.principal), Number(loanRow.monthly_interest_rate), Number(loanRow.total_interest_paid))
     : 0;
@@ -519,7 +519,7 @@ export async function repayLoan(
   if (loanRow.status !== 'Active') throw new AppError(409, 'LOAN_CLOSED', 'Cannot record repayment on a closed or written-off loan.');
 
   const currentMonth         = cycleRow?.current_month ?? 0;
-  const cyclesElapsed        = Math.max(0, currentMonth - loanRow.disbursement_month_number + 1);
+  const cyclesElapsed        = Math.max(0, currentMonth - loanRow.disbursement_month_number);
   const outstanding_interest = computeOutstandingInterest(
     cyclesElapsed, Number(loanRow.principal), Number(loanRow.monthly_interest_rate), Number(loanRow.total_interest_paid),
   );
