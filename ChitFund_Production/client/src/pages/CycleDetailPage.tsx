@@ -145,6 +145,7 @@ export default function CycleDetailPage() {
   const firstWinner    = cycle.winners?.[0] ?? null
   const winnerName     = firstWinner?.name ?? ''
   const hasWinner      = (cycle.winners?.length ?? 0) > 0
+  const isXChiti       = (cycle.winners?.length ?? 0) > 1
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length
@@ -180,36 +181,84 @@ export default function CycleDetailPage() {
         <div className={`rounded-2xl p-4 border ${
           hasWinner ? 'bg-maroon-50 border-maroon-100' : 'bg-gray-50 border-gray-200'
         }`}>
-          {/* Regular month with winner */}
+          {/* Regular month with winner — handles both single winner and X Chiti (2 winners) */}
           {hasWinner && !cycle.is_skip_month && (
             <>
-              <p className="text-[11px] font-semibold text-maroon-400 tracking-widest mb-3">WINNER</p>
-              <div className="flex items-center gap-3 mb-3">
-                <Avatar name={winnerName} size="lg" />
-                <p className="text-lg font-bold text-gray-900">{winnerName}</p>
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
-                  <p className="text-[10px] text-gray-400 mb-0.5">Won bid</p>
-                  <p className="text-sm font-bold text-gray-900">{formatPaise(firstWinner?.bid_amount ?? 0)}</p>
-                </div>
-                <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
-                  <p className="text-[10px] text-gray-400 mb-0.5">Took home</p>
-                  <p className="text-sm font-bold text-gray-900">{formatPaise(firstWinner?.winner_takeaway ?? 0)}</p>
-                </div>
-              </div>
-              {firstWinner?.recorded_at && (
-                <p className="text-[11px] text-gray-400 mt-2.5">
-                  Recorded on {formatDateTime(firstWinner.recorded_at)}
-                </p>
-              )}
-              {canCorrect && (
-                <button
-                  onClick={openCorrectModal}
-                  className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
-                >
-                  Correct this entry
-                </button>
+              {isXChiti ? (
+                /* X Chiti: two winners */
+                <>
+                  <div className="flex items-center gap-2 mb-3">
+                    <p className="text-[11px] font-semibold text-maroon-400 tracking-widest">WINNERS</p>
+                    <span className="text-[9px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-1.5 py-0.5">
+                      X Chiti
+                    </span>
+                  </div>
+                  {cycle.winners.map((winner, idx) => (
+                    <div key={winner.user_id + '-' + idx}>
+                      {idx > 0 && <div className="border-t border-maroon-100 my-3" />}
+                      <div className="flex items-center gap-3 mb-2">
+                        <Avatar name={winner.name ?? ''} size="lg" />
+                        <p className="text-base font-bold text-gray-900">{winner.name}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
+                          <p className="text-[10px] text-gray-400 mb-0.5">Won bid</p>
+                          <p className="text-sm font-bold text-gray-900">{formatPaise(winner.bid_amount)}</p>
+                        </div>
+                        <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
+                          <p className="text-[10px] text-gray-400 mb-0.5">Took home</p>
+                          <p className="text-sm font-bold text-gray-900">{formatPaise(winner.winner_takeaway)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {firstWinner?.recorded_at && (
+                    <p className="text-[11px] text-gray-400 mt-2.5">
+                      Recorded on {formatDateTime(firstWinner.recorded_at)}
+                    </p>
+                  )}
+                  {canCorrect && (
+                    <button
+                      onClick={openCorrectModal}
+                      className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
+                    >
+                      Correct this entry
+                      <span className="ml-1 text-[10px] text-amber-500">(Corrects the primary winner entry)</span>
+                    </button>
+                  )}
+                </>
+              ) : (
+                /* Single winner */
+                <>
+                  <p className="text-[11px] font-semibold text-maroon-400 tracking-widest mb-3">WINNER</p>
+                  <div className="flex items-center gap-3 mb-3">
+                    <Avatar name={winnerName} size="lg" />
+                    <p className="text-lg font-bold text-gray-900">{winnerName}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
+                      <p className="text-[10px] text-gray-400 mb-0.5">Won bid</p>
+                      <p className="text-sm font-bold text-gray-900">{formatPaise(firstWinner?.bid_amount ?? 0)}</p>
+                    </div>
+                    <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
+                      <p className="text-[10px] text-gray-400 mb-0.5">Took home</p>
+                      <p className="text-sm font-bold text-gray-900">{formatPaise(firstWinner?.winner_takeaway ?? 0)}</p>
+                    </div>
+                  </div>
+                  {firstWinner?.recorded_at && (
+                    <p className="text-[11px] text-gray-400 mt-2.5">
+                      Recorded on {formatDateTime(firstWinner.recorded_at)}
+                    </p>
+                  )}
+                  {canCorrect && (
+                    <button
+                      onClick={openCorrectModal}
+                      className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
+                    >
+                      Correct this entry
+                    </button>
+                  )}
+                </>
               )}
             </>
           )}

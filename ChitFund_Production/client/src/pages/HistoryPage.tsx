@@ -23,17 +23,21 @@ function formatShortDate(iso: string) {
 
 // Each row is a button that navigates to CycleDetailPage.
 // Pending cycles are disabled (not yet started, no detail to show).
-function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }) {
+// Payment-free cycles (saved by X Chiti) are also non-clickable but styled in teal.
+function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPaymentFree?: boolean; onClick?: () => void }) {
   const isPending = cycle.status === 'Pending'
-  const chip = statusChip(cycle)
+  const isDisabled = isPending || isPaymentFree
+  const chip = isPaymentFree
+    ? { label: 'Payment-Free', cls: 'bg-teal-100 text-teal-700' }
+    : statusChip(cycle)
   const allPaid = cycle.paid_count > 0 && cycle.paid_count === cycle.total_count
 
   return (
     <button
-      onClick={isPending ? undefined : onClick}
-      disabled={isPending}
+      onClick={isDisabled ? undefined : onClick}
+      disabled={isDisabled}
       className={`w-full flex items-center gap-3 px-4 py-3.5 border-b border-gray-100 last:border-0 text-left transition ${
-        isPending ? 'opacity-50 cursor-default' : 'hover:bg-gray-50 active:bg-gray-100'
+        isDisabled ? 'opacity-50 cursor-default' : 'hover:bg-gray-50 active:bg-gray-100'
       }`}
     >
       {/* Left — month label + chip */}
@@ -46,7 +50,12 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
 
       {/* Center — winner info */}
       <div className="flex-1 min-w-0">
-        {isPending ? (
+        {isPaymentFree && cycle.status === 'Pending' ? (
+          <>
+            <p className="text-xs font-medium text-teal-700">Payment-Free Month</p>
+            <p className="text-[11px] text-teal-500 mt-0.5">Saved by X Chiti — no payment needed</p>
+          </>
+        ) : isPending ? (
           <p className="text-xs text-gray-400">Opens {formatShortDate(cycle.due_date)}</p>
         ) : (cycle.winners?.length ?? 0) > 1 ? (
           /* X Chiti: two winners */
@@ -72,7 +81,7 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
 
       {/* Right — winner takeaway (when present) + collection totals */}
       <div className="shrink-0 text-right">
-        {isPending ? (
+        {isPaymentFree || isPending ? (
           <p className="text-sm text-gray-300">—</p>
         ) : (
           <>
@@ -93,7 +102,7 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
         )}
       </div>
 
-      {!isPending && (
+      {!isDisabled && (
         <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
@@ -175,6 +184,16 @@ export default function HistoryPage() {
     Open:    cycles.filter(c => c.status === 'Open').length,
     Closed:  cycles.filter(c => c.status === 'Closed').length,
   }
+
+  // Payment-free month detection: pending cycles that won't require payment due to X Chiti
+  const totalSlotsWon = cycles
+    .filter(c => c.status === 'Closed')
+    .reduce((sum, c) => sum + c.winners.length, 0)
+  const slotsRemaining = (group?.total_shares ?? 0) - totalSlotsWon
+  const pendingCycles  = cycles.filter(c => c.status === 'Pending').sort((a, b) => a.month_number - b.month_number)
+  const savedCount     = Math.max(0, pendingCycles.length - slotsRemaining)
+  // The LAST savedCount pending cycles (by month_number) are payment-free
+  const paymentFreeIds = new Set(pendingCycles.slice(-savedCount).map(c => c.cycle_id))
 
   const cycle     = group?.current_cycle
   const monthNum  = cycle?.month_number ?? 0
@@ -285,6 +304,7 @@ export default function HistoryPage() {
               <CycleRow
                 key={cycle.cycle_id}
                 cycle={cycle}
+                isPaymentFree={paymentFreeIds.has(cycle.cycle_id)}
                 // Pass role via navigate state so CycleDetailPage knows if admin actions should be shown
                 onClick={() => navigate(`/groups/${groupId}/history/${cycle.cycle_id}`, {
                   state: { role: group?.my_membership?.role ?? 'Member', groupName: group?.name }
