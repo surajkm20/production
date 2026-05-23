@@ -48,7 +48,17 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
       <div className="flex-1 min-w-0">
         {isPending ? (
           <p className="text-xs text-gray-400">Opens {formatShortDate(cycle.due_date)}</p>
-        ) : (cycle.winners?.length ?? 0) > 0 ? (
+        ) : (cycle.winners?.length ?? 0) > 1 ? (
+          /* X Chiti: two winners */
+          <>
+            <p className="text-xs font-medium text-gray-800 truncate">{cycle.winners[0].name}</p>
+            <p className="text-[10px] text-gray-500 truncate">{cycle.winners[1].name}</p>
+            <span className="inline-block mt-0.5 text-[9px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-1.5 py-0.5">
+              2× X Chiti
+            </span>
+          </>
+        ) : (cycle.winners?.length ?? 0) === 1 ? (
+          /* Single winner */
           <>
             <p className="text-xs font-medium text-gray-800 truncate">{cycle.winners[0].name}</p>
             <p className="text-[11px] text-gray-400 mt-0.5">
@@ -60,12 +70,19 @@ function CycleRow({ cycle, onClick }: { cycle: CycleItem; onClick?: () => void }
         )}
       </div>
 
-      {/* Right — collection totals */}
+      {/* Right — winner takeaway (when present) + collection totals */}
       <div className="shrink-0 text-right">
         {isPending ? (
           <p className="text-sm text-gray-300">—</p>
         ) : (
           <>
+            {(cycle.winners?.length ?? 0) > 0 && (
+              <p className="text-xs font-semibold text-gray-700 tabular-nums">
+                {cycle.winners.length > 1
+                  ? formatPaise(cycle.winners[0].winner_takeaway + cycle.winners[1].winner_takeaway)
+                  : formatPaise(cycle.winners[0].winner_takeaway)}
+              </p>
+            )}
             <p className={`text-xs font-semibold ${allPaid ? 'text-green-600' : 'text-red-500'}`}>
               {formatPaise(cycle.collected_amount)}
             </p>
