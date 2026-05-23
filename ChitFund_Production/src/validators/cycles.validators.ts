@@ -35,5 +35,6 @@ export const updateCycleSchema = z.object({
 export const correctCycleSchema = z.object({
   winner_user_id: z.string().uuid(),
   bid_amount:     z.number().int().positive().optional(),
-  notes:          z.string().optional(),
+  notes:          z.string().max(500).optional(),
+  winner_number:  z.number().int().min(1).max(2).optional(),
 });

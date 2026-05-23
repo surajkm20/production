@@ -56,13 +56,14 @@ export default function CycleDetailPage() {
   const [auditExpanded, setAuditExpanded] = useState(false)
 
   // Correct-cycle modal state
-  const [showCorrect,   setShowCorrect]   = useState(false)
-  const [members,       setMembers]       = useState<Member[]>([])
-  const [correctWinner, setCorrectWinner] = useState('')
-  const [correctBidRupees, setCorrectBidRupees] = useState('')
-  const [correctNotes,  setCorrectNotes]  = useState('')
-  const [correctLoading, setCorrectLoading] = useState(false)
-  const [correctError,  setCorrectError]  = useState<string | null>(null)
+  const [showCorrect,       setShowCorrect]       = useState(false)
+  const [members,           setMembers]           = useState<Member[]>([])
+  const [correctWinner,     setCorrectWinner]     = useState('')
+  const [correctBidRupees,  setCorrectBidRupees]  = useState('')
+  const [correctNotes,      setCorrectNotes]      = useState('')
+  const [correctLoading,    setCorrectLoading]    = useState(false)
+  const [correctError,      setCorrectError]      = useState<string | null>(null)
+  const [correctWinnerNumber, setCorrectWinnerNumber] = useState(1)
 
   useEffect(() => { load() }, [groupId, cycleId])
 
@@ -85,10 +86,12 @@ export default function CycleDetailPage() {
     }
   }
 
-  async function openCorrectModal() {
+  async function openCorrectModal(winnerNumber: number = 1) {
+    const slotIdx = winnerNumber - 1
+    setCorrectWinnerNumber(winnerNumber)
     setCorrectError(null)
-    setCorrectWinner(cycle?.winners?.[0]?.user_id ?? '')
-    setCorrectBidRupees(cycle?.winners?.[0]?.bid_amount != null ? String(cycle.winners[0].bid_amount / 100) : '')
+    setCorrectWinner(cycle?.winners?.[slotIdx]?.user_id ?? '')
+    setCorrectBidRupees(cycle?.winners?.[slotIdx]?.bid_amount != null ? String(cycle.winners[slotIdx].bid_amount / 100) : '')
     setCorrectNotes(cycle?.notes ?? '')
     setShowCorrect(true)
     try {
@@ -110,6 +113,7 @@ export default function CycleDetailPage() {
         winner_user_id: correctWinner,
         ...(!cycle.is_skip_month ? { bid_amount: bid } : {}),
         ...(correctNotes.trim() ? { notes: correctNotes.trim() } : {}),
+        winner_number: correctWinnerNumber,
       })
       setShowCorrect(false)
       await load()
@@ -151,9 +155,10 @@ export default function CycleDetailPage() {
   const totalCount     = cycle.payments.length
   const canCorrect     = isAdmin && cycle.status === 'Closed' && hasWinner
 
-  // For the correction modal: show eligible members + the current winner (even if no longer eligible)
+  // For the correction modal: show eligible members + the winner of the slot being corrected
+  const slotWinner = cycle.winners?.[correctWinnerNumber - 1] ?? null
   const correctableMembers = members.filter(
-    m => m.is_eligible_to_win || m.user_id === firstWinner?.user_id,
+    m => m.is_eligible_to_win || m.user_id === slotWinner?.user_id,
   )
   const correctBid = Math.round(parseFloat(correctBidRupees) * 100) || 0
   const poolAmount = group?.pool_amount ?? 0
@@ -218,13 +223,17 @@ export default function CycleDetailPage() {
                     </p>
                   )}
                   {canCorrect && (
-                    <button
-                      onClick={openCorrectModal}
-                      className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
-                    >
-                      Correct this entry
-                      <span className="ml-1 text-[10px] text-amber-500">(Corrects the primary winner entry)</span>
-                    </button>
+                    <div className="mt-3 flex flex-col gap-2">
+                      {cycle.winners.map((w, i) => (
+                        <button
+                          key={w.user_id + '-' + i}
+                          onClick={() => openCorrectModal(i + 1)}
+                          className="w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
+                        >
+                          Correct Winner {i + 1} — {w.name}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </>
               ) : (
@@ -252,7 +261,7 @@ export default function CycleDetailPage() {
                   )}
                   {canCorrect && (
                     <button
-                      onClick={openCorrectModal}
+                      onClick={() => openCorrectModal(1)}
                       className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
                     >
                       Correct this entry
@@ -281,7 +290,7 @@ export default function CycleDetailPage() {
               )}
               {canCorrect && (
                 <button
-                  onClick={openCorrectModal}
+                  onClick={() => openCorrectModal(1)}
                   className="mt-3 w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
                 >
                   Correct this entry
@@ -415,7 +424,9 @@ export default function CycleDetailPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-0">
           <div className="w-full max-w-md bg-white rounded-t-3xl p-5 pb-8 shadow-xl">
             <div className="flex items-center justify-between mb-4">
-              <p className="text-sm font-bold text-gray-900">Correct cycle entry</p>
+              <p className="text-sm font-bold text-gray-900">
+                {isXChiti ? `Correct Winner ${correctWinnerNumber}` : 'Correct cycle entry'}
+              </p>
               <button onClick={() => setShowCorrect(false)} className="text-gray-400 hover:text-gray-600 transition">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -442,7 +453,7 @@ export default function CycleDetailPage() {
                   <option value="">Select member</option>
                   {correctableMembers.map(m => (
                     <option key={m.user_id} value={m.user_id}>
-                      {m.name} ({m.wins_count}/{m.share_count} wins){m.user_id === firstWinner?.user_id ? ' — current' : ''}
+                      {m.name} ({m.wins_count}/{m.share_count} wins){m.user_id === slotWinner?.user_id ? ' — current' : ''}
                     </option>
                   ))}
                 </select>

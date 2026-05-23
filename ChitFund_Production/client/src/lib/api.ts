@@ -57,7 +57,7 @@ export const api = {
   delete: <T>(path: string) =>
     request<T>(path, { method: 'DELETE' }),
 
-  correctCycle: (groupId: string, cycleId: string, data: { winner_user_id: string; bid_amount?: number; notes?: string }) =>
+  correctCycle: (groupId: string, cycleId: string, data: { winner_user_id: string; bid_amount?: number; notes?: string; winner_number?: number }) =>
     request<{ cycle_id: string; winner_user_id: string; bid_amount?: number; basket_balance_after: number }>(
       `/groups/${groupId}/cycles/${cycleId}/correct`,
       { method: 'POST', body: JSON.stringify(data) },

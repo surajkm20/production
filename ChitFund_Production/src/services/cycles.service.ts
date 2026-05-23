@@ -728,12 +728,12 @@ export async function correctClosedCycle(
   userId:   string,
   group_id: string,
   cycle_id: string,
-  data:     { winner_user_id: string; bid_amount?: number; notes?: string },
+  data:     { winner_user_id: string; bid_amount?: number; notes?: string; winner_number?: number },
 ) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
-  const { winner_user_id: new_winner_id, bid_amount: new_bid, notes } = data;
+  const { winner_user_id: new_winner_id, bid_amount: new_bid, notes, winner_number = 1 } = data;
 
   const [cycleRows, basketRows, firstWinnerRows, groupRows] = await Promise.all([
     db.select({
@@ -750,7 +750,7 @@ export async function correctClosedCycle(
 
     db.select({ id: cycle_winners.id, winner_user_id: cycle_winners.winner_user_id, bid_amount: cycle_winners.bid_amount, basket_credit: cycle_winners.basket_credit })
       .from(cycle_winners)
-      .where(and(eq(cycle_winners.cycle_id, cycle_id), eq(cycle_winners.winner_number, 1)))
+      .where(and(eq(cycle_winners.cycle_id, cycle_id), eq(cycle_winners.winner_number, winner_number)))
       .limit(1),
 
     db.select({ pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate })
