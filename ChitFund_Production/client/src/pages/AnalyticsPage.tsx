@@ -403,43 +403,82 @@ export default function AnalyticsPage() {
 
               {/* ── SUB-SECTION 1: CYCLE PROGRESS ── */}
               {(() => {
-                const cyclesCompleted = completedBids.length
-                const cyclesPlanned   = group.total_months
-                const cyclesRemaining = cyclesPlanned - cyclesCompleted
-                const totalSlotsWon   = actualWinners.length
-                const savedCycles     = totalSlotsWon - cyclesCompleted
-                const progressPct     = cyclesPlanned > 0
-                  ? Math.min(100, Math.round((cyclesCompleted / cyclesPlanned) * 100))
-                  : 0
+                const cyclesCompleted  = completedBids.length          // actual distinct cycles run
+                const cyclesPlanned    = group.total_months
+                const totalSlotsWon    = actualWinners.length          // total winner slots paid out
+                const extraFromXChiti  = totalSlotsWon - cyclesCompleted  // bonus payouts via X Chiti
+                const slotsRemaining   = group.total_shares - totalSlotsWon  // effective remaining
 
                 return (
-                  <div className="px-4 pt-4 pb-3 border-b border-gray-100">
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-3">Cycle Progress</p>
+                  <div className="border-b border-gray-100">
 
-                    {/* Progress bar */}
-                    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden mb-2">
-                      <div
-                        className="h-full bg-maroon-500 rounded-full transition-all"
-                        style={{ width: `${progressPct}%` }}
-                      />
-                    </div>
+                    {/* X Chiti savings banner — primary metric when applicable */}
+                    {extraFromXChiti > 0 && (
+                      <div className="mx-4 mt-4 mb-3 rounded-xl bg-teal-50 border border-teal-200 p-3 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
+                          <span className="text-lg font-extrabold text-teal-700">{extraFromXChiti}</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-teal-800">
+                            {extraFromXChiti === 1 ? 'Cycle' : 'Cycles'} saved by X Chiti
+                          </p>
+                          <p className="text-[11px] text-teal-600 mt-0.5">
+                            {extraFromXChiti} extra payout{extraFromXChiti !== 1 ? 's' : ''} in fewer cycles · members finish sooner
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
-                    {/* Progress text + X Chiti badge */}
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs text-gray-500">
-                        <span className="font-semibold text-gray-900">{cyclesCompleted}</span>
-                        {' of '}
-                        <span className="font-semibold text-gray-900">{cyclesPlanned}</span>
-                        {' cycles completed'}
-                        {cyclesRemaining > 0 && (
-                          <span className="text-gray-400"> · {cyclesRemaining} remaining</span>
+                    <div className="px-4 pb-3 pt-1">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-3">Cycle Progress</p>
+
+                      {/* Stacked progress bar: actual cycles (maroon) + X Chiti bonus (teal) */}
+                      <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden mb-2 flex gap-0.5">
+                        <div
+                          className="h-full bg-maroon-500 rounded-l-full transition-all"
+                          style={{ width: `${cyclesPlanned > 0 ? Math.round((cyclesCompleted / cyclesPlanned) * 100) : 0}%` }}
+                        />
+                        {extraFromXChiti > 0 && (
+                          <div
+                            className="h-full bg-teal-400 rounded-r-full transition-all"
+                            style={{ width: `${cyclesPlanned > 0 ? Math.round((extraFromXChiti / cyclesPlanned) * 100) : 0}%` }}
+                          />
                         )}
-                      </p>
-                      {savedCycles > 0 && (
-                        <span className="shrink-0 text-[10px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
-                          X Chiti saved {savedCycles} cycle{savedCycles !== 1 ? 's' : ''}
+                      </div>
+
+                      {/* Legend */}
+                      <div className="flex items-center gap-3 text-[10px] text-gray-400 mb-3">
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-maroon-500 inline-block" />
+                          {cyclesCompleted} actual cycle{cyclesCompleted !== 1 ? 's' : ''}
                         </span>
-                      )}
+                        {extraFromXChiti > 0 && (
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />
+                            +{extraFromXChiti} via X Chiti
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Stats row */}
+                      <div className="flex items-center justify-between">
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-gray-900">{cyclesCompleted}</p>
+                          <p className="text-[10px] text-gray-400">cycles run</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-gray-900">{totalSlotsWon}</p>
+                          <p className="text-[10px] text-gray-400">slots paid</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-maroon-600">{slotsRemaining}</p>
+                          <p className="text-[10px] text-gray-400">remaining</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-gray-900">{cyclesPlanned}</p>
+                          <p className="text-[10px] text-gray-400">planned</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )
@@ -467,7 +506,7 @@ export default function AnalyticsPage() {
                         valueClass="text-emerald-600"
                       />
                       <MetricRow
-                        label="Paid out to winners"
+                        label={`Paid out to ${totalSlotsWon} winner${totalSlotsWon !== 1 ? 's' : ''}`}
                         value={formatPaise(overview.total_disbursed_to_winners)}
                       />
                       {slotsRemaining > 0 && (
