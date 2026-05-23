@@ -185,14 +185,18 @@ export default function HistoryPage() {
     Closed:  cycles.filter(c => c.status === 'Closed').length,
   }
 
-  // Payment-free month detection: the last N unclosed cycles saved by X Chiti.
+  // Payment-free month detection: the last N future cycles saved by X Chiti.
   // xChitiBonus = extra winner slots above cycles-run = payment-free months earned.
-  // Future months may be Open OR Pending — include both when picking the last N.
+  // Only truly-future cycles (no payments seeded yet) qualify — the current active Open
+  // cycle always has payments seeded and is never payment-free.
   const closedCycles      = cycles.filter(c => c.status === 'Closed')
   const totalSlotsWon     = closedCycles.reduce((sum, c) => sum + c.winners.length, 0)
   const cyclesWithWinners = closedCycles.filter(c => c.winners.length > 0).length
   const xChitiBonus       = Math.max(0, totalSlotsWon - cyclesWithWinners)
-  const unclosedCycles    = cycles.filter(c => c.status !== 'Closed').sort((a, b) => a.month_number - b.month_number)
+  // Only cycles with no payments seeded (total_count === 0) are candidates for payment-free.
+  // The current active Open cycle always has payments seeded (total_count > 0) and must never
+  // be treated as payment-free even when xChitiBonus >= 1.
+  const unclosedCycles    = cycles.filter(c => c.status !== 'Closed' && c.total_count === 0).sort((a, b) => a.month_number - b.month_number)
   // The LAST xChitiBonus unclosed cycles (by month_number) are payment-free
   const paymentFreeIds    = new Set(unclosedCycles.slice(-xChitiBonus).map(c => c.cycle_id))
 
