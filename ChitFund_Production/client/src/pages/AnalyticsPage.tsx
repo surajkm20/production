@@ -399,32 +399,139 @@ export default function AnalyticsPage() {
         {overview && (
           <div className="mx-4">
             <SectionLabel>Group overview</SectionLabel>
-            <div className="bg-white rounded-2xl border border-gray-100 px-4 divide-y divide-gray-50">
-              <MetricRow
-                label="Total contributions collected"
-                value={formatPaise(overview.total_collected)}
-                sub={completedBids.length > 0
-                  ? `${completedBids.length} cycle${completedBids.length !== 1 ? 's' : ''} × ${formatPaise(group.monthly_contribution * group.total_shares)}`
-                  : undefined}
-                valueClass="text-emerald-600"
-              />
-              <MetricRow
-                label="Disbursed to winners"
-                value={formatPaise(overview.total_disbursed_to_winners)}
-              />
-              <MetricRow
-                label="Active loans"
-                value={String(overview.active_loans_count)}
-                sub={overview.defaulters_this_month > 0
-                  ? `${overview.defaulters_this_month} defaulter${overview.defaulters_this_month !== 1 ? 's' : ''} this month`
-                  : 'No defaulters this month'}
-                valueClass={overview.active_loans_count > 0 ? 'text-red-500' : 'text-gray-900'}
-              />
-              <MetricRow
-                label="Interest earned"
-                value={formatPaise(overview.total_interest_earned)}
-                valueClass="text-emerald-600"
-              />
+            <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+
+              {/* ── SUB-SECTION 1: CYCLE PROGRESS ── */}
+              {(() => {
+                const cyclesCompleted = completedBids.length
+                const cyclesPlanned   = group.total_months
+                const cyclesRemaining = cyclesPlanned - cyclesCompleted
+                const totalSlotsWon   = actualWinners.length
+                const savedCycles     = totalSlotsWon - cyclesCompleted
+                const progressPct     = cyclesPlanned > 0
+                  ? Math.min(100, Math.round((cyclesCompleted / cyclesPlanned) * 100))
+                  : 0
+
+                return (
+                  <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-3">Cycle Progress</p>
+
+                    {/* Progress bar */}
+                    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden mb-2">
+                      <div
+                        className="h-full bg-maroon-500 rounded-full transition-all"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+
+                    {/* Progress text + X Chiti badge */}
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-gray-500">
+                        <span className="font-semibold text-gray-900">{cyclesCompleted}</span>
+                        {' of '}
+                        <span className="font-semibold text-gray-900">{cyclesPlanned}</span>
+                        {' cycles completed'}
+                        {cyclesRemaining > 0 && (
+                          <span className="text-gray-400"> · {cyclesRemaining} remaining</span>
+                        )}
+                      </p>
+                      {savedCycles > 0 && (
+                        <span className="shrink-0 text-[10px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
+                          X Chiti saved {savedCycles} cycle{savedCycles !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* ── SUB-SECTION 2: MONEY FLOW ── */}
+              {(() => {
+                const totalSlotsWon   = actualWinners.length
+                const slotsRemaining  = group.total_shares - totalSlotsWon
+                const avgBid          = totalSlotsWon > 0
+                  ? Math.round(totalBidMoney / totalSlotsWon)
+                  : 0
+                const poolAmount      = group.monthly_contribution * group.total_shares
+
+                return (
+                  <div className="px-4 pt-3 pb-1 border-b border-gray-100">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1">Money Flow</p>
+                    <div className="divide-y divide-gray-50">
+                      <MetricRow
+                        label="Total contributions collected"
+                        value={formatPaise(overview.total_collected)}
+                        sub={completedBids.length > 0
+                          ? `${completedBids.length} cycle${completedBids.length !== 1 ? 's' : ''} × ${formatPaise(poolAmount)}`
+                          : undefined}
+                        valueClass="text-emerald-600"
+                      />
+                      <MetricRow
+                        label="Paid out to winners"
+                        value={formatPaise(overview.total_disbursed_to_winners)}
+                      />
+                      {slotsRemaining > 0 && (
+                        <MetricRow
+                          label="Remaining payout estimate"
+                          value={formatPaise(slotsRemaining * poolAmount)}
+                          sub={`${slotsRemaining} slot${slotsRemaining !== 1 ? 's' : ''} remaining · pre-bid estimate`}
+                          valueClass="text-gray-400"
+                        />
+                      )}
+                      {totalSlotsWon > 0 && (
+                        <MetricRow
+                          label="Average bid amount"
+                          value={formatPaise(avgBid)}
+                          sub={`Avg across ${totalSlotsWon} completed bid${totalSlotsWon !== 1 ? 's' : ''}`}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* ── SUB-SECTION 3: LOAN HEALTH ── */}
+              {(() => {
+                const loanExposurePct = (overview.active_loans_principal + overview.current_basket_balance) > 0
+                  ? Math.round(
+                      (overview.active_loans_principal /
+                        (overview.current_basket_balance + overview.active_loans_principal)) * 100
+                    )
+                  : 0
+
+                return (
+                  <div className="px-4 pt-3 pb-1">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1">Loan Health</p>
+                    <div className="divide-y divide-gray-50">
+                      <MetricRow
+                        label="Active loans"
+                        value={String(overview.active_loans_count)}
+                        sub={overview.defaulters_this_month > 0
+                          ? `${overview.defaulters_this_month} defaulter${overview.defaulters_this_month !== 1 ? 's' : ''} this month`
+                          : 'No defaulters this month'}
+                        valueClass={overview.active_loans_count > 0 ? 'text-red-500' : 'text-gray-900'}
+                      />
+
+                      {overview.active_loans_count > 0 && (
+                        <div className="py-2.5">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-sm text-gray-600">Loan exposure</p>
+                            <p className="text-sm font-semibold text-red-500 tabular-nums">{loanExposurePct}%</p>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full bg-red-400 rounded-full transition-all"
+                              style={{ width: `${loanExposurePct}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">{loanExposurePct}% of basket deployed as loans</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
             </div>
           </div>
         )}
