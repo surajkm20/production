@@ -185,15 +185,16 @@ export default function HistoryPage() {
     Closed:  cycles.filter(c => c.status === 'Closed').length,
   }
 
-  // Payment-free month detection: pending cycles that won't require payment due to X Chiti
-  const totalSlotsWon = cycles
-    .filter(c => c.status === 'Closed')
-    .reduce((sum, c) => sum + c.winners.length, 0)
-  const slotsRemaining = (group?.total_shares ?? 0) - totalSlotsWon
-  const pendingCycles  = cycles.filter(c => c.status === 'Pending').sort((a, b) => a.month_number - b.month_number)
-  const savedCount     = Math.max(0, pendingCycles.length - slotsRemaining)
-  // The LAST savedCount pending cycles (by month_number) are payment-free
-  const paymentFreeIds = new Set(pendingCycles.slice(-savedCount).map(c => c.cycle_id))
+  // Payment-free month detection: pending cycles saved by X Chiti (double chitti).
+  // Key insight: count winners from ALL non-pending cycles (Open + Closed), not just Closed.
+  // xChitiBonus = extra winner slots above the number of cycles run = payment-free months earned.
+  const nonPendingCycles  = cycles.filter(c => c.status !== 'Pending')
+  const totalSlotsWon     = nonPendingCycles.reduce((sum, c) => sum + c.winners.length, 0)
+  const cyclesWithWinners = nonPendingCycles.filter(c => c.winners.length > 0).length
+  const xChitiBonus       = Math.max(0, totalSlotsWon - cyclesWithWinners)
+  const pendingCycles     = cycles.filter(c => c.status === 'Pending').sort((a, b) => a.month_number - b.month_number)
+  // The LAST xChitiBonus pending cycles (by month_number) become payment-free
+  const paymentFreeIds    = new Set(pendingCycles.slice(-xChitiBonus).map(c => c.cycle_id))
 
   const cycle     = group?.current_cycle
   const monthNum  = cycle?.month_number ?? 0
