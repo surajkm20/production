@@ -467,16 +467,18 @@ export async function recordWinner(
         });
       }
 
-      await tx.insert(basket_transactions).values({
-        basket_id:            basket.id,
-        cycle_id,
-        txn_type:             'CREDIT_DISCOUNT',
-        amount:               basket_credit,
-        direction:            'C',
-        counterparty_user_id: winner_user_id,
-        notes:                notes ?? 'Cycle bid savings',
-        created_by:           userId,
-      });
+      if (basket_credit > 0) {
+        await tx.insert(basket_transactions).values({
+          basket_id:            basket.id,
+          cycle_id,
+          txn_type:             'CREDIT_DISCOUNT',
+          amount:               basket_credit,
+          direction:            'C',
+          counterparty_user_id: winner_user_id,
+          notes:                notes ?? 'Cycle bid savings',
+          created_by:           userId,
+        });
+      }
     }
 
     await tx.update(memberships)
