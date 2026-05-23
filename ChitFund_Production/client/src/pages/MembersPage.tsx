@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
-import { initials } from '../lib/format'
+import { initials, formatMobile } from '../lib/format'
 import type { GroupDetail } from '../types/api'
 import GroupNavBar from '../components/GroupNavBar'
 
@@ -185,7 +185,7 @@ function MemberRow({
           )}
         </div>
         <p className="text-xs text-gray-400 truncate">
-          {member.mobile_number} · joined {joinedDate}
+          {formatMobile(member.mobile_number)} · joined {joinedDate}
         </p>
       </div>
 
@@ -500,7 +500,7 @@ export default function MembersPage() {
                           <p className="text-xs text-gray-500">Reject this request?</p>
                         ) : (
                           <p className="text-xs text-gray-400 truncate">
-                            {req.mobile_number} · {req.requested_share_count} {req.requested_share_count === 1 ? 'share' : 'shares'} requested
+                            {formatMobile(req.mobile_number)} · {req.requested_share_count} {req.requested_share_count === 1 ? 'share' : 'shares'} requested
                           </p>
                         )}
                       </div>
