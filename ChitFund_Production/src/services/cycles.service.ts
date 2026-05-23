@@ -933,7 +933,6 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
   const group = groupRows[0];
   const closedAt = new Date();
   const nextMonthNumber = Number(cycle.month_number) + 1;
-  const isSeedingFinalCycle = nextMonthNumber === Number(group.total_months);
 
   await db.transaction(async (tx) => {
     await tx.update(monthly_cycles).set({ status: 'Closed', closed_at: closedAt }).where(eq(monthly_cycles.id, cycle_id));
@@ -945,89 +944,91 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       .limit(1);
 
     if (nextCycle) {
+      const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance })
+        .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
+
+      const currentBalance = Number(basketRows?.current_balance ?? 0);
+      const pool            = Number(group.pool_amount);
+      const commissionRate  = parseFloat(String(group.admin_commission_rate));
+      const adminCommission = Math.round(pool * commissionRate / 100);
+      const total_needed    = pool + adminCommission;
+
+      const activeMembers = await tx
+        .select({ user_id: memberships.user_id, share_count: memberships.share_count, name: users.name })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.user_id))
+        .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active')));
+
       const [alreadyExists] = await tx.select({ id: payments.id }).from(payments).where(eq(payments.cycle_id, nextCycle.id)).limit(1);
-      if (!alreadyExists) {
-        const activeMembers = await tx
-          .select({ user_id: memberships.user_id, share_count: memberships.share_count, name: users.name })
-          .from(memberships)
-          .innerJoin(users, eq(users.id, memberships.user_id))
-          .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active')));
 
-        if (isSeedingFinalCycle) {
-          // ── Final cycle: seed payments with basket-offset reduced amounts ──────
-          const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance })
-            .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
+      if (currentBalance > 0) {
+        // ── Basket has funds: seed/update payments with basket-offset reduced amounts ──
+        const basket_contribution  = Math.min(currentBalance, total_needed);
+        const remaining_to_collect = Math.max(0, total_needed - basket_contribution);
+        const total_shares         = Number(group.total_shares);
 
-          const pool              = Number(group.pool_amount);
-          const commissionRate    = parseFloat(String(group.admin_commission_rate));
-          const adminCommission   = Math.round(pool * commissionRate / 100);
-          const total_needed      = pool + adminCommission;
-          const currentBalance    = Number(basketRows.current_balance);
-          const basket_contribution = Math.min(currentBalance, total_needed);
-          const remaining_to_collect = Math.max(0, total_needed - basket_contribution);
-          const total_shares      = Number(group.total_shares);
+        const sortedMembers = [...activeMembers].sort((a, b) => {
+          const shareDiff = Number(b.share_count) - Number(a.share_count);
+          if (shareDiff !== 0) return shareDiff;
+          return a.name.localeCompare(b.name);
+        });
 
-          // Sort members: highest share_count first, then alphabetically by name for tie-breaking
-          const sortedMembers = [...activeMembers].sort((a, b) => {
-            const shareDiff = Number(b.share_count) - Number(a.share_count);
-            if (shareDiff !== 0) return shareDiff;
-            return a.name.localeCompare(b.name);
-          });
+        const memberAmounts = sortedMembers.map(m => ({
+          user_id:     m.user_id,
+          share_count: Number(m.share_count),
+          amount:      remaining_to_collect === 0
+            ? 0
+            : Math.floor(remaining_to_collect * Number(m.share_count) / total_shares),
+        }));
 
-          // Compute floored amounts per member
-          const memberAmounts = sortedMembers.map(m => ({
-            user_id:    m.user_id,
-            share_count: Number(m.share_count),
-            amount:      remaining_to_collect === 0
-              ? 0
-              : Math.floor(remaining_to_collect * Number(m.share_count) / total_shares),
-          }));
+        if (remaining_to_collect > 0 && memberAmounts.length > 0) {
+          const allocatedSum = memberAmounts.reduce((s, m) => s + m.amount, 0);
+          const residual = remaining_to_collect - allocatedSum;
+          if (residual > 0) memberAmounts[0].amount += residual;
+        }
 
-          // Add residual paisa to the member with the most shares (first in sorted order)
-          if (remaining_to_collect > 0 && memberAmounts.length > 0) {
-            const allocatedSum = memberAmounts.reduce((s, m) => s + m.amount, 0);
-            const residual = remaining_to_collect - allocatedSum;
-            if (residual > 0) memberAmounts[0].amount += residual;
+        if (alreadyExists) {
+          for (const m of memberAmounts) {
+            await tx.update(payments)
+              .set({ expected_amount: m.amount, status: m.amount === 0 ? 'Waived' : 'Unpaid' })
+              .where(and(eq(payments.cycle_id, nextCycle.id), eq(payments.member_user_id, m.user_id)));
           }
-
-          // Seed payment rows
+        } else {
           await tx.insert(payments).values(
             memberAmounts.map(m => ({
               cycle_id:        nextCycle.id,
               member_user_id:  m.user_id,
               expected_amount: m.amount,
-              status:          m.amount === 0 ? 'Waived' : 'Unpaid',
-            })),
-          );
-
-          // Debit basket immediately for the offset amount (only if > 0)
-          if (basket_contribution > 0) {
-            const newBalance = currentBalance - basket_contribution;
-            await tx.update(baskets)
-              .set({ current_balance: newBalance })
-              .where(eq(baskets.id, basketRows.id));
-
-            await tx.insert(basket_transactions).values({
-              basket_id:  basketRows.id,
-              cycle_id:   nextCycle.id,
-              txn_type:   'DEBIT_FINAL_CYCLE_OFFSET',
-              amount:     basket_contribution,
-              direction:  'D',
-              notes:      `Final cycle basket offset: covers ${basket_contribution} of ${total_needed} needed (pool ${pool} + commission ${adminCommission})`,
-              created_by: userId,
-            });
-          }
-        } else {
-          // ── Regular cycle: seed with standard per-share contribution ──────────
-          const contribution = Number(group.monthly_contribution);
-          await tx.insert(payments).values(
-            activeMembers.map(m => ({
-              cycle_id:        nextCycle.id,
-              member_user_id:  m.user_id,
-              expected_amount: contribution * Number(m.share_count),
+              status:          (m.amount === 0 ? 'Waived' : 'Unpaid') as 'Waived' | 'Unpaid',
             })),
           );
         }
+
+        if (basket_contribution > 0) {
+          await tx.update(baskets)
+            .set({ current_balance: currentBalance - basket_contribution })
+            .where(eq(baskets.id, basketRows.id));
+
+          await tx.insert(basket_transactions).values({
+            basket_id:  basketRows.id,
+            cycle_id:   nextCycle.id,
+            txn_type:   'DEBIT_FINAL_CYCLE_OFFSET',
+            amount:     basket_contribution,
+            direction:  'D',
+            notes:      `Basket offset for cycle ${nextMonthNumber}: covers ${basket_contribution} of ${total_needed} (pool ${pool} + commission ${adminCommission})`,
+            created_by: userId,
+          });
+        }
+      } else if (!alreadyExists) {
+        // ── No basket funds: seed with standard full contribution amounts ─────
+        const contribution = Number(group.monthly_contribution);
+        await tx.insert(payments).values(
+          activeMembers.map(m => ({
+            cycle_id:        nextCycle.id,
+            member_user_id:  m.user_id,
+            expected_amount: contribution * Number(m.share_count),
+          })),
+        );
       }
     }
   });
