@@ -95,6 +95,15 @@ export async function getMemberWins(req: Request, res: Response, next: NextFunct
   } catch (err) { next(err) }
 }
 
+export async function updateMemberProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const group_id       = req.params.group_id    as string;
+    const target_user_id = req.params.user_id     as string;
+    const result = await MembershipsService.updateMemberProfile(req.user!.userId, group_id, target_user_id, req.body);
+    sendSuccess(res, result);
+  } catch (err) { next(err); }
+}
+
 export async function remindMember(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const group_id      = req.params.group_id      as string;

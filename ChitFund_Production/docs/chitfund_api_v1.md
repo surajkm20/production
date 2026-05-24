@@ -661,6 +661,34 @@ Soft-delete (mark as Inactive). Allowed any time; if the cycle has started, requ
 
 ---
 
+### PATCH `/groups/:group_id/members/:user_id/profile` **[admin]**
+Update a member's display name and/or phone number. Operates on the `users` table — changes are global (not per-group). At least one of `name` or `phone` must be provided.
+
+**Request**
+```json
+{ "name": "Ramesh Kumar", "phone": "+919876543211" }
+```
+- `name`: non-empty string, trimmed, max 100 chars (optional).
+- `phone`: valid E.164 Indian mobile number; must not already be registered to a different user (optional).
+
+**Response 200**
+```json
+{
+  "data": {
+    "user_id": "uuid",
+    "name": "Ramesh Kumar",
+    "mobile_number": "+919876543211"
+  }
+}
+```
+
+**Errors:**
+- `MEMBER_NOT_FOUND` — `user_id` is not a member of this group
+- `PHONE_TAKEN` — the new phone number is already registered to another user
+- `INVALID_REQUEST` — neither `name` nor `phone` was provided, or values fail validation
+
+---
+
 ### POST `/groups/:group_id/members/:membership_id/transfer-admin` **[admin]**
 Initiate admin transfer to this member. Both old and new admin must confirm via OTP.
 

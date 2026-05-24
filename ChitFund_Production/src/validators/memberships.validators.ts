@@ -63,3 +63,15 @@ export const approveJoinRequestSchema = z.object({
 export const rejectJoinRequestSchema = z.object({
   reason: z.string().optional(),
 });
+
+// ─── PATCH /groups/:group_id/members/:user_id/profile ────────────────────────
+// At least one of name or phone is required (enforced via .refine).
+// phone accepts the same normalisation as addMemberSchema and must be a valid Indian number.
+export const updateMemberProfileSchema = z
+  .object({
+    name:  z.string().trim().min(1).max(100).optional(),
+    phone: normaliseMobile.optional(),
+  })
+  .refine((d) => d.name !== undefined || d.phone !== undefined, {
+    message: 'At least one of name or phone must be provided.',
+  });

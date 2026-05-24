@@ -139,6 +139,113 @@ function AddMemberModal({
   )
 }
 
+// ─── Edit profile modal ───────────────────────────────────────────────────────
+
+// Self-contained modal for editing a member's name and/or phone number.
+// Calls PATCH /v1/groups/:groupId/members/:userId/profile.
+// On success calls onUpdated with the new { name, mobile_number } so the parent
+// can update local state without a full re-fetch.
+function EditMemberProfileModal({
+  groupId,
+  member,
+  onClose,
+  onUpdated,
+}: {
+  groupId: string
+  member: Member
+  onClose: () => void
+  onUpdated: (userId: string, name: string, mobile_number: string) => void
+}) {
+  const [name, setName] = useState(member.name)
+  const [phone, setPhone] = useState(member.mobile_number)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: { preventDefault(): void }) {
+    e.preventDefault()
+    setError(null)
+
+    // Build only the changed fields
+    const body: { name?: string; phone?: string } = {}
+    const trimmedName = name.trim()
+    if (trimmedName !== member.name) body.name = trimmedName
+
+    // Normalise phone the same way the backend validator does
+    let rawPhone = phone.replace(/\s+/g, '')
+    if (!rawPhone.startsWith('+')) {
+      if (/^91[6-9]\d{9}$/.test(rawPhone)) rawPhone = '+' + rawPhone
+      else if (/^[6-9]\d{9}$/.test(rawPhone)) rawPhone = '+91' + rawPhone
+    }
+    if (rawPhone !== member.mobile_number) body.phone = rawPhone
+
+    if (!body.name && !body.phone) {
+      onClose()
+      return
+    }
+
+    setLoading(true)
+    try {
+      const result = await api.patch<{ user_id: string; name: string; mobile_number: string }>(
+        `/groups/${groupId}/members/${member.user_id}/profile`,
+        body,
+      )
+      onUpdated(result.user_id, result.name, result.mobile_number)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+        <h2 className="text-base font-bold text-gray-900 mb-1">Edit member profile</h2>
+        <p className="text-sm text-gray-500 mb-4">Correct spelling mistakes or update their phone number. This does not affect payment history or financial records.</p>
+
+        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Full name"
+              required
+              autoFocus
+              maxLength={100}
+              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Phone number</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="9876543210"
+              required
+              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading || !name.trim()}
+              className="flex-1 py-2.5 rounded-lg bg-maroon-600 hover:bg-maroon-700 disabled:opacity-60 text-sm font-semibold text-white transition">
+              {loading ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ─── Member row ───────────────────────────────────────────────────────────────
 
 // MemberRow handles its own busy state for the +/− share stepper.
@@ -149,12 +256,14 @@ function MemberRow({
   groupLocked,
   isAdmin,
   onShareChange,
+  onEditProfile,
 }: {
   member: Member
   currentUserId: string
   groupLocked: boolean
   isAdmin: boolean
   onShareChange: (membershipId: string, newCount: number) => Promise<void>
+  onEditProfile: (member: Member) => void
 }) {
   const [busy, setBusy] = useState(false)
 
@@ -212,6 +321,19 @@ function MemberRow({
           {member.share_count} {member.share_count === 1 ? 'share' : 'shares'}
         </span>
       )}
+
+      {/* Edit profile icon — admin only, always visible regardless of groupLocked */}
+      {isAdmin && (
+        <button
+          onClick={() => onEditProfile(member)}
+          className="ml-1 w-7 h-7 rounded-md flex items-center justify-center text-gray-400 hover:text-maroon-600 hover:bg-maroon-50 transition shrink-0"
+          title="Edit member profile"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13l-4 1 1-4 9.5-9.5a2 2 0 112.828 2.828L9 13z" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }
@@ -249,6 +371,8 @@ export default function MembersPage() {
   const [reqShareCount, setReqShareCount] = useState(1)
   const [reqBusy, setReqBusy] = useState(false)
   const [reqError, setReqError] = useState<string | null>(null)
+  // editingMember: the member whose profile the admin is currently editing (null = modal closed)
+  const [editingMember, setEditingMember] = useState<Member | null>(null)
 
   useEffect(() => { load() }, [groupId])
 
@@ -476,6 +600,7 @@ export default function MembersPage() {
               groupLocked={groupLocked}
               isAdmin={group.my_membership.role === 'Admin'}
               onShareChange={handleShareChange}
+              onEditProfile={setEditingMember}
             />
           ))}
         </div>
@@ -664,6 +789,21 @@ export default function MembersPage() {
           groupId={groupId!}
           onClose={() => setShowAddModal(false)}
           onAdded={m => { setMembers(ms => [...ms, m]); setShowAddModal(false) }}
+        />
+      )}
+
+      {/* Edit member profile modal — mounts when admin taps the pencil icon on a row */}
+      {editingMember && (
+        <EditMemberProfileModal
+          groupId={groupId!}
+          member={editingMember}
+          onClose={() => setEditingMember(null)}
+          onUpdated={(userId, name, mobile_number) => {
+            setMembers(ms => ms.map(m =>
+              m.user_id === userId ? { ...m, name, mobile_number } : m,
+            ))
+            setEditingMember(null)
+          }}
         />
       )}
 

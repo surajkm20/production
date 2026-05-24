@@ -12,7 +12,7 @@ import { authenticate } from '../middleware/authenticate';
 import { requireMember } from '../middleware/requireMember';
 import { requireAdmin } from '../middleware/requireAdmin';
 import { validate } from '../middleware/validate';
-import { addMemberSchema, updateMemberSchema, removeMemberSchema, remindMemberSchema, confirmTransferAdminSchema, approveJoinRequestSchema, rejectJoinRequestSchema } from '../validators/memberships.validators';
+import { addMemberSchema, updateMemberSchema, removeMemberSchema, remindMemberSchema, confirmTransferAdminSchema, approveJoinRequestSchema, rejectJoinRequestSchema, updateMemberProfileSchema } from '../validators/memberships.validators';
 import * as memberships from '../controllers/memberships.controller';
 
 export const membershipsRouter = Router();
@@ -24,6 +24,7 @@ membershipsRouter.get('/:group_id/members',                                     
 membershipsRouter.post('/:group_id/members',                               requireAdmin, validate(addMemberSchema),    memberships.addMember);
 membershipsRouter.patch('/:group_id/members/:membership_id',               requireAdmin, validate(updateMemberSchema), memberships.updateMember);
 membershipsRouter.delete('/:group_id/members/:membership_id',              requireAdmin, validate(removeMemberSchema), memberships.removeMember);
+membershipsRouter.patch('/:group_id/members/:user_id/profile',             requireAdmin, validate(updateMemberProfileSchema), memberships.updateMemberProfile);
 membershipsRouter.post('/:group_id/members/:membership_id/transfer-admin', requireAdmin,                               memberships.initiateTransferAdmin);
 membershipsRouter.post('/:group_id/transfer-admin/:transfer_id/confirm',   authenticate, validate(confirmTransferAdminSchema), memberships.confirmTransferAdmin);
 membershipsRouter.post('/:group_id/members/:membership_id/remind',         requireAdmin, validate(remindMemberSchema), memberships.remindMember);

@@ -569,6 +569,70 @@ export async function getMemberWins(callerId: string, groupId: string, targetUse
   return rows;
 }
 
+// ─── updateMemberProfile ─────────────────────────────────────────────────────
+// Updates name and/or mobile_number on the users table for a member of the group.
+// Only the group admin may call this. Changes are global (not per-group) — the
+// user's display name and phone are updated everywhere they appear.
+export async function updateMemberProfile(
+  callerId: string,
+  group_id: string,
+  target_user_id: string,
+  data: { name?: string; phone?: string },
+) {
+  const caller = await assertActiveMember(group_id, callerId);
+  if (caller.role !== 'Admin') {
+    throw new AppError(403, 'FORBIDDEN', 'Only the group admin can edit a member\'s profile.');
+  }
+
+  // Verify the target user is an active member of this group
+  const [targetMembership] = await db
+    .select({ id: memberships.id })
+    .from(memberships)
+    .where(and(
+      eq(memberships.group_id, group_id),
+      eq(memberships.user_id, target_user_id),
+      eq(memberships.status, 'Active'),
+    ))
+    .limit(1);
+
+  if (!targetMembership) {
+    throw new AppError(404, 'MEMBER_NOT_FOUND', 'This user is not an active member of the group.');
+  }
+
+  // If phone is being changed, check uniqueness against other users
+  if (data.phone !== undefined) {
+    const [existing] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.mobile_number, data.phone))
+      .limit(1);
+
+    if (existing && existing.id !== target_user_id) {
+      throw new AppError(409, 'PHONE_TAKEN', 'This phone number is already registered to another user.');
+    }
+  }
+
+  const updates: Partial<{ name: string; mobile_number: string; updated_at: Date }> = {
+    updated_at: new Date(),
+  };
+  if (data.name  !== undefined) updates.name          = data.name;
+  if (data.phone !== undefined) updates.mobile_number = data.phone;
+
+  const [updated] = await db
+    .update(users)
+    .set(updates)
+    .where(eq(users.id, target_user_id))
+    .returning({ id: users.id, name: users.name, mobile_number: users.mobile_number });
+
+  if (!updated) throw new AppError(404, 'MEMBER_NOT_FOUND', 'User not found.');
+
+  return {
+    user_id:       updated.id,
+    name:          updated.name,
+    mobile_number: updated.mobile_number,
+  };
+}
+
 // ─── remindMember ────────────────────────────────────────────────────────────
 export async function remindMember(
   userId:        string,
