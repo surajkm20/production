@@ -29,6 +29,6 @@ export const memberships = pgTable('memberships', {
   check('chk_role',              sql`${table.role} IN ('Admin', 'Member')`),
   check('chk_membership_status',       sql`${table.status} IN ('Pending', 'Active', 'Inactive')`),
   check('chk_requested_share_count',   sql`${table.requested_share_count} IS NULL OR ${table.requested_share_count} >= 1`),
-  check('chk_share_count',       sql`${table.share_count} >= 1`),
+  check('chk_share_count',       sql`${table.share_count} >= 0`),
   check('chk_wins_le_shares',    sql`${table.wins_count} >= 0 AND ${table.wins_count} <= ${table.share_count}`),
 ]);
