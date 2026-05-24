@@ -229,7 +229,7 @@ function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] })
     if (!loanGroupMap.has(lid)) {
       loanGroupMap.set(lid, {
         loan_id:             lid,
-        borrower_name:       txn.counterparty_name,
+        borrower_name:       txn.loan_borrower_name ?? txn.counterparty_name,
         disbursement_label:  txn.loan_disbursement_label,
         disbursement_month:  txn.loan_disbursement_month_number,
         transactions:        [],

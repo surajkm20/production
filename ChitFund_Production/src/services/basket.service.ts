@@ -99,6 +99,8 @@ export async function listTransactions(
   const txnCycle          = alias(monthly_cycles, 'txn_cycle');
   // Alias for the cycle the loan was disbursed in (looked up via loans.disbursement_month_number)
   const disbursementCycle = alias(monthly_cycles, 'disbursement_cycle');
+  // Alias for the loan's borrower — reliable even when counterparty_user_id is null on repayment rows
+  const loanBorrower      = alias(users, 'loan_borrower');
 
   const rows = await db
     .select({
@@ -110,6 +112,7 @@ export async function listTransactions(
       cycle_month_number:              txnCycle.month_number,
       counterparty_user_id:            basket_transactions.counterparty_user_id,
       counterparty_name:               users.name,
+      loan_borrower_name:              loanBorrower.name,
       notes:                           basket_transactions.notes,
       created_at:                      basket_transactions.created_at,
       related_loan_id:                 basket_transactions.related_loan_id,
@@ -120,6 +123,7 @@ export async function listTransactions(
     .leftJoin(txnCycle, eq(txnCycle.id, basket_transactions.cycle_id))
     .leftJoin(users, eq(users.id, basket_transactions.counterparty_user_id))
     .leftJoin(loans, eq(loans.id, basket_transactions.related_loan_id))
+    .leftJoin(loanBorrower, eq(loanBorrower.id, loans.borrower_user_id))
     .leftJoin(
       disbursementCycle,
       and(
@@ -147,6 +151,7 @@ export async function listTransactions(
       cycle_month_label:              r.cycle_month_label ?? null,
       cycle_month_number:             r.cycle_month_number ?? null,
       counterparty_name:              r.counterparty_name ?? null,
+      loan_borrower_name:             r.loan_borrower_name ?? null,
       notes:                          r.notes ?? null,
       created_at:                     r.created_at,
       related_loan_id:                r.related_loan_id ?? null,

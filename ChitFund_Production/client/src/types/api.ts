@@ -228,6 +228,7 @@ export interface BasketTransaction {
   cycle_month_label: string | null
   cycle_month_number: number | null
   counterparty_name: string | null
+  loan_borrower_name: string | null
   notes: string | null
   created_at: string
   related_loan_id: string | null
