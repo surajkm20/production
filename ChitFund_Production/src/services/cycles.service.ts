@@ -339,7 +339,7 @@ export async function recordWinner(
     .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
     .limit(1),
 
-    db.select({ id: baskets.id, current_balance: baskets.current_balance })
+    db.select({ id: baskets.id, current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_debited: baskets.total_debited })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
     db.select({ share_count: memberships.share_count, wins_count: memberships.wins_count, role: memberships.role, admin_withdrawal_used: memberships.admin_withdrawal_used })
@@ -450,8 +450,14 @@ export async function recordWinner(
     });
 
     if (!is_admin_withdrawal) {
+      // Compute aggregate deltas: +basket_credit credited, +pool debited for X Chiti slots
+      const xChitiDebit = nextSlot > 1 ? pool : 0;
       await tx.update(baskets)
-        .set({ current_balance: basket_balance_after })
+        .set({
+          current_balance: basket_balance_after,
+          total_credited:  Number(basket.total_credited) + basket_credit,
+          total_debited:   Number(basket.total_debited)  + xChitiDebit,
+        })
         .where(eq(baskets.id, basket.id));
 
       if (nextSlot > 1) {
@@ -558,7 +564,7 @@ export async function declareSkipMonth(
       .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
       .limit(1),
 
-    db.select({ id: baskets.id, current_balance: baskets.current_balance })
+    db.select({ id: baskets.id, current_balance: baskets.current_balance, total_debited: baskets.total_debited })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
     db.select({ id: payments.id })
@@ -622,7 +628,10 @@ export async function declareSkipMonth(
     });
 
     await tx.update(baskets)
-      .set({ current_balance: balance_after })
+      .set({
+        current_balance: balance_after,
+        total_debited:   Number(basket.total_debited) + pool_amount,
+      })
       .where(eq(baskets.id, basket.id));
 
     await tx.insert(basket_transactions).values({
@@ -675,7 +684,7 @@ export async function updateCycle(
       .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
       .limit(1),
 
-    db.select({ id: baskets.id, current_balance: baskets.current_balance })
+    db.select({ id: baskets.id, current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_debited: baskets.total_debited })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
     db.select({ id: cycle_winners.id, winner_number: cycle_winners.winner_number, winner_user_id: cycle_winners.winner_user_id, bid_amount: cycle_winners.bid_amount, basket_credit: cycle_winners.basket_credit, is_admin_withdrawal: cycle_winners.is_admin_withdrawal, created_at: cycle_winners.created_at })
@@ -728,7 +737,12 @@ export async function updateCycle(
       .where(eq(cycle_winners.id, winnerW.id));
 
     if (credit_delta !== 0) {
-      await tx.update(baskets).set({ current_balance: balance_after }).where(eq(baskets.id, basket.id));
+      await tx.update(baskets).set({
+        current_balance: balance_after,
+        ...(credit_delta > 0
+          ? { total_credited: Number(basket.total_credited) + credit_delta }
+          : { total_debited:  Number(basket.total_debited)  + Math.abs(credit_delta) }),
+      }).where(eq(baskets.id, basket.id));
       await tx.insert(basket_transactions).values({
         basket_id:  basket.id,
         cycle_id,
@@ -766,7 +780,7 @@ export async function correctClosedCycle(
     .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
     .limit(1),
 
-    db.select({ id: baskets.id, current_balance: baskets.current_balance })
+    db.select({ id: baskets.id, current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_debited: baskets.total_debited })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
     db.select({ id: cycle_winners.id, winner_user_id: cycle_winners.winner_user_id, bid_amount: cycle_winners.bid_amount, basket_credit: cycle_winners.basket_credit })
@@ -823,7 +837,12 @@ export async function correctClosedCycle(
         .where(eq(cycle_winners.id, firstWinner.id));
 
       if (credit_delta !== 0) {
-        await tx.update(baskets).set({ current_balance: new_balance }).where(eq(baskets.id, basket.id));
+        await tx.update(baskets).set({
+          current_balance: new_balance,
+          ...(credit_delta > 0
+            ? { total_credited: Number(basket.total_credited) + credit_delta }
+            : { total_debited:  Number(basket.total_debited)  + Math.abs(credit_delta) }),
+        }).where(eq(baskets.id, basket.id));
         await tx.insert(basket_transactions).values({
           basket_id:  basket.id, cycle_id,
           txn_type:   'ADJUSTMENT',
@@ -949,7 +968,7 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       .limit(1);
 
     if (nextCycle) {
-      const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance })
+      const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance, total_debited: baskets.total_debited })
         .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
 
       const currentBalance  = Number(basketRows?.current_balance ?? 0);
@@ -960,6 +979,10 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       // Admin commission is settled in this cycle (last member auto-wins; no bid discount).
       const total_needed    = pool + adminCommission;
 
+      // The basket offset only applies to the FINAL cycle (month N).
+      // For all earlier cycles, payments are seeded with standard contributions.
+      const isFinalCycle = nextMonthNumber === Number(group.total_months);
+
       const activeMembers = await tx
         .select({ user_id: memberships.user_id, share_count: memberships.share_count, name: users.name })
         .from(memberships)
@@ -968,8 +991,8 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
 
       const [alreadyExists] = await tx.select({ id: payments.id }).from(payments).where(eq(payments.cycle_id, nextCycle.id)).limit(1);
 
-      if (currentBalance > 0) {
-        // ── Basket has funds: seed/update payments with basket-offset reduced amounts ──
+      if (isFinalCycle && currentBalance > 0) {
+        // ── Final cycle + basket has funds: seed/update payments with basket-offset reduced amounts ──
         const basket_contribution  = Math.min(currentBalance, total_needed);
         const remaining_to_collect = Math.max(0, total_needed - basket_contribution);
         const total_shares         = Number(group.total_shares);
@@ -1013,7 +1036,10 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
 
         if (basket_contribution > 0) {
           await tx.update(baskets)
-            .set({ current_balance: currentBalance - basket_contribution })
+            .set({
+              current_balance: currentBalance - basket_contribution,
+              total_debited:   Number(basketRows.total_debited) + basket_contribution,
+            })
             .where(eq(baskets.id, basketRows.id));
 
           await tx.insert(basket_transactions).values({
@@ -1022,12 +1048,12 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
             txn_type:   'DEBIT_FINAL_CYCLE_OFFSET',
             amount:     basket_contribution,
             direction:  'D',
-            notes:      `Basket offset for cycle ${nextMonthNumber}: covers ${basket_contribution} of ${total_needed} (pool ${pool} + commission ${adminCommission})`,
+            notes:      `Basket offset for final cycle ${nextMonthNumber}: covers ${basket_contribution} of ${total_needed} (pool ${pool} + commission ${adminCommission})`,
             created_by: userId,
           });
         }
       } else if (!alreadyExists) {
-        // ── No basket funds: seed with standard full contribution amounts ─────
+        // ── Normal cycle or no basket funds: seed with standard full contribution amounts ─────
         const contribution = Number(group.monthly_contribution);
         await tx.insert(payments).values(
           activeMembers.map(m => ({
