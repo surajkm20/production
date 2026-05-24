@@ -222,7 +222,7 @@ function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] })
     else otherTxns.push(txn)
   }
 
-  // Group loan transactions by loan_id, preserving order of first appearance
+  // Group loan transactions by loan_id
   const loanGroupMap = new Map<string, LoanGroup>()
   for (const txn of loanTxns) {
     const lid = txn.related_loan_id!
@@ -238,14 +238,46 @@ function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] })
     loanGroupMap.get(lid)!.transactions.push(txn)
   }
 
-  const loanGroups = [...loanGroupMap.values()]
+  // Sort transactions within each group chronologically (disbursement → repayments)
+  for (const group of loanGroupMap.values()) {
+    group.transactions.sort((a, b) =>
+      new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+    )
+  }
+
+  // Separate active/partial from fully repaid, sort each section by disbursement month
+  const isGroupRepaid = (g: LoanGroup) => {
+    const principal   = g.transactions.find(t => t.txn_type === 'LOAN_DISBURSED')?.amount ?? 0
+    const totalRepaid = g.transactions.filter(t => t.txn_type === 'LOAN_REPAID').reduce((s, t) => s + t.amount, 0)
+    return principal > 0 && totalRepaid >= principal
+  }
+  const byDisbursement = (a: LoanGroup, b: LoanGroup) =>
+    (a.disbursement_month ?? 0) - (b.disbursement_month ?? 0)
+
+  const allGroups   = [...loanGroupMap.values()]
+  const activeGroups = allGroups.filter(g => !isGroupRepaid(g)).sort(byDisbursement)
+  const repaidGroups = allGroups.filter(g =>  isGroupRepaid(g)).sort(byDisbursement)
 
   return (
     <div className="space-y-3">
-      {/* Loan lifecycle cards */}
-      {loanGroups.length > 0 && (
+      {/* Active / partially-repaid loans */}
+      {activeGroups.length > 0 && (
         <div className="space-y-2">
-          {loanGroups.map(group => (
+          {activeGroups.map(group => (
+            <LoanLifecycleCard key={group.loan_id} group={group} />
+          ))}
+        </div>
+      )}
+
+      {/* Fully repaid loans — shown under a section header */}
+      {repaidGroups.length > 0 && (
+        <div className="space-y-2">
+          {activeGroups.length > 0 && (
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-1 pt-1">
+              Repaid Loans
+            </p>
+          )}
+          {repaidGroups.map(group => (
             <LoanLifecycleCard key={group.loan_id} group={group} />
           ))}
         </div>
