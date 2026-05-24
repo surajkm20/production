@@ -35,6 +35,12 @@ export const basketAdjustmentSchema = z.object({
   notes:     z.string().min(1, 'Notes are required for a basket adjustment.'),
 });
 
+// ─── POST /groups/:group_id/loans/bulk-repay ─────────────────────────────────
+export const bulkRepaySchema = z.object({
+  member_user_id: z.string().uuid(),
+  mode:           z.enum(['interest_only', 'principal_only', 'full_settlement']),
+});
+
 // ─── PATCH /groups/:group_id/loans/:loan_id ──────────────────────────────────
 // Only two meaningful changes allowed: write-off (status = 'WrittenOff') or
 // extending the expected_close_date. notes alone is rejected by the controller.

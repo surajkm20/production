@@ -76,3 +76,11 @@ export async function updateLoan(req: Request, res: Response, next: NextFunction
     sendSuccess(res, result);
   } catch (err) { next(err); }
 }
+
+export async function bulkRepayMember(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const group_id = req.params.group_id as string;
+    const result = await BasketService.bulkRepayMember(req.user!.userId, group_id, req.body);
+    sendSuccess(res, result);
+  } catch (err) { next(err); }
+}

@@ -12,7 +12,7 @@ import { authenticate } from '../middleware/authenticate';
 import { requireMember } from '../middleware/requireMember';
 import { requireAdmin } from '../middleware/requireAdmin';
 import { validate } from '../middleware/validate';
-import { disburseLoanSchema, repayLoanSchema, updateLoanSchema, basketAdjustmentSchema } from '../validators/loans.validators';
+import { disburseLoanSchema, repayLoanSchema, updateLoanSchema, basketAdjustmentSchema, bulkRepaySchema } from '../validators/loans.validators';
 import * as basket from '../controllers/basket.controller';
 
 export const basketRouter = Router();
@@ -27,3 +27,4 @@ basketRouter.get('/:group_id/loans',                                            
 basketRouter.get('/:group_id/loans/:loan_id',                                                       basket.getLoan);
 basketRouter.post('/:group_id/loans/:loan_id/repay',    requireAdmin, validate(repayLoanSchema),    basket.repayLoan);
 basketRouter.patch('/:group_id/loans/:loan_id',         requireAdmin, validate(updateLoanSchema),   basket.updateLoan);
+basketRouter.post('/:group_id/loans/bulk-repay',        requireAdmin, validate(bulkRepaySchema),     basket.bulkRepayMember);

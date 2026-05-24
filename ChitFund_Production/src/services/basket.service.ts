@@ -427,6 +427,7 @@ export async function listLoans(
     const cyclesElapsed = Math.max(0, currentMonth - r.disbursement_month_number);
     return {
       ...r,
+      cycle_label: `Cycle ${r.disbursement_month_number}`,
       outstanding_interest: r.status === 'Active'
         ? computeOutstandingInterest(cyclesElapsed, Number(r.principal), Number(r.monthly_interest_rate), Number(r.total_interest_paid))
         : 0,
@@ -580,6 +581,139 @@ export async function repayLoan(
     status:               loanFullyRepaid ? 'Repaid' : 'Active',
     basket_balance_after: newBalance,
   };
+}
+
+// ─── bulkRepayMember ─────────────────────────────────────────────────────────
+export async function bulkRepayMember(
+  adminUserId: string,
+  group_id:    string,
+  data: {
+    member_user_id: string;
+    mode: 'interest_only' | 'principal_only' | 'full_settlement';
+  },
+) {
+  const caller = await assertActiveMember(group_id, adminUserId);
+  if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+
+  const { member_user_id, mode } = data;
+
+  const [basketRows] = await db
+    .select({ id: baskets.id, current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_lent_out: baskets.total_lent_out, total_interest_earned: baskets.total_interest_earned })
+    .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
+  if (!basketRows) throw new AppError(404, 'BASKET_NOT_FOUND', 'Basket not found.');
+
+  // Find the current open cycle (join with payments to find one with pending payments)
+  const [currentCycleRow] = await db
+    .select({ month_number: monthly_cycles.month_number })
+    .from(monthly_cycles)
+    .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
+    .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open')))
+    .orderBy(monthly_cycles.month_number)
+    .limit(1);
+
+  const currentMonth = currentCycleRow?.month_number ?? 0;
+
+  // Fetch all active loans for this member in the group
+  const activeLoans = await db
+    .select({
+      id:                      loans.id,
+      principal:               loans.principal,
+      monthly_interest_rate:   loans.monthly_interest_rate,
+      disbursement_month_number: loans.disbursement_month_number,
+      total_interest_paid:     loans.total_interest_paid,
+      borrower_user_id:        loans.borrower_user_id,
+    })
+    .from(loans)
+    .where(and(eq(loans.basket_id, basketRows.id), eq(loans.borrower_user_id, member_user_id), eq(loans.status, 'Active')));
+
+  if (activeLoans.length === 0) {
+    throw new AppError(409, 'NO_ACTIVE_LOANS', 'This member has no active loans in this group.');
+  }
+
+  let loans_repaid = 0;
+  let total_amount = 0;
+  const now = new Date();
+  const txn_date = now.toISOString().slice(0, 10);
+
+  // Snapshot basket balance for mutation
+  let currentBalance        = Number(basketRows.current_balance);
+  let currentTotalCredited  = Number(basketRows.total_credited);
+  let currentLentOut        = Number(basketRows.total_lent_out);
+  let currentInterestEarned = Number(basketRows.total_interest_earned);
+
+  await db.transaction(async (tx) => {
+    for (const loan of activeLoans) {
+      const cyclesElapsed = Math.max(0, currentMonth - loan.disbursement_month_number);
+      const outstanding_interest = computeOutstandingInterest(
+        cyclesElapsed, Number(loan.principal), Number(loan.monthly_interest_rate), Number(loan.total_interest_paid),
+      );
+
+      let principal_repaid = 0;
+      let interest_paid    = 0;
+
+      if (mode === 'interest_only') {
+        if (outstanding_interest <= 0) continue;
+        interest_paid = outstanding_interest;
+      } else if (mode === 'principal_only') {
+        principal_repaid = Number(loan.principal);
+      } else {
+        // full_settlement: always repay principal; interest only if > 0
+        principal_repaid = Number(loan.principal);
+        if (outstanding_interest > 0) interest_paid = outstanding_interest;
+      }
+
+      if (principal_repaid <= 0 && interest_paid <= 0) continue;
+
+      const loanFullyRepaid = principal_repaid > 0;
+      const repaymentTotal  = principal_repaid + interest_paid;
+
+      if (principal_repaid > 0) {
+        await tx.insert(loan_transactions).values({ loan_id: loan.id, txn_type: 'PRINCIPAL_REPAID', amount: principal_repaid, txn_date, created_by: adminUserId });
+        await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'LOAN_REPAID', amount: principal_repaid, direction: 'C', related_loan_id: loan.id, created_by: adminUserId });
+      }
+      if (interest_paid > 0) {
+        await tx.insert(loan_transactions).values({ loan_id: loan.id, txn_type: 'INTEREST_PAID', amount: interest_paid, txn_date, created_by: adminUserId });
+        await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'INTEREST_ACCRUED', amount: interest_paid, direction: 'C', related_loan_id: loan.id, created_by: adminUserId });
+      }
+
+      const newTotalInterestPaid = Number(loan.total_interest_paid) + interest_paid;
+      await tx.update(loans).set({
+        total_interest_paid: newTotalInterestPaid,
+        updated_at: now,
+        ...(loanFullyRepaid ? { status: 'Repaid', closed_at: now } : {}),
+      }).where(eq(loans.id, loan.id));
+
+      // Accumulate basket changes
+      currentBalance        += repaymentTotal;
+      currentTotalCredited  += repaymentTotal;
+      currentLentOut        -= principal_repaid;
+      currentInterestEarned += interest_paid;
+
+      total_amount  += repaymentTotal;
+      loans_repaid  += loanFullyRepaid ? 1 : 0;
+    }
+
+    // Write updated basket in one shot
+    await tx.update(baskets).set({
+      current_balance:       currentBalance,
+      total_credited:        currentTotalCredited,
+      total_lent_out:        currentLentOut,
+      total_interest_earned: currentInterestEarned,
+    }).where(eq(baskets.id, basketRows.id));
+  });
+
+  if (total_amount === 0) {
+    throw new AppError(409, 'NOTHING_TO_REPAY', 'No repayable amounts found for the selected mode on this member\'s loans.');
+  }
+
+  await insertActivity({
+    group_id,
+    event_type: 'LOAN_REPAID',
+    actor_id:   member_user_id,
+    data:       { amount: total_amount, bulk: true },
+  });
+
+  return { loans_repaid, total_amount };
 }
 
 // ─── updateLoan ──────────────────────────────────────────────────────────────

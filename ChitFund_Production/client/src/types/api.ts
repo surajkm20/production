@@ -194,12 +194,19 @@ export interface Loan {
   borrower_name: string
   principal: number
   monthly_interest_rate: string
+  disbursement_month_number: number
+  cycle_label: string
   total_interest_paid: number
   outstanding_interest: number
   disbursed_at: string | null
   expected_close_date: string | null
   status: 'Active' | 'Repaid' | 'WrittenOff'
   next_cycle_due_date: string | null
+}
+
+export interface BulkRepayResponse {
+  loans_repaid: number
+  total_amount: number
 }
 
 export interface DisburseLoanResponse {
