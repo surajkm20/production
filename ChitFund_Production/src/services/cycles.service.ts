@@ -979,19 +979,22 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       // Admin commission is settled in this cycle (last member auto-wins; no bid discount).
       const total_needed    = pool + adminCommission;
 
-      // The basket offset only applies to the FINAL cycle (month N).
-      // For all earlier cycles, payments are seeded with standard contributions.
-      const isFinalCycle = nextMonthNumber === Number(group.total_months);
-
       const activeMembers = await tx
-        .select({ user_id: memberships.user_id, share_count: memberships.share_count, name: users.name })
+        .select({ user_id: memberships.user_id, share_count: memberships.share_count, wins_count: memberships.wins_count, name: users.name })
         .from(memberships)
         .innerJoin(users, eq(users.id, memberships.user_id))
         .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active')));
 
+      // Compute remaining wins needed AFTER the current cycle's winner(s) are already recorded in memberships.
+      // The basket offset must only apply when seeding the FINAL cycle — i.e. exactly 1 win remains.
+      const remainingWinsNeeded = activeMembers.reduce(
+        (sum, m) => sum + Math.max(0, Number(m.share_count) - Number(m.wins_count)),
+        0,
+      );
+
       const [alreadyExists] = await tx.select({ id: payments.id }).from(payments).where(eq(payments.cycle_id, nextCycle.id)).limit(1);
 
-      if (isFinalCycle && currentBalance > 0) {
+      if (remainingWinsNeeded === 1 && currentBalance > 0) {
         // ── Final cycle + basket has funds: seed/update payments with basket-offset reduced amounts ──
         const basket_contribution  = Math.min(currentBalance, total_needed);
         const remaining_to_collect = Math.max(0, total_needed - basket_contribution);
