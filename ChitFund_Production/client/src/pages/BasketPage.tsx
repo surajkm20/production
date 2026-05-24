@@ -596,17 +596,22 @@ function MemberLoanCard({
               {bulkError && <p className="text-xs text-red-500">{bulkError}</p>}
               <div className="grid grid-cols-3 gap-2">
                 {([
-                  { mode: 'interest_only'  as BulkMode, label: 'Pay Interest',     disabled: totalInterest <= 0 },
-                  { mode: 'principal_only' as BulkMode, label: 'Pay Principal',     disabled: false },
-                  { mode: 'full_settlement'as BulkMode, label: 'Full Settlement',   disabled: false },
-                ]).map(({ mode, label, disabled }) => (
+                  { mode: 'interest_only'  as BulkMode, label: 'Pay Interest',   amount: totalInterest,   disabled: totalInterest <= 0 },
+                  { mode: 'principal_only' as BulkMode, label: 'Pay Principal',  amount: totalPrincipal,  disabled: totalPrincipal <= 0 },
+                  { mode: 'full_settlement'as BulkMode, label: 'Full Settlement', amount: totalOutstanding, disabled: totalOutstanding <= 0 },
+                ]).map(({ mode, label, amount, disabled }) => (
                   <button
                     key={mode}
                     onClick={() => handleBulk(mode)}
                     disabled={!!bulkLoading || disabled || isClosed}
-                    className="py-2 rounded-lg border border-maroon-200 text-[11px] font-semibold text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    className="py-2 px-1 rounded-lg border border-maroon-200 text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex flex-col items-center gap-0.5"
                   >
-                    {bulkLoading === mode ? 'Saving…' : label}
+                    <span className="text-[11px] font-semibold">
+                      {bulkLoading === mode ? 'Saving…' : label}
+                    </span>
+                    {bulkLoading !== mode && (
+                      <span className="text-[11px] font-bold">{formatPaise(amount)}</span>
+                    )}
                   </button>
                 ))}
               </div>
