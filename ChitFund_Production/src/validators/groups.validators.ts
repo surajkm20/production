@@ -18,7 +18,7 @@ export const createGroupSchema = z.object({
   payment_due_day:        z.number().int().min(1).max(28, 'payment_due_day cannot exceed 28 — days 29-31 are not allowed'),
   admin_commission_rate:  z.number().min(0).max(100, 'admin_commission_rate cannot exceed 100').optional(),
   monthly_interest_rate:  z.number().min(0).max(99.99).optional(),
-  admin_share_count:      z.number().int().min(1).optional(),
+  admin_share_count:      z.number().int().min(0).optional(),
 }).refine(
   (d) => d.admin_share_count == null || d.admin_share_count <= d.total_shares,
   { message: 'admin_share_count cannot exceed total_shares', path: ['admin_share_count'] },

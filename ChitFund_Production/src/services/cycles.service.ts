@@ -979,11 +979,12 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       // Admin commission is settled in this cycle (last member auto-wins; no bid discount).
       const total_needed    = pool + adminCommission;
 
-      const activeMembers = await tx
+      const activeMembers = (await tx
         .select({ user_id: memberships.user_id, share_count: memberships.share_count, wins_count: memberships.wins_count, name: users.name })
         .from(memberships)
         .innerJoin(users, eq(users.id, memberships.user_id))
-        .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active')));
+        .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active'))))
+        .filter(m => Number(m.share_count) > 0);
 
       // Compute remaining wins needed AFTER the current cycle's winner(s) are already recorded in memberships.
       // The basket offset must only apply when seeding the FINAL cycle — i.e. exactly 1 win remains.

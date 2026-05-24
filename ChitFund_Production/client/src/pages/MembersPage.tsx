@@ -158,10 +158,12 @@ function MemberRow({
 }) {
   const [busy, setBusy] = useState(false)
 
-  // Calls the parent's optimistic handler, shows busy while in-flight
+  // Calls the parent's optimistic handler, shows busy while in-flight.
+  // Admin may go down to 0; regular Members must stay at >= 1.
   async function adjust(delta: number) {
     const next = member.share_count + delta
-    if (next < 1) return
+    if (next < 1 && member.role !== 'Admin') return
+    if (next < 0) return
     setBusy(true)
     await onShareChange(member.membership_id, next)
     setBusy(false)
@@ -192,7 +194,9 @@ function MemberRow({
       {/* Share stepper — admin only, hidden once cycle starts (groupLocked) */}
       {isAdmin && !groupLocked && (
         <div className="flex items-center gap-1.5 shrink-0">
-          <button onClick={() => adjust(-1)} disabled={busy || member.share_count <= 1}
+          <button
+            onClick={() => adjust(-1)}
+            disabled={busy || (member.role === 'Admin' ? member.share_count <= 0 : member.share_count <= 1)}
             className="w-7 h-7 rounded-md border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 disabled:opacity-40 transition text-sm">
             −
           </button>

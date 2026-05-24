@@ -591,11 +591,13 @@ export async function startGroup(userId: string, group_id: string) {
   }
 
   await db.insert(payments).values(
-    activeMembers.map(m => ({
-      cycle_id:        cycle1.id,
-      member_user_id:  m.user_id,
-      expected_amount: Number(group.monthly_contribution) * Number(m.share_count),
-    })),
+    activeMembers
+      .filter(m => Number(m.share_count) > 0)
+      .map(m => ({
+        cycle_id:        cycle1.id,
+        member_user_id:  m.user_id,
+        expected_amount: Number(group.monthly_contribution) * Number(m.share_count),
+      })),
   );
 
   await insertActivity({ group_id, event_type: 'GROUP_STARTED', actor_id: userId });

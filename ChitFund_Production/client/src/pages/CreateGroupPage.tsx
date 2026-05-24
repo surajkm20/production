@@ -200,8 +200,8 @@ export default function CreateGroupPage() {
             <div className="flex items-center gap-4">
               <button
                 type="button"
-                onClick={() => setAdminShareCount(s => Math.max(1, s - 1))}
-                disabled={adminShareCount <= 1}
+                onClick={() => setAdminShareCount(s => Math.max(0, s - 1))}
+                disabled={adminShareCount <= 0}
                 className="w-10 h-10 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition text-lg font-medium"
               >
                 −
@@ -217,7 +217,9 @@ export default function CreateGroupPage() {
               </button>
               {contribution > 0 && (
                 <p className="text-xs text-gray-400 flex-1">
-                  You'll pay {adminShareCount === 1 ? formatPaise(contribution) : formatPaise(contribution * adminShareCount)} per month
+                  {adminShareCount === 0
+                    ? 'No contribution (organizer only)'
+                    : `You'll pay ${adminShareCount === 1 ? formatPaise(contribution) : formatPaise(contribution * adminShareCount)} per month`}
                 </p>
               )}
             </div>
@@ -331,7 +333,11 @@ export default function CreateGroupPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-maroon-200">Your share ({adminShareCount} {adminShareCount === 1 ? 'share' : 'shares'})</span>
-                  <span className="font-bold">{contribution > 0 ? formatPaise(contribution * adminShareCount) : '—'}/mo</span>
+                  <span className="font-bold">
+                    {adminShareCount === 0
+                      ? 'No contribution'
+                      : contribution > 0 ? `${formatPaise(contribution * adminShareCount)}/mo` : '—'}
+                  </span>
                 </div>
                 {startLabel && endLabel && (
                   <div className="flex justify-between text-sm">

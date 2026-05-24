@@ -28,8 +28,10 @@ export const addMemberSchema = z.object({
 
 // ─── PATCH /groups/:group_id/members/:membership_id ───────────────────────────
 // Only share_count is mutable via this endpoint (spec §5).
+// min(0) because the admin may set their own share_count to 0 (organizer-only role).
+// The service enforces that only Admin role may reach 0.
 export const updateMemberSchema = z.object({
-  share_count: z.number().int().min(1),
+  share_count: z.number().int().min(0),
 });
 
 // ─── DELETE /groups/:group_id/members/:membership_id ─────────────────────────

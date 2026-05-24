@@ -214,6 +214,10 @@ export async function updateMember(
   const totalCap       = Number(groupRows[0].total_shares);
   const filled         = Number(sharesRows[0].shares_filled ?? 0);
 
+  if (new_share_count === 0 && target.role !== 'Admin') {
+    throw new AppError(400, 'INVALID_SHARE_COUNT', 'Only the admin may have 0 shares.');
+  }
+
   if (new_share_count < wins) {
     throw new AppError(409, 'WINS_EXCEED_SHARES',
       `Cannot reduce share_count to ${new_share_count} — member has already won ${wins} time(s).`);
