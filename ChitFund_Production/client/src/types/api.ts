@@ -226,9 +226,13 @@ export interface BasketTransaction {
   direction: 'C' | 'D'
   amount: number
   cycle_month_label: string | null
+  cycle_month_number: number | null
   counterparty_name: string | null
   notes: string | null
   created_at: string
+  related_loan_id: string | null
+  loan_disbursement_month_number: number | null
+  loan_disbursement_label: string | null
 }
 
 export interface TransactionListResponse {

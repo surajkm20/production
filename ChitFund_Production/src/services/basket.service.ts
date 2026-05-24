@@ -5,6 +5,7 @@
 // write-off loan, recompute cached basket balance from ledger for integrity checks.
 
 import { eq, and, desc, gte, lte, count, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../config/db';
 import {
   chit_groups, memberships, baskets, basket_transactions,
@@ -75,7 +76,7 @@ export async function listTransactions(
 ) {
   const caller  = await assertActiveMember(group_id, userId);
   const isAdmin = caller.role === 'Admin';
-  const limit   = Math.min(filters.limit ?? 20, 100);
+  const limit   = Math.min(filters.limit ?? 100, 100);
 
   const [basketRows] = await db
     .select({ id: baskets.id })
@@ -94,21 +95,38 @@ export async function listTransactions(
     conditions.push(lte(basket_transactions.created_at, new Date(created_at)));
   }
 
+  // Alias for the cycle the transaction belongs to (repayment/disbursement cycle tag)
+  const txnCycle          = alias(monthly_cycles, 'txn_cycle');
+  // Alias for the cycle the loan was disbursed in (looked up via loans.disbursement_month_number)
+  const disbursementCycle = alias(monthly_cycles, 'disbursement_cycle');
+
   const rows = await db
     .select({
-      id:                   basket_transactions.id,
-      txn_type:             basket_transactions.txn_type,
-      direction:            basket_transactions.direction,
-      amount:               basket_transactions.amount,
-      cycle_month_label:    monthly_cycles.month_label,
-      counterparty_user_id: basket_transactions.counterparty_user_id,
-      counterparty_name:    users.name,
-      notes:                basket_transactions.notes,
-      created_at:           basket_transactions.created_at,
+      id:                              basket_transactions.id,
+      txn_type:                        basket_transactions.txn_type,
+      direction:                       basket_transactions.direction,
+      amount:                          basket_transactions.amount,
+      cycle_month_label:               txnCycle.month_label,
+      cycle_month_number:              txnCycle.month_number,
+      counterparty_user_id:            basket_transactions.counterparty_user_id,
+      counterparty_name:               users.name,
+      notes:                           basket_transactions.notes,
+      created_at:                      basket_transactions.created_at,
+      related_loan_id:                 basket_transactions.related_loan_id,
+      loan_disbursement_month_number:  disbursementCycle.month_number,
+      loan_disbursement_label:         disbursementCycle.month_label,
     })
     .from(basket_transactions)
-    .leftJoin(monthly_cycles, eq(monthly_cycles.id, basket_transactions.cycle_id))
+    .leftJoin(txnCycle, eq(txnCycle.id, basket_transactions.cycle_id))
     .leftJoin(users, eq(users.id, basket_transactions.counterparty_user_id))
+    .leftJoin(loans, eq(loans.id, basket_transactions.related_loan_id))
+    .leftJoin(
+      disbursementCycle,
+      and(
+        eq(disbursementCycle.month_number, loans.disbursement_month_number),
+        eq(disbursementCycle.group_id, group_id),
+      ),
+    )
     .where(and(...conditions))
     .orderBy(desc(basket_transactions.created_at))
     .limit(limit + 1);
@@ -122,14 +140,18 @@ export async function listTransactions(
 
   return {
     data: items.map(r => ({
-      txn_id:            r.id,
-      txn_type:          r.txn_type,
-      direction:         r.direction,
-      amount:            r.amount,
-      cycle_month_label: r.cycle_month_label ?? null,
-      counterparty_name: r.counterparty_name ?? null,
-      notes:             r.notes ?? null,
-      created_at:        r.created_at,
+      txn_id:                         r.id,
+      txn_type:                       r.txn_type,
+      direction:                      r.direction,
+      amount:                         r.amount,
+      cycle_month_label:              r.cycle_month_label ?? null,
+      cycle_month_number:             r.cycle_month_number ?? null,
+      counterparty_name:              r.counterparty_name ?? null,
+      notes:                          r.notes ?? null,
+      created_at:                     r.created_at,
+      related_loan_id:                r.related_loan_id ?? null,
+      loan_disbursement_month_number: r.loan_disbursement_month_number ?? null,
+      loan_disbursement_label:        r.loan_disbursement_label ?? null,
     })),
     next_cursor,
     has_more,

@@ -33,15 +33,239 @@ function LoanStatusBadge({ status }: { status: string }) {
 
 function txnLabel(txn_type: string): string {
   const map: Record<string, string> = {
-    LOAN_DISBURSED:   'Loan disbursed',
-    LOAN_REPAID:      'Loan repaid',
-    INTEREST_ACCRUED: 'Interest earned',
-    BID_TO_BASKET:    'Bid → basket',
-    SKIP_MONTH_DEBIT: 'Skip month payout',
-    ADJUSTMENT:       'Manual adjustment',
-    CLOSURE_SPLIT:    'Closure split',
+    LOAN_DISBURSED:          'Loan disbursed',
+    LOAN_REPAID:             'Principal repaid',
+    INTEREST_ACCRUED:        'Interest earned',
+    CREDIT_DISCOUNT:         'Bid discount',
+    BID_TO_BASKET:           'Bid → basket',
+    DEBIT_SKIP_MONTH:        'Skip month payout',
+    DEBIT_X_CHITI:           'X-Chiti payout',
+    DEBIT_FINAL_CYCLE_OFFSET:'Final cycle offset',
+    SKIP_MONTH_DEBIT:        'Skip month payout',
+    ADJUSTMENT:              'Manual adjustment',
+    CLOSURE_SPLIT:           'Closure split',
   }
   return map[txn_type] ?? txn_type
+}
+
+// ─── LedgerTimeline ────────────────────────────────────────────────────────────
+
+type LoanGroup = {
+  loan_id: string
+  borrower_name: string | null
+  disbursement_label: string | null
+  disbursement_month: number | null
+  transactions: BasketTransaction[]
+}
+
+function loanRepaidTxnLabel(txn: BasketTransaction): string {
+  if (txn.txn_type === 'LOAN_DISBURSED') return 'Disbursed'
+  if (txn.txn_type === 'INTEREST_ACCRUED') return 'Interest'
+  if (txn.txn_type === 'LOAN_REPAID') return 'Principal'
+  return txnLabel(txn.txn_type)
+}
+
+function loanTxnColors(txn: BasketTransaction): { bg: string; text: string; amount: string } {
+  if (txn.txn_type === 'LOAN_DISBURSED')
+    return { bg: 'bg-indigo-50', text: 'text-indigo-700', amount: 'text-indigo-600' }
+  if (txn.txn_type === 'INTEREST_ACCRUED')
+    return { bg: 'bg-amber-50', text: 'text-amber-700', amount: 'text-amber-600' }
+  if (txn.txn_type === 'LOAN_REPAID')
+    return { bg: 'bg-green-50', text: 'text-green-700', amount: 'text-green-600' }
+  return { bg: 'bg-gray-50', text: 'text-gray-600', amount: 'text-gray-700' }
+}
+
+function otherTxnColors(txn_type: string): { icon: string; amount: string } {
+  if (txn_type === 'CREDIT_DISCOUNT' || txn_type === 'BID_TO_BASKET')
+    return { icon: 'text-green-600', amount: 'text-green-600' }
+  if (txn_type === 'DEBIT_FINAL_CYCLE_OFFSET' || txn_type === 'DEBIT_SKIP_MONTH' || txn_type === 'DEBIT_X_CHITI')
+    return { icon: 'text-red-500', amount: 'text-red-500' }
+  if (txn_type === 'CLOSURE_SPLIT')
+    return { icon: 'text-indigo-600', amount: 'text-indigo-600' }
+  return { icon: 'text-gray-500', amount: 'text-gray-700' }
+}
+
+function LoanLifecycleCard({ group }: { group: LoanGroup }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const disburseRow   = group.transactions.find(t => t.txn_type === 'LOAN_DISBURSED')
+  const repaidRows    = group.transactions.filter(t => t.txn_type === 'LOAN_REPAID')
+  const principal     = disburseRow ? disburseRow.amount : 0
+  const totalRepaid   = repaidRows.reduce((s, t) => s + t.amount, 0)
+  const fullyRepaid   = principal > 0 && totalRepaid >= principal
+  const partiallyRepaid = !fullyRepaid && totalRepaid > 0
+  const progressPct   = principal > 0 ? Math.min(100, Math.round((totalRepaid / principal) * 100)) : 0
+
+  const label = group.disbursement_label
+    ?? (group.disbursement_month != null ? `Cycle ${group.disbursement_month}` : 'Unknown cycle')
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      {/* Card header */}
+      <button
+        className="w-full flex items-start gap-3 px-4 py-3.5 text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
+          <span className="text-indigo-700 text-xs font-bold">L</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-gray-800 truncate">
+              {group.borrower_name ?? 'Unknown'} · Loan
+            </p>
+            <span className="text-[11px] text-gray-400 font-normal">{label}</span>
+          </div>
+          {principal > 0 && (
+            <p className="text-xs text-gray-400 mt-0.5">{formatPaise(principal)}</p>
+          )}
+          {/* Status badge */}
+          <div className="flex items-center gap-2 mt-1.5">
+            {fullyRepaid ? (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Fully Repaid</span>
+            ) : partiallyRepaid ? (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Partially Repaid</span>
+            ) : (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">Active</span>
+            )}
+            {principal > 0 && (
+              <span className="text-[11px] text-gray-400">{progressPct}% repaid</span>
+            )}
+          </div>
+          {/* Progress bar */}
+          {principal > 0 && (
+            <div className="mt-1.5 h-1 bg-gray-100 rounded-full overflow-hidden w-full">
+              <div
+                className={`h-full rounded-full ${fullyRepaid ? 'bg-emerald-400' : 'bg-indigo-400'}`}
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          )}
+        </div>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform shrink-0 mt-1 ${expanded ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {/* Expanded transaction rows */}
+      {expanded && (
+        <div className="border-t border-gray-50 divide-y divide-gray-50">
+          {group.transactions.map(txn => {
+            const colors = loanTxnColors(txn)
+            const cycleLabel = txn.cycle_month_number != null
+              ? `Cycle ${txn.cycle_month_number}`
+              : txn.cycle_month_label ?? null
+            return (
+              <div key={txn.txn_id} className="flex items-center gap-3 px-4 py-2.5">
+                <div className={`text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${colors.bg} ${colors.text}`}>
+                  {loanRepaidTxnLabel(txn)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  {cycleLabel && (
+                    <p className="text-xs font-medium text-gray-700">{cycleLabel} repayment</p>
+                  )}
+                  <p className="text-[11px] text-gray-400">{fmtDate(txn.created_at)}</p>
+                </div>
+                <p className={`text-sm font-semibold shrink-0 ${colors.amount}`}>
+                  {txn.direction === 'C' ? '+' : '−'}{formatPaise(txn.amount)}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OtherActivityRow({ txn }: { txn: BasketTransaction }) {
+  const colors = otherTxnColors(txn.txn_type)
+  const cycleLabel = txn.cycle_month_number != null
+    ? `Cycle ${txn.cycle_month_number}`
+    : txn.cycle_month_label ?? null
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-sm ${txn.direction === 'C' ? 'bg-green-50' : 'bg-red-50'}`}>
+        <span className={`text-sm font-bold ${colors.icon}`}>{txn.direction === 'C' ? '↑' : '↓'}</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-800">{txnLabel(txn.txn_type)}</p>
+        <p className="text-xs text-gray-400 truncate">
+          {cycleLabel ? `${cycleLabel} · ` : ''}
+          {txn.counterparty_name ? `${txn.counterparty_name} · ` : ''}
+          {fmtDate(txn.created_at)}
+        </p>
+        {txn.notes && <p className="text-xs text-gray-400 truncate">{txn.notes}</p>}
+      </div>
+      <p className={`text-sm font-semibold shrink-0 ${colors.amount}`}>
+        {txn.direction === 'C' ? '+' : '−'}{formatPaise(txn.amount)}
+      </p>
+    </div>
+  )
+}
+
+function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] }) {
+  if (transactions.length === 0) {
+    return <p className="text-sm text-gray-400 text-center py-10">No transactions yet.</p>
+  }
+
+  // Partition: loan-linked vs other
+  const loanTxns:  BasketTransaction[] = []
+  const otherTxns: BasketTransaction[] = []
+
+  for (const txn of transactions) {
+    if (txn.related_loan_id) loanTxns.push(txn)
+    else otherTxns.push(txn)
+  }
+
+  // Group loan transactions by loan_id, preserving order of first appearance
+  const loanGroupMap = new Map<string, LoanGroup>()
+  for (const txn of loanTxns) {
+    const lid = txn.related_loan_id!
+    if (!loanGroupMap.has(lid)) {
+      loanGroupMap.set(lid, {
+        loan_id:             lid,
+        borrower_name:       txn.counterparty_name,
+        disbursement_label:  txn.loan_disbursement_label,
+        disbursement_month:  txn.loan_disbursement_month_number,
+        transactions:        [],
+      })
+    }
+    loanGroupMap.get(lid)!.transactions.push(txn)
+  }
+
+  const loanGroups = [...loanGroupMap.values()]
+
+  return (
+    <div className="space-y-3">
+      {/* Loan lifecycle cards */}
+      {loanGroups.length > 0 && (
+        <div className="space-y-2">
+          {loanGroups.map(group => (
+            <LoanLifecycleCard key={group.loan_id} group={group} />
+          ))}
+        </div>
+      )}
+
+      {/* Other basket activity */}
+      {otherTxns.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-4 pt-3 pb-1">
+            Other Basket Activity
+          </p>
+          <div className="divide-y divide-gray-50">
+            {otherTxns.map(txn => (
+              <OtherActivityRow key={txn.txn_id} txn={txn} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── New loan modal ───────────────────────────────────────────────────────────
@@ -712,7 +936,7 @@ export default function BasketPage() {
       const isAdmin = g.my_membership.role === 'Admin'
       const parallel: Promise<unknown>[] = [
         api.get<Loan[]>(`/groups/${groupId}/loans?status=active`),
-        api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=20`),
+        api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=100`),
       ]
       if (isAdmin) {
         parallel.push(api.get<Member[]>(`/groups/${groupId}/members`))
@@ -744,7 +968,7 @@ export default function BasketPage() {
     const [basketRes, active, txns] = await Promise.all([
       api.get<BasketOverview>(`/groups/${groupId}/basket`),
       api.get<Loan[]>(`/groups/${groupId}/loans?status=active`),
-      api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=20`),
+      api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=100`),
     ])
     setBasket(basketRes)
     setActiveLoans(active)
@@ -889,33 +1113,8 @@ export default function BasketPage() {
 
         {/* Ledger */}
         {tab === 'ledger' && (
-          <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            {transactions.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-10">No transactions yet.</p>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {transactions.map(txn => (
-                  <div key={txn.txn_id} className="flex items-center gap-3 px-4 py-3">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-sm ${txn.direction === 'C' ? 'bg-green-100' : 'bg-amber-100'}`}>
-                      {txn.direction === 'C' ? '↑' : '↓'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800">{txnLabel(txn.txn_type)}</p>
-                      <p className="text-xs text-gray-400 truncate">
-                        {txn.cycle_month_label ? `${txn.cycle_month_label} · ` : ''}
-                        {txn.counterparty_name ? `${txn.counterparty_name} · ` : ''}{fmtDate(txn.created_at)}
-                      </p>
-                      {txn.notes && (
-                        <p className="text-xs text-gray-400 truncate">{txn.notes}</p>
-                      )}
-                    </div>
-                    <p className={`text-sm font-semibold shrink-0 ${txn.direction === 'C' ? 'text-green-600' : 'text-amber-600'}`}>
-                      {txn.direction === 'C' ? '+' : '−'}{formatPaise(txn.amount)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div className="mx-3 mt-3">
+            <LedgerTimeline transactions={transactions} />
           </div>
         )}
 
