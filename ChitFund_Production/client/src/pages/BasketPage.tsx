@@ -330,38 +330,38 @@ type CycleGroup = {
   closingBalance:  number
 }
 
-function cycleTxnLabel(txn_type: string): string {
+// ─── helpers shared by CycleLedger components ─────────────────────────────────
+
+function simpleTxnLabel(txn_type: string): string {
   const map: Record<string, string> = {
-    CREDIT_DISCOUNT:          'Bid discount to basket',
-    BID_TO_BASKET:            'Bid discount to basket',
-    DEBIT_X_CHITI:            'X-Chiti payout',
-    DEBIT_SKIP_MONTH:         'Skip-month payout',
-    SKIP_MONTH_DEBIT:         'Skip-month payout',
-    DEBIT_FINAL_CYCLE_OFFSET: 'Final-cycle basket offset',
-    LOAN_DISBURSED:           'Loan disbursed',
-    LOAN_REPAID:              'Principal repaid',
-    INTEREST_ACCRUED:         'Interest recovered',
-    ADJUSTMENT:               'Manual adjustment',
-    CLOSURE_SPLIT:            'Closure split',
+    CREDIT_DISCOUNT:          'Bid Discount to Basket',
+    BID_TO_BASKET:            'Bid Discount to Basket',
+    DEBIT_X_CHITI:            'X-Chiti Payout',
+    DEBIT_SKIP_MONTH:         'Skip-Month Payout',
+    SKIP_MONTH_DEBIT:         'Skip-Month Payout',
+    DEBIT_FINAL_CYCLE_OFFSET: 'Final-Cycle Basket Offset',
+    ADJUSTMENT:               'Manual Adjustment',
+    CLOSURE_SPLIT:            'Closure Split',
   }
   return map[txn_type] ?? txn_type
 }
 
-function cycleTxnColors(direction: 'C' | 'D'): { dot: string; amount: string } {
+function simpleTxnColors(direction: 'C' | 'D'): { dot: string; amount: string } {
   return direction === 'C'
-    ? { dot: 'bg-green-500',  amount: 'text-green-600' }
-    : { dot: 'bg-red-400',    amount: 'text-red-500'   }
+    ? { dot: 'bg-green-500', amount: 'text-green-600' }
+    : { dot: 'bg-red-400',   amount: 'text-red-500'   }
 }
 
+// Simple single-row for non-loan transaction types
 function CycleTxnRow({ txn }: { txn: BasketTransaction }) {
-  const { dot, amount } = cycleTxnColors(txn.direction)
-  const who = txn.loan_borrower_name ?? txn.counterparty_name ?? null
+  const { dot, amount } = simpleTxnColors(txn.direction)
+  const who = txn.counterparty_name ?? null
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
       <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-700">{cycleTxnLabel(txn.txn_type)}</p>
+        <p className="text-sm text-gray-700">{simpleTxnLabel(txn.txn_type)}</p>
         {who && <p className="text-xs text-gray-400 truncate">{who}</p>}
         {txn.notes && !who && (
           <p className="text-xs text-gray-400 truncate">{txn.notes}</p>
@@ -374,30 +374,134 @@ function CycleTxnRow({ txn }: { txn: BasketTransaction }) {
   )
 }
 
+// Collapsible aggregate row for LOAN_DISBURSED transactions
+function LoanDisbursedGroup({ txns }: { txns: BasketTransaction[] }) {
+  const [open, setOpen] = useState(false)
+  const total = txns.reduce((s, t) => s + t.amount, 0)
+
+  return (
+    <div>
+      <button
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="w-2 h-2 rounded-full shrink-0 bg-red-400" />
+        <p className="flex-1 text-sm text-gray-700">Loan Disbursed</p>
+        <p className="text-sm font-semibold shrink-0 tabular-nums text-red-500 mr-1">
+          −{formatPaise(total)}
+        </p>
+        <svg
+          className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="pb-1">
+          {txns.map(t => (
+            <div key={t.txn_id} className="flex items-center gap-3 pl-10 pr-4 py-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-300 shrink-0" />
+              <p className="flex-1 text-xs text-gray-500 truncate">
+                {t.loan_borrower_name ?? t.counterparty_name ?? 'Unknown'}
+              </p>
+              <p className="text-xs font-medium tabular-nums text-red-400 shrink-0">
+                −{formatPaise(t.amount)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Collapsible aggregate row for LOAN_REPAID + INTEREST_ACCRUED transactions
+function LoanRecoveryGroup({ txns }: { txns: BasketTransaction[] }) {
+  const [open, setOpen] = useState(false)
+  const total = txns.reduce((s, t) => s + t.amount, 0)
+
+  return (
+    <div>
+      <button
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="w-2 h-2 rounded-full shrink-0 bg-green-500" />
+        <p className="flex-1 text-sm text-gray-700">Loan Recovery</p>
+        <p className="text-sm font-semibold shrink-0 tabular-nums text-green-600 mr-1">
+          +{formatPaise(total)}
+        </p>
+        <svg
+          className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="pb-1">
+          {txns.map(t => {
+            const label = t.txn_type === 'INTEREST_ACCRUED' ? 'interest' : 'principal'
+            const name  = t.loan_borrower_name ?? t.counterparty_name ?? 'Unknown'
+            return (
+              <div key={t.txn_id} className="flex items-center gap-3 pl-10 pr-4 py-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-300 shrink-0" />
+                <p className="flex-1 text-xs text-gray-500 truncate">
+                  {name} <span className="text-gray-400">({label})</span>
+                </p>
+                <p className="text-xs font-medium tabular-nums text-green-500 shrink-0">
+                  +{formatPaise(t.amount)}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CycleGroupCard({ group }: { group: CycleGroup }) {
   const [expanded, setExpanded] = useState(false)
 
   const label = group.month_label ?? `Cycle ${group.month_number}`
 
+  // Partition transactions into three buckets:
+  //   disbursements → collapsible LOAN_DISBURSED group
+  //   recoveries    → collapsible LOAN_REPAID + INTEREST_ACCRUED group
+  //   simple        → all other types, each a plain row
+  const disbursements = group.transactions.filter(t => t.txn_type === 'LOAN_DISBURSED')
+  const recoveries    = group.transactions.filter(t => t.txn_type === 'LOAN_REPAID' || t.txn_type === 'INTEREST_ACCRUED')
+  const simpleRows    = group.transactions.filter(t =>
+    t.txn_type !== 'LOAN_DISBURSED' && t.txn_type !== 'LOAN_REPAID' && t.txn_type !== 'INTEREST_ACCRUED'
+  )
+
+  // Build an ordered list of display items to preserve rough chronological order:
+  // simple rows first (bid discount etc.), then disbursements, then recoveries.
+  // This gives the financial-flow feel described in the spec.
+  const txnCount = group.transactions.length
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      {/* Collapsible header — shows label + closing balance summary */}
+      {/* Collapsed header */}
       <button
         className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
         onClick={() => setExpanded(v => !v)}
       >
-        <div className="w-8 h-8 rounded-full bg-maroon-50 flex items-center justify-center shrink-0">
-          <span className="text-xs font-bold text-maroon-600">M{group.month_number}</span>
+        {/* Cycle avatar */}
+        <div className="w-9 h-9 rounded-full bg-maroon-50 flex items-center justify-center shrink-0">
+          <span className="text-[11px] font-bold text-maroon-700">M{group.month_number}</span>
         </div>
 
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800">{label}</p>
           <p className="text-xs text-gray-400">
-            {group.transactions.length} transaction{group.transactions.length !== 1 ? 's' : ''}
+            {txnCount} transaction{txnCount !== 1 ? 's' : ''}
           </p>
         </div>
 
-        {/* Closing balance */}
+        {/* Closing basket balance */}
         <p className="text-sm font-semibold shrink-0 tabular-nums mr-1 text-gray-800">
           {formatPaise(group.closingBalance)}
         </p>
@@ -410,31 +514,42 @@ function CycleGroupCard({ group }: { group: CycleGroup }) {
         </svg>
       </button>
 
+      {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-gray-100">
           {/* Opening balance */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
             <p className="text-xs font-medium text-gray-500">Opening Balance</p>
-            <p className="text-xs font-semibold tabular-nums text-gray-700">{formatPaise(group.openingBalance)}</p>
+            <p className="text-xs font-semibold tabular-nums text-gray-700">
+              {formatPaise(group.openingBalance)}
+            </p>
           </div>
 
-          {/* Divider */}
+          {/* Top dashed divider */}
           <div className="mx-4 border-t border-dashed border-gray-200" />
 
-          {/* Line items */}
+          {/* Line items — simple rows, then disbursements group, then recoveries group */}
           <div className="divide-y divide-gray-50">
-            {group.transactions.map(txn => (
+            {simpleRows.map(txn => (
               <CycleTxnRow key={txn.txn_id} txn={txn} />
             ))}
+            {disbursements.length > 0 && (
+              <LoanDisbursedGroup txns={disbursements} />
+            )}
+            {recoveries.length > 0 && (
+              <LoanRecoveryGroup txns={recoveries} />
+            )}
           </div>
 
-          {/* Divider */}
+          {/* Bottom dashed divider */}
           <div className="mx-4 border-t border-dashed border-gray-200" />
 
           {/* Closing balance */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
             <p className="text-xs font-medium text-gray-500">Closing Balance</p>
-            <p className="text-xs font-bold tabular-nums text-gray-800">{formatPaise(group.closingBalance)}</p>
+            <p className="text-xs font-bold tabular-nums text-gray-800">
+              {formatPaise(group.closingBalance)}
+            </p>
           </div>
         </div>
       )}
@@ -459,14 +574,22 @@ function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
   })
 
   // Resolve effective cycle for each transaction.
-  // Priority: cycle_month_number (tagged at record time) → loan_disbursement_month_number (fallback for
-  // historical loan transactions that were written before cycle stamping was introduced).
+  // LOAN_DISBURSED falls back to loan_disbursement_month_number when cycle_month_number is absent.
+  // All other types (LOAN_REPAID, INTEREST_ACCRUED, …) only use cycle_month_number — if it is
+  // null the transaction is left untagged (honest gap).
   const cycleTagged: BasketTransaction[] = []
   const untagged:    BasketTransaction[] = []
   for (const txn of withBalance) {
-    const effectiveMn = txn.cycle_month_number ?? txn.loan_disbursement_month_number
-    if (effectiveMn != null) cycleTagged.push({ ...txn, cycle_month_number: effectiveMn, cycle_month_label: txn.cycle_month_label ?? txn.loan_disbursement_label })
-    else untagged.push(txn)
+    const effectiveMn = txn.cycle_month_number ??
+      (txn.txn_type === 'LOAN_DISBURSED' ? txn.loan_disbursement_month_number : null)
+    const effectiveLabel = txn.cycle_month_label ??
+      (txn.txn_type === 'LOAN_DISBURSED' ? txn.loan_disbursement_label : null)
+
+    if (effectiveMn != null) {
+      cycleTagged.push({ ...txn, cycle_month_number: effectiveMn, cycle_month_label: effectiveLabel })
+    } else {
+      untagged.push(txn)
+    }
   }
 
   // Group cycle-tagged transactions by effective month_number (already in chronological order)
@@ -480,8 +603,8 @@ function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
   }
 
   // Sort cycles ascending (earliest first) and compute opening/closing balances.
-  // Opening balance of cycle N = running_balance of first txn in cycle N minus its signed amount.
-  // Closing balance of cycle N = running_balance of last txn in cycle N.
+  // Opening balance of cycle N = running_balance of first txn minus its signed amount.
+  // Closing balance of cycle N = running_balance of last txn.
   const cycleGroups: CycleGroup[] = [...groupMap.values()]
     .sort((a, b) => a.month_number - b.month_number)
     .map(g => {
@@ -499,7 +622,7 @@ function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
         <CycleGroupCard key={group.month_number} group={group} />
       ))}
 
-      {/* Transactions not tagged to any cycle (e.g. manual adjustments without cycle context) */}
+      {/* Transactions not tagged to any cycle */}
       {untagged.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-4 pt-3 pb-1">
