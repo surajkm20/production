@@ -643,14 +643,15 @@ export async function bulkRepayMember(
 
   // Find the current open cycle (join with payments to find one with pending payments)
   const [currentCycleRow] = await db
-    .select({ month_number: monthly_cycles.month_number })
+    .select({ id: monthly_cycles.id, month_number: monthly_cycles.month_number })
     .from(monthly_cycles)
     .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
     .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open')))
     .orderBy(monthly_cycles.month_number)
     .limit(1);
 
-  const currentMonth = currentCycleRow?.month_number ?? 0;
+  const currentMonth   = currentCycleRow?.month_number ?? 0;
+  const currentCycleId = currentCycleRow?.id ?? undefined;
 
   // Fetch all active loans for this member in the group
   const activeLoans = await db
@@ -708,11 +709,11 @@ export async function bulkRepayMember(
 
       if (principal_repaid > 0) {
         await tx.insert(loan_transactions).values({ loan_id: loan.id, txn_type: 'PRINCIPAL_REPAID', amount: principal_repaid, txn_date, created_by: adminUserId });
-        await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'LOAN_REPAID', amount: principal_repaid, direction: 'C', related_loan_id: loan.id, created_by: adminUserId });
+        await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'LOAN_REPAID', amount: principal_repaid, direction: 'C', related_loan_id: loan.id, ...(currentCycleId ? { cycle_id: currentCycleId } : {}), created_by: adminUserId });
       }
       if (interest_paid > 0) {
         await tx.insert(loan_transactions).values({ loan_id: loan.id, txn_type: 'INTEREST_PAID', amount: interest_paid, txn_date, created_by: adminUserId });
-        await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'INTEREST_ACCRUED', amount: interest_paid, direction: 'C', related_loan_id: loan.id, created_by: adminUserId });
+        await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'INTEREST_ACCRUED', amount: interest_paid, direction: 'C', related_loan_id: loan.id, ...(currentCycleId ? { cycle_id: currentCycleId } : {}), created_by: adminUserId });
       }
 
       const newTotalInterestPaid = Number(loan.total_interest_paid) + interest_paid;

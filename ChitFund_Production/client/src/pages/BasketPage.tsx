@@ -1362,8 +1362,8 @@ function RepaymentSheet({
   onRepaid: (msg: string) => void
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
-      <div className="bg-white rounded-t-2xl w-full max-w-md max-h-[85vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <h2 className="text-base font-bold text-gray-900">Repayment</h2>
           <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition">
