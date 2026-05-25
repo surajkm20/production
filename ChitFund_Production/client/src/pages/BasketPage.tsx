@@ -1208,6 +1208,19 @@ function ActiveLoanCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  async function handleDeleteLoan(loan: Loan, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!window.confirm('Delete this loan? This cannot be undone.')) return
+    setDeleteError(null)
+    try {
+      await api.deleteLoan(groupId, loan.loan_id)
+      onEdited()
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete loan.')
+    }
+  }
 
   const representative   = memberLoans[0]
   const totalPrincipal   = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
@@ -1255,9 +1268,12 @@ function ActiveLoanCard({
           </div>
         </button>
 
-        {/* Expanded: loan details with optional Edit button for admin */}
+        {/* Expanded: loan details with optional Edit / Delete buttons for admin */}
         {expanded && (
           <div className="border-t border-gray-100 divide-y divide-gray-50">
+            {deleteError && (
+              <p className="px-4 py-2 text-xs text-red-600 bg-red-50">{deleteError}</p>
+            )}
             {memberLoans.map(loan => (
               <div key={loan.loan_id} className="px-4 py-3">
                 <div className="flex items-center justify-between mb-2">
@@ -1265,12 +1281,20 @@ function ActiveLoanCard({
                   <div className="flex items-center gap-2">
                     <LoanStatusBadge status={loan.status} />
                     {isAdmin && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setEditingLoan(loan) }}
-                        className="text-[11px] px-2 py-0.5 rounded-full border border-maroon-200 text-maroon-600 font-medium hover:bg-maroon-50 transition"
-                      >
-                        Edit
-                      </button>
+                      <>
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingLoan(loan) }}
+                          className="text-[11px] px-2 py-0.5 rounded-full border border-maroon-200 text-maroon-600 font-medium hover:bg-maroon-50 transition"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={e => handleDeleteLoan(loan, e)}
+                          className="text-[11px] px-2 py-0.5 rounded-full border border-red-200 text-red-600 font-medium hover:bg-red-50 transition"
+                        >
+                          Delete
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

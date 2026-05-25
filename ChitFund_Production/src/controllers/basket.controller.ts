@@ -84,3 +84,12 @@ export async function bulkRepayMember(req: Request, res: Response, next: NextFun
     sendSuccess(res, result);
   } catch (err) { next(err); }
 }
+
+export async function deleteLoan(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const group_id = req.params.group_id as string;
+    const loan_id  = req.params.loan_id  as string;
+    const result = await BasketService.deleteLoan(req.user!.userId, group_id, loan_id);
+    sendSuccess(res, result);
+  } catch (err) { next(err); }
+}

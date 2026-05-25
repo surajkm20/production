@@ -74,4 +74,7 @@ export const api = {
 
   editLoan: (groupId: string, loanId: string, body: { principal?: number; expected_close_date?: string; notes?: string }) =>
     request<import('../types/api').Loan>(`/groups/${groupId}/loans/${loanId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  deleteLoan: (groupId: string, loanId: string) =>
+    request<{ deleted: boolean; loan_id: string }>(`/groups/${groupId}/loans/${loanId}`, { method: 'DELETE' }),
 }

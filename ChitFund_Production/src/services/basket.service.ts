@@ -756,6 +756,53 @@ export async function bulkRepayMember(
   return { loans_repaid, total_amount };
 }
 
+// ─── deleteLoan ──────────────────────────────────────────────────────────────
+export async function deleteLoan(
+  userId:   string,
+  group_id: string,
+  loan_id:  string,
+) {
+  const caller = await assertActiveMember(group_id, userId);
+  if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+
+  const [basketRow] = await db
+    .select({ id: baskets.id, current_balance: baskets.current_balance, total_lent_out: baskets.total_lent_out, total_debited: baskets.total_debited })
+    .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
+
+  if (!basketRow) throw new AppError(404, 'BASKET_NOT_FOUND', 'Basket not found.');
+
+  const [loanRow] = await db
+    .select({ id: loans.id, status: loans.status, principal: loans.principal, borrower_user_id: loans.borrower_user_id })
+    .from(loans)
+    .where(and(eq(loans.id, loan_id), eq(loans.basket_id, basketRow.id)))
+    .limit(1);
+
+  if (!loanRow) throw new AppError(404, 'LOAN_NOT_FOUND', 'Loan not found in this group.');
+  if (loanRow.status !== 'Active') throw new AppError(409, 'LOAN_NOT_ACTIVE', 'Only Active loans can be deleted.');
+
+  const principal = Number(loanRow.principal);
+
+  await db.transaction(async (tx) => {
+    // 1. Delete all loan_transactions for this loan
+    await tx.delete(loan_transactions).where(eq(loan_transactions.loan_id, loan_id));
+
+    // 2. Delete all basket_transactions referencing this loan
+    await tx.delete(basket_transactions).where(eq(basket_transactions.related_loan_id, loan_id));
+
+    // 3. Reverse basket balance: add back principal, subtract from total_lent_out and total_debited
+    await tx.update(baskets).set({
+      current_balance: Number(basketRow.current_balance) + principal,
+      total_lent_out:  Number(basketRow.total_lent_out)  - principal,
+      total_debited:   Number(basketRow.total_debited)   - principal,
+    }).where(eq(baskets.id, basketRow.id));
+
+    // 4. Delete the loan row
+    await tx.delete(loans).where(eq(loans.id, loan_id));
+  });
+
+  return { deleted: true, loan_id };
+}
+
 // ─── updateLoan ──────────────────────────────────────────────────────────────
 export async function updateLoan(
   userId:   string,

@@ -1,11 +1,12 @@
 // Routes for basket and loan management (require JWT + group membership):
-//   GET  /groups/:group_id/basket                          — basket overview (members see limited view)
-//   GET  /groups/:group_id/basket/transactions             — ledger entries
-//   POST /groups/:group_id/loans                  [admin]  — disburse a new loan
-//   GET  /groups/:group_id/loans                           — list loans
-//   GET  /groups/:group_id/loans/:loan_id                  — loan detail + repayment history
-//   POST /groups/:group_id/loans/:loan_id/repay   [admin]  — record repayment
-//   PATCH /groups/:group_id/loans/:loan_id         [admin]  — write off or extend due date
+//   GET    /groups/:group_id/basket                          — basket overview (members see limited view)
+//   GET    /groups/:group_id/basket/transactions             — ledger entries
+//   POST   /groups/:group_id/loans                  [admin]  — disburse a new loan
+//   GET    /groups/:group_id/loans                           — list loans
+//   GET    /groups/:group_id/loans/:loan_id                  — loan detail + repayment history
+//   POST   /groups/:group_id/loans/:loan_id/repay   [admin]  — record repayment
+//   PATCH  /groups/:group_id/loans/:loan_id          [admin]  — write off or extend due date
+//   DELETE /groups/:group_id/loans/:loan_id          [admin]  — delete an Active loan (reverses basket)
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
@@ -27,4 +28,5 @@ basketRouter.get('/:group_id/loans',                                            
 basketRouter.get('/:group_id/loans/:loan_id',                                                       basket.getLoan);
 basketRouter.post('/:group_id/loans/:loan_id/repay',    requireAdmin, validate(repayLoanSchema),    basket.repayLoan);
 basketRouter.patch('/:group_id/loans/:loan_id',         requireAdmin, validate(updateLoanSchema),   basket.updateLoan);
+basketRouter.delete('/:group_id/loans/:loan_id',        requireAdmin,                                basket.deleteLoan);
 basketRouter.post('/:group_id/loans/bulk-repay',        requireAdmin, validate(bulkRepaySchema),     basket.bulkRepayMember);
