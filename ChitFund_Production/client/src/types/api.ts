@@ -234,6 +234,8 @@ export interface BasketTransaction {
   related_loan_id: string | null
   loan_disbursement_month_number: number | null
   loan_disbursement_label: string | null
+  /** Computed on the frontend — running basket balance after this transaction. */
+  running_balance?: number
 }
 
 export interface TransactionListResponse {

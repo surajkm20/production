@@ -323,9 +323,11 @@ function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] })
 // balance. It therefore does NOT appear here.
 
 type CycleGroup = {
-  month_number: number
-  month_label:  string | null
-  transactions: BasketTransaction[]
+  month_number:    number
+  month_label:     string | null
+  transactions:    BasketTransaction[]
+  openingBalance:  number
+  closingBalance:  number
 }
 
 function cycleTxnLabel(txn_type: string): string {
@@ -375,26 +377,19 @@ function CycleTxnRow({ txn }: { txn: BasketTransaction }) {
 function CycleGroupCard({ group }: { group: CycleGroup }) {
   const [expanded, setExpanded] = useState(false)
 
-  // Net basket movement for this cycle (credits positive, debits negative)
-  const net = group.transactions.reduce(
-    (sum, t) => sum + (t.direction === 'C' ? t.amount : -t.amount),
-    0,
-  )
-
   const label = group.month_label ?? `Cycle ${group.month_number}`
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      {/* Collapsible header — shows label + closing balance summary */}
       <button
         className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
         onClick={() => setExpanded(v => !v)}
       >
-        {/* Cycle avatar */}
         <div className="w-8 h-8 rounded-full bg-maroon-50 flex items-center justify-center shrink-0">
           <span className="text-xs font-bold text-maroon-600">M{group.month_number}</span>
         </div>
 
-        {/* Label + transaction count */}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800">{label}</p>
           <p className="text-xs text-gray-400">
@@ -402,9 +397,9 @@ function CycleGroupCard({ group }: { group: CycleGroup }) {
           </p>
         </div>
 
-        {/* Net basket movement */}
-        <p className={`text-sm font-semibold shrink-0 tabular-nums mr-1 ${net >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-          {net >= 0 ? '+' : '−'}{formatPaise(Math.abs(net))}
+        {/* Closing balance */}
+        <p className="text-sm font-semibold shrink-0 tabular-nums mr-1 text-gray-800">
+          {formatPaise(group.closingBalance)}
         </p>
 
         <svg
@@ -416,10 +411,31 @@ function CycleGroupCard({ group }: { group: CycleGroup }) {
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-50 divide-y divide-gray-50">
-          {group.transactions.map(txn => (
-            <CycleTxnRow key={txn.txn_id} txn={txn} />
-          ))}
+        <div className="border-t border-gray-100">
+          {/* Opening balance */}
+          <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
+            <p className="text-xs font-medium text-gray-500">Opening Balance</p>
+            <p className="text-xs font-semibold tabular-nums text-gray-700">{formatPaise(group.openingBalance)}</p>
+          </div>
+
+          {/* Divider */}
+          <div className="mx-4 border-t border-dashed border-gray-200" />
+
+          {/* Line items */}
+          <div className="divide-y divide-gray-50">
+            {group.transactions.map(txn => (
+              <CycleTxnRow key={txn.txn_id} txn={txn} />
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="mx-4 border-t border-dashed border-gray-200" />
+
+          {/* Closing balance */}
+          <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
+            <p className="text-xs font-medium text-gray-500">Closing Balance</p>
+            <p className="text-xs font-bold tabular-nums text-gray-800">{formatPaise(group.closingBalance)}</p>
+          </div>
         </div>
       )}
     </div>
@@ -431,17 +447,27 @@ function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
     return <p className="text-sm text-gray-400 text-center py-10">No transactions yet.</p>
   }
 
-  // Partition: cycle-tagged vs untagged (no cycle_id stamp)
-  const cycleTagged:  BasketTransaction[] = []
-  const untagged:     BasketTransaction[] = []
+  // The API returns transactions newest-first (desc created_at).
+  // Reverse to chronological order so we can compute a running balance forward.
+  const chronological = [...transactions].reverse()
 
-  for (const txn of transactions) {
+  // Attach a running_balance to every transaction (cumulative, credits +, debits −).
+  let runningBal = 0
+  const withBalance: BasketTransaction[] = chronological.map(txn => {
+    runningBal += txn.direction === 'C' ? txn.amount : -txn.amount
+    return { ...txn, running_balance: runningBal }
+  })
+
+  // Partition into cycle-tagged and untagged
+  const cycleTagged: BasketTransaction[] = []
+  const untagged:    BasketTransaction[] = []
+  for (const txn of withBalance) {
     if (txn.cycle_month_number != null) cycleTagged.push(txn)
     else untagged.push(txn)
   }
 
-  // Group cycle-tagged transactions by month_number, ordered ascending
-  const groupMap = new Map<number, CycleGroup>()
+  // Group cycle-tagged transactions by month_number (already in chronological order)
+  const groupMap = new Map<number, { month_number: number; month_label: string | null; transactions: BasketTransaction[] }>()
   for (const txn of cycleTagged) {
     const mn = txn.cycle_month_number!
     if (!groupMap.has(mn)) {
@@ -450,8 +476,19 @@ function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
     groupMap.get(mn)!.transactions.push(txn)
   }
 
-  // Sort cycles ascending (earliest first)
-  const cycleGroups = [...groupMap.values()].sort((a, b) => a.month_number - b.month_number)
+  // Sort cycles ascending (earliest first) and compute opening/closing balances.
+  // Opening balance of cycle N = running_balance of first txn in cycle N minus its signed amount.
+  // Closing balance of cycle N = running_balance of last txn in cycle N.
+  const cycleGroups: CycleGroup[] = [...groupMap.values()]
+    .sort((a, b) => a.month_number - b.month_number)
+    .map(g => {
+      const first = g.transactions[0]
+      const last  = g.transactions[g.transactions.length - 1]
+      const firstSignedAmount = first.direction === 'C' ? first.amount : -first.amount
+      const openingBalance    = (first.running_balance ?? 0) - firstSignedAmount
+      const closingBalance    = last.running_balance ?? 0
+      return { ...g, openingBalance, closingBalance }
+    })
 
   return (
     <div className="space-y-3">
