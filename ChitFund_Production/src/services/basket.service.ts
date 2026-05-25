@@ -298,7 +298,7 @@ export async function disburseLoan(
     throw new AppError(409, 'INSUFFICIENT_BASKET_BALANCE', `Basket balance (${paiseToRupeeDisplay(Number(basket.current_balance))}) is less than the loan amount (${paiseToRupeeDisplay(principal)}).`);
 
   const [currentCycleRow] = await db
-    .select({ month_number: monthly_cycles.month_number })
+    .select({ id: monthly_cycles.id, month_number: monthly_cycles.month_number })
     .from(monthly_cycles)
     .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
     .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open')))
@@ -325,6 +325,7 @@ export async function disburseLoan(
       direction:            'D',
       counterparty_user_id: borrower_user_id,
       related_loan_id:      loan.id,
+      ...(currentCycleRow?.id ? { cycle_id: currentCycleRow.id } : {}),
       notes:                notes ?? null,
       created_by:           userId,
     });
@@ -547,7 +548,7 @@ export async function repayLoan(
       .where(and(eq(loans.id, loan_id), eq(loans.basket_id, basketRows.id)))
       .limit(1),
 
-    db.select({ current_month: sql<number>`min(${monthly_cycles.month_number})` })
+    db.select({ id: monthly_cycles.id, current_month: sql<number>`min(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
       .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
       .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open'))),
@@ -556,6 +557,7 @@ export async function repayLoan(
   if (!loanRow) throw new AppError(404, 'LOAN_NOT_FOUND', 'Loan not found.');
   if (loanRow.status !== 'Active') throw new AppError(409, 'LOAN_CLOSED', 'Cannot record repayment on a closed or written-off loan.');
 
+  const effective_cycle_id   = cycle_id ?? cycleRow?.id ?? undefined;
   const currentMonth         = cycleRow?.current_month ?? 0;
   const cyclesElapsed        = Math.max(0, currentMonth - loanRow.disbursement_month_number);
   const outstanding_interest = computeOutstandingInterest(
@@ -584,11 +586,11 @@ export async function repayLoan(
   await db.transaction(async (tx) => {
     if (principal_repaid > 0) {
       await tx.insert(loan_transactions).values({ loan_id, txn_type: 'PRINCIPAL_REPAID', amount: principal_repaid, txn_date, notes: notes ?? null, created_by: userId });
-      await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'LOAN_REPAID', amount: principal_repaid, direction: 'C', related_loan_id: loan_id, ...(cycle_id ? { cycle_id } : {}), notes: notes ?? null, created_by: userId });
+      await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'LOAN_REPAID', amount: principal_repaid, direction: 'C', related_loan_id: loan_id, ...(effective_cycle_id ? { cycle_id: effective_cycle_id } : {}), notes: notes ?? null, created_by: userId });
     }
     if (interest_paid > 0) {
       await tx.insert(loan_transactions).values({ loan_id, txn_type: 'INTEREST_PAID', amount: interest_paid, txn_date, notes: notes ?? null, created_by: userId });
-      await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'INTEREST_ACCRUED', amount: interest_paid, direction: 'C', related_loan_id: loan_id, ...(cycle_id ? { cycle_id } : {}), notes: notes ?? null, created_by: userId });
+      await tx.insert(basket_transactions).values({ basket_id: basketRows.id, txn_type: 'INTEREST_ACCRUED', amount: interest_paid, direction: 'C', related_loan_id: loan_id, ...(effective_cycle_id ? { cycle_id: effective_cycle_id } : {}), notes: notes ?? null, created_by: userId });
     }
     await tx.update(loans).set({ total_interest_paid: newTotalInterestPaid, updated_at: now, ...(loanFullyRepaid ? { status: 'Repaid', closed_at: now } : {}) }).where(eq(loans.id, loan_id));
     await tx.update(baskets).set({ current_balance: newBalance, total_credited: Number(basketRows.total_credited) + totalReturn, total_lent_out: newLentOut, total_interest_earned: newInterestEarned }).where(eq(baskets.id, basketRows.id));
