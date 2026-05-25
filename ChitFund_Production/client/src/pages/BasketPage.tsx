@@ -7,7 +7,7 @@ import type {
   TransactionListResponse, Member, DisburseLoanResponse, CycleItem, BulkRepayResponse,
 } from '../types/api'
 
-type Tab = 'loans' | 'ledger' | 'closed'
+type Tab = 'loans' | 'repayment' | 'ledger' | 'closed'
 type LedgerView = 'byLoan' | 'byCycle'
 type BulkMode = 'interest_only' | 'principal_only' | 'full_settlement'
 
@@ -1528,10 +1528,11 @@ export default function BasketPage() {
         {/* Tabs */}
         <div className="mx-3 mt-3 flex bg-gray-100 rounded-xl p-1 gap-1">
           {([
-            { key: 'loans',  label: `Active loans${activeLoans.length > 0 ? ` (${activeLoans.length})` : ''}` },
-            { key: 'ledger', label: 'Ledger' },
-            { key: 'closed', label: 'Closed loans' },
-          ] as { key: Tab; label: string }[]).map(t => (
+            { key: 'loans',     label: `Active loans${activeLoans.length > 0 ? ` (${activeLoans.length})` : ''}`, show: true },
+            { key: 'repayment', label: 'Repayment', show: isAdmin },
+            { key: 'ledger',    label: 'Ledger',    show: true },
+            { key: 'closed',    label: 'Closed',    show: true },
+          ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(t => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
@@ -1542,42 +1543,37 @@ export default function BasketPage() {
           ))}
         </div>
 
-        {/* Active loans tab — two sections: info + repayment */}
+        {/* Active Loans tab — tracking/information only */}
         {tab === 'loans' && (
-          <div className="mx-3 mt-3 space-y-4">
-
-            {/* Section 1: Active Loans — tracking/information only */}
-            <div>
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-1">
-                Active Loans
-              </p>
-              {activeLoans.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-gray-100 px-4 py-10 text-center">
-                  <p className="text-sm text-gray-400">No active loans.</p>
-                  {isAdmin && <p className="text-xs text-gray-400 mt-1">Use "New loan" above to disburse one.</p>}
-                </div>
-              ) : (
-                <ActiveLoanGroups loans={activeLoans} />
-              )}
-            </div>
-
-            {/* Section 2: Repayment — admin action workflow */}
-            {isAdmin && activeLoans.length > 0 && (
-              <div>
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-1">
-                  Repayment
-                </p>
-                <RepaymentGroups
-                  groupId={groupId!}
-                  loans={activeLoans}
-                  isClosed={isClosed}
-                  cycles={cycles}
-                  currentCycleId={group.current_cycle?.cycle_id ?? null}
-                  onRepaid={(msg: string) => { afterAction(); showToast(msg) }}
-                />
+          <div className="mx-3 mt-3">
+            {activeLoans.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-100 px-4 py-10 text-center">
+                <p className="text-sm text-gray-400">No active loans.</p>
+                {isAdmin && <p className="text-xs text-gray-400 mt-1">Use "New loan" above to disburse one.</p>}
               </div>
+            ) : (
+              <ActiveLoanGroups loans={activeLoans} />
             )}
+          </div>
+        )}
 
+        {/* Repayment tab — admin action workflow */}
+        {tab === 'repayment' && isAdmin && (
+          <div className="mx-3 mt-3">
+            {activeLoans.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-100 px-4 py-10 text-center">
+                <p className="text-sm text-gray-400">No active loans to repay.</p>
+              </div>
+            ) : (
+              <RepaymentGroups
+                groupId={groupId!}
+                loans={activeLoans}
+                isClosed={isClosed}
+                cycles={cycles}
+                currentCycleId={group.current_cycle?.cycle_id ?? null}
+                onRepaid={(msg: string) => { afterAction(); showToast(msg) }}
+              />
+            )}
           </div>
         )}
 
