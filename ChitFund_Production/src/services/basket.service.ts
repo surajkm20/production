@@ -542,7 +542,7 @@ export async function repayLoan(
     .select({ id: baskets.id, current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_lent_out: baskets.total_lent_out, total_interest_earned: baskets.total_interest_earned })
     .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
 
-  const [[loanRow], [cycleRow]] = await Promise.all([
+  const [[loanRow], [cycleRow], [txnDateCycleRow]] = await Promise.all([
     db.select({ id: loans.id, status: loans.status, principal: loans.principal, monthly_interest_rate: loans.monthly_interest_rate, disbursement_month_number: loans.disbursement_month_number, total_interest_paid: loans.total_interest_paid, borrower_user_id: loans.borrower_user_id })
       .from(loans)
       .where(and(eq(loans.id, loan_id), eq(loans.basket_id, basketRows.id)))
@@ -552,12 +552,22 @@ export async function repayLoan(
       .from(monthly_cycles)
       .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
       .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open'))),
+
+    // Find the cycle whose month matches txn_date — used when no explicit cycle_id is passed.
+    // This correctly handles backdated repayments (e.g. recording a Jan repayment in May).
+    db.select({ id: monthly_cycles.id })
+      .from(monthly_cycles)
+      .where(and(
+        eq(monthly_cycles.group_id, group_id),
+        sql`${monthly_cycles.month_label} = TO_CHAR(${txn_date}::date, 'Mon YYYY')`,
+      ))
+      .limit(1),
   ]);
 
   if (!loanRow) throw new AppError(404, 'LOAN_NOT_FOUND', 'Loan not found.');
   if (loanRow.status !== 'Active') throw new AppError(409, 'LOAN_CLOSED', 'Cannot record repayment on a closed or written-off loan.');
 
-  const effective_cycle_id   = cycle_id ?? cycleRow?.id ?? undefined;
+  const effective_cycle_id   = cycle_id ?? txnDateCycleRow?.id ?? undefined;
   const currentMonth         = cycleRow?.current_month ?? 0;
   const cyclesElapsed        = Math.max(0, currentMonth - loanRow.disbursement_month_number);
   const outstanding_interest = computeOutstandingInterest(

@@ -800,7 +800,7 @@ function RepayLoanModal({ groupId, loans, cycles, currentCycleId, onClose, onSav
   const [loanId, setLoanId]               = useState(loans[0]?.loan_id ?? '')
   const [principalPaid, setPrincipalPaid] = useState(false)
   const [interestRupees, setInterestRupees] = useState('')
-  const [cycleId, setCycleId]             = useState(currentCycleId ?? cycles[0]?.cycle_id ?? '')
+  const [cycleId, setCycleId]             = useState('')
   const [notes, setNotes]                 = useState('')
   const [loading, setLoading]             = useState(false)
   const [error, setError]                 = useState<string | null>(null)
@@ -935,19 +935,25 @@ function RepayLoanModal({ groupId, loans, cycles, currentCycleId, onClose, onSav
 
           {/* Cycle month */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Cycle month</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Month repayment was received <span className="text-red-500">*</span>
+            </label>
             <select
               value={cycleId}
               onChange={e => setCycleId(e.target.value)}
               required
               className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500 bg-white"
             >
+              <option value="" disabled>Select the month repayment was made…</option>
               {cycles.map(c => (
                 <option key={c.cycle_id} value={c.cycle_id}>
                   {c.month_label}{c.cycle_id === currentCycleId ? ' (current)' : ''}
                 </option>
               ))}
             </select>
+            <p className="text-[11px] text-amber-600 mt-1">
+              Select the actual month the repayment was received — not the current cycle.
+            </p>
           </div>
 
           {/* Notes */}
