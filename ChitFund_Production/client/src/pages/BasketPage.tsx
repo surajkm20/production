@@ -8,6 +8,7 @@ import type {
 } from '../types/api'
 
 type Tab = 'loans' | 'ledger' | 'closed'
+type LedgerView = 'byLoan' | 'byCycle'
 type BulkMode = 'interest_only' | 'principal_only' | 'full_settlement'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -292,6 +293,181 @@ function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] })
           <div className="divide-y divide-gray-50">
             {otherTxns.map(txn => (
               <OtherActivityRow key={txn.txn_id} txn={txn} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── CycleLedger ─────────────────────────────────────────────────────────────
+//
+// Groups basket_transactions by cycle month number and renders one card per
+// cycle. Only transactions that are stamped with a cycle_id are shown here;
+// loan disbursements / repayments that cross cycle boundaries are listed under
+// the cycle they were tagged to when recorded.
+//
+// What IS shown per cycle:
+//   CREDIT_DISCOUNT / BID_TO_BASKET → Bid discount credited to basket  (+)
+//   DEBIT_X_CHITI                   → X-Chiti pool payout from basket  (-)
+//   DEBIT_SKIP_MONTH                → Skip-month payout from basket     (-)
+//   DEBIT_FINAL_CYCLE_OFFSET        → Final-cycle basket offset         (-)
+//   LOAN_DISBURSED                  → Loan disbursed from basket        (-)
+//   LOAN_REPAID                     → Principal repaid to basket        (+)
+//   INTEREST_ACCRUED                → Interest recovered to basket      (+)
+//   ADJUSTMENT                      → Manual basket adjustment          (+/-)
+//
+// The Pool Amount (winner takeaway) is NOT a basket transaction — it flows
+// directly from member contributions to the winner and never touches the basket
+// balance. It therefore does NOT appear here.
+
+type CycleGroup = {
+  month_number: number
+  month_label:  string | null
+  transactions: BasketTransaction[]
+}
+
+function cycleTxnLabel(txn_type: string): string {
+  const map: Record<string, string> = {
+    CREDIT_DISCOUNT:          'Bid discount to basket',
+    BID_TO_BASKET:            'Bid discount to basket',
+    DEBIT_X_CHITI:            'X-Chiti payout',
+    DEBIT_SKIP_MONTH:         'Skip-month payout',
+    SKIP_MONTH_DEBIT:         'Skip-month payout',
+    DEBIT_FINAL_CYCLE_OFFSET: 'Final-cycle basket offset',
+    LOAN_DISBURSED:           'Loan disbursed',
+    LOAN_REPAID:              'Principal repaid',
+    INTEREST_ACCRUED:         'Interest recovered',
+    ADJUSTMENT:               'Manual adjustment',
+    CLOSURE_SPLIT:            'Closure split',
+  }
+  return map[txn_type] ?? txn_type
+}
+
+function cycleTxnColors(direction: 'C' | 'D'): { dot: string; amount: string } {
+  return direction === 'C'
+    ? { dot: 'bg-green-500',  amount: 'text-green-600' }
+    : { dot: 'bg-red-400',    amount: 'text-red-500'   }
+}
+
+function CycleTxnRow({ txn }: { txn: BasketTransaction }) {
+  const { dot, amount } = cycleTxnColors(txn.direction)
+  const who = txn.loan_borrower_name ?? txn.counterparty_name ?? null
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-700">{cycleTxnLabel(txn.txn_type)}</p>
+        {who && <p className="text-xs text-gray-400 truncate">{who}</p>}
+        {txn.notes && !who && (
+          <p className="text-xs text-gray-400 truncate">{txn.notes}</p>
+        )}
+      </div>
+      <p className={`text-sm font-semibold shrink-0 tabular-nums ${amount}`}>
+        {txn.direction === 'C' ? '+' : '−'}{formatPaise(txn.amount)}
+      </p>
+    </div>
+  )
+}
+
+function CycleGroupCard({ group }: { group: CycleGroup }) {
+  const [expanded, setExpanded] = useState(false)
+
+  // Net basket movement for this cycle (credits positive, debits negative)
+  const net = group.transactions.reduce(
+    (sum, t) => sum + (t.direction === 'C' ? t.amount : -t.amount),
+    0,
+  )
+
+  const label = group.month_label ?? `Cycle ${group.month_number}`
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <button
+        className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        {/* Cycle avatar */}
+        <div className="w-8 h-8 rounded-full bg-maroon-50 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-maroon-600">M{group.month_number}</span>
+        </div>
+
+        {/* Label + transaction count */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800">{label}</p>
+          <p className="text-xs text-gray-400">
+            {group.transactions.length} transaction{group.transactions.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+
+        {/* Net basket movement */}
+        <p className={`text-sm font-semibold shrink-0 tabular-nums mr-1 ${net >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+          {net >= 0 ? '+' : '−'}{formatPaise(Math.abs(net))}
+        </p>
+
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-50 divide-y divide-gray-50">
+          {group.transactions.map(txn => (
+            <CycleTxnRow key={txn.txn_id} txn={txn} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
+  if (transactions.length === 0) {
+    return <p className="text-sm text-gray-400 text-center py-10">No transactions yet.</p>
+  }
+
+  // Partition: cycle-tagged vs untagged (no cycle_id stamp)
+  const cycleTagged:  BasketTransaction[] = []
+  const untagged:     BasketTransaction[] = []
+
+  for (const txn of transactions) {
+    if (txn.cycle_month_number != null) cycleTagged.push(txn)
+    else untagged.push(txn)
+  }
+
+  // Group cycle-tagged transactions by month_number, ordered ascending
+  const groupMap = new Map<number, CycleGroup>()
+  for (const txn of cycleTagged) {
+    const mn = txn.cycle_month_number!
+    if (!groupMap.has(mn)) {
+      groupMap.set(mn, { month_number: mn, month_label: txn.cycle_month_label, transactions: [] })
+    }
+    groupMap.get(mn)!.transactions.push(txn)
+  }
+
+  // Sort cycles ascending (earliest first)
+  const cycleGroups = [...groupMap.values()].sort((a, b) => a.month_number - b.month_number)
+
+  return (
+    <div className="space-y-3">
+      {cycleGroups.map(group => (
+        <CycleGroupCard key={group.month_number} group={group} />
+      ))}
+
+      {/* Transactions not tagged to any cycle (e.g. manual adjustments without cycle context) */}
+      {untagged.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-4 pt-3 pb-1">
+            No Cycle
+          </p>
+          <div className="divide-y divide-gray-50">
+            {untagged.map(txn => (
+              <CycleTxnRow key={txn.txn_id} txn={txn} />
             ))}
           </div>
         </div>
@@ -942,6 +1118,7 @@ export default function BasketPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [cycles, setCycles] = useState<CycleItem[]>([])
   const [tab, setTab] = useState<Tab>('loans')
+  const [ledgerView, setLedgerView] = useState<LedgerView>('byLoan')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showNewLoan, setShowNewLoan] = useState(false)
@@ -1143,10 +1320,32 @@ export default function BasketPage() {
           </div>
         )}
 
-        {/* Ledger */}
+        {/* Ledger — By Loan / By Cycle toggle */}
         {tab === 'ledger' && (
-          <div className="mx-3 mt-3">
-            <LedgerTimeline transactions={transactions} />
+          <div className="mx-3 mt-3 space-y-3">
+            {/* Toggle */}
+            <div className="flex bg-gray-100 rounded-xl p-1 gap-1">
+              {([
+                { key: 'byLoan'  as LedgerView, label: 'By Loan'  },
+                { key: 'byCycle' as LedgerView, label: 'By Cycle' },
+              ]).map(v => (
+                <button
+                  key={v.key}
+                  onClick={() => setLedgerView(v.key)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${
+                    ledgerView === v.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+                  }`}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Content */}
+            {ledgerView === 'byLoan'
+              ? <LedgerTimeline transactions={transactions} />
+              : <CycleLedger    transactions={transactions} />
+            }
           </div>
         )}
 
