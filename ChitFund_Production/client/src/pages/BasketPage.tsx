@@ -458,15 +458,18 @@ function CycleLedger({ transactions }: { transactions: BasketTransaction[] }) {
     return { ...txn, running_balance: runningBal }
   })
 
-  // Partition into cycle-tagged and untagged
+  // Resolve effective cycle for each transaction.
+  // Priority: cycle_month_number (tagged at record time) → loan_disbursement_month_number (fallback for
+  // historical loan transactions that were written before cycle stamping was introduced).
   const cycleTagged: BasketTransaction[] = []
   const untagged:    BasketTransaction[] = []
   for (const txn of withBalance) {
-    if (txn.cycle_month_number != null) cycleTagged.push(txn)
+    const effectiveMn = txn.cycle_month_number ?? txn.loan_disbursement_month_number
+    if (effectiveMn != null) cycleTagged.push({ ...txn, cycle_month_number: effectiveMn, cycle_month_label: txn.cycle_month_label ?? txn.loan_disbursement_label })
     else untagged.push(txn)
   }
 
-  // Group cycle-tagged transactions by month_number (already in chronological order)
+  // Group cycle-tagged transactions by effective month_number (already in chronological order)
   const groupMap = new Map<number, { month_number: number; month_label: string | null; transactions: BasketTransaction[] }>()
   for (const txn of cycleTagged) {
     const mn = txn.cycle_month_number!
