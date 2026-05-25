@@ -1073,53 +1073,19 @@ function AdjustBasketModal({ groupId, onClose, onSaved }: { groupId: string; onC
   )
 }
 
-// ─── MemberLoanGroups ────────────────────────────────────────────────────────
+// ─── ActiveLoanCard — purely informational, no action buttons ─────────────────
 
-function MemberLoanCard({
-  groupId, memberLoans, isAdmin, isClosed, cycles, currentCycleId,
-  onRepaid,
-}: {
-  groupId: string
-  memberLoans: Loan[]
-  isAdmin: boolean
-  isClosed: boolean
-  cycles: CycleItem[]
-  currentCycleId: string | null
-  onRepaid: (msg: string) => void
-}) {
-  const [expanded, setExpanded]           = useState(false)
-  const [bulkLoading, setBulkLoading]     = useState<BulkMode | null>(null)
-  const [bulkError, setBulkError]         = useState<string | null>(null)
-  const [showRepayModal, setShowRepayModal] = useState(false)
-  const [repayLoansList, setRepayLoansList] = useState<Loan[]>(memberLoans)
+function ActiveLoanCard({ memberLoans }: { memberLoans: Loan[] }) {
+  const [expanded, setExpanded] = useState(false)
 
-  const representative = memberLoans[0]
-  const totalPrincipal = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
-  const totalInterest  = memberLoans.reduce((s, l) => s + Number(l.outstanding_interest), 0)
+  const representative   = memberLoans[0]
+  const totalPrincipal   = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
+  const totalInterest    = memberLoans.reduce((s, l) => s + Number(l.outstanding_interest), 0)
   const totalOutstanding = totalPrincipal + totalInterest
-
-  async function handleBulk(mode: BulkMode) {
-    setBulkLoading(mode)
-    setBulkError(null)
-    try {
-      const res: BulkRepayResponse = await api.bulkRepayMember(groupId, {
-        member_user_id: representative.borrower_user_id,
-        mode,
-      })
-      const label = mode === 'interest_only'   ? 'Interest paid'
-                  : mode === 'principal_only'  ? 'Principal repaid'
-                  : 'Fully settled'
-      onRepaid(`${label} — ${formatPaise(res.total_amount)}`)
-    } catch (err) {
-      setBulkError(err instanceof ApiError ? err.message : 'Bulk repayment failed.')
-    } finally {
-      setBulkLoading(null)
-    }
-  }
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      {/* Header row — always visible */}
+      {/* Header row */}
       <button
         className="w-full flex items-center gap-3 p-4 text-left"
         onClick={() => setExpanded(v => !v)}
@@ -1148,80 +1114,192 @@ function MemberLoanCard({
         </div>
       </button>
 
-      {/* Expanded section */}
+      {/* Expanded: loan details only, no action buttons */}
+      {expanded && (
+        <div className="border-t border-gray-100 divide-y divide-gray-50">
+          {memberLoans.map(loan => (
+            <div key={loan.loan_id} className="px-4 py-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-700">{loan.cycle_label}</p>
+                <LoanStatusBadge status={loan.status} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-gray-50 rounded-lg px-2.5 py-2">
+                  <p className="text-[10px] text-gray-400 mb-0.5">Loan amount</p>
+                  <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg px-2.5 py-2">
+                  <p className="text-[10px] text-gray-400 mb-0.5">Taken in</p>
+                  <p className="text-xs font-bold text-gray-800">{loan.cycle_label ?? '—'}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg px-2.5 py-2">
+                  <p className="text-[10px] text-gray-400 mb-0.5">Remaining principal</p>
+                  <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
+                </div>
+                <div className={`rounded-lg px-2.5 py-2 ${loan.outstanding_interest > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  <p className={`text-[10px] mb-0.5 ${loan.outstanding_interest > 0 ? 'text-amber-500' : 'text-gray-400'}`}>
+                    Pending interest
+                  </p>
+                  <p className={`text-xs font-bold ${loan.outstanding_interest > 0 ? 'text-amber-600' : 'text-gray-800'}`}>
+                    {loan.outstanding_interest > 0 ? formatPaise(loan.outstanding_interest) : 'None'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ActiveLoanGroups({ loans: allLoans }: { loans: Loan[] }) {
+  const groups = allLoans.reduce<Map<string, Loan[]>>((map, loan) => {
+    const existing = map.get(loan.borrower_user_id)
+    if (existing) existing.push(loan)
+    else map.set(loan.borrower_user_id, [loan])
+    return map
+  }, new Map())
+
+  return (
+    <div className="space-y-2">
+      {[...groups.values()].map(memberLoans => (
+        <ActiveLoanCard
+          key={memberLoans[0].borrower_user_id}
+          memberLoans={memberLoans}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ─── RepaymentCard — admin action workflow, grouped by member ─────────────────
+
+function RepaymentCard({
+  groupId, memberLoans, isClosed, cycles, currentCycleId, onRepaid,
+}: {
+  groupId: string
+  memberLoans: Loan[]
+  isClosed: boolean
+  cycles: CycleItem[]
+  currentCycleId: string | null
+  onRepaid: (msg: string) => void
+}) {
+  const [expanded, setExpanded]             = useState(false)
+  const [bulkLoading, setBulkLoading]       = useState<BulkMode | null>(null)
+  const [bulkError, setBulkError]           = useState<string | null>(null)
+  const [showRepayModal, setShowRepayModal] = useState(false)
+  const [repayLoansList, setRepayLoansList] = useState<Loan[]>(memberLoans)
+
+  const representative   = memberLoans[0]
+  const totalPrincipal   = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
+  const totalInterest    = memberLoans.reduce((s, l) => s + Number(l.outstanding_interest), 0)
+  const totalOutstanding = totalPrincipal + totalInterest
+
+  async function handleBulk(mode: BulkMode) {
+    setBulkLoading(mode)
+    setBulkError(null)
+    try {
+      const res: BulkRepayResponse = await api.bulkRepayMember(groupId, {
+        member_user_id: representative.borrower_user_id,
+        mode,
+      })
+      const label = mode === 'interest_only'  ? 'Interest paid'
+                  : mode === 'principal_only' ? 'Principal repaid'
+                  : 'Fully settled'
+      onRepaid(`${label} — ${formatPaise(res.total_amount)}`)
+    } catch (err) {
+      setBulkError(err instanceof ApiError ? err.message : 'Bulk repayment failed.')
+    } finally {
+      setBulkLoading(null)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      {/* Header row */}
+      <button
+        className="w-full flex items-center gap-3 p-4 text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
+          {initials(representative.borrower_name)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800">{representative.borrower_name}</p>
+          <p className="text-xs text-gray-400">
+            {memberLoans.length} loan{memberLoans.length !== 1 ? 's' : ''} · {formatPaise(totalOutstanding)} outstanding
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {totalInterest > 0 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium">
+              {formatPaise(totalInterest)} interest
+            </span>
+          )}
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+
+      {/* Expanded: repayment options */}
       {expanded && (
         <div className="border-t border-gray-100">
-          {/* Individual loan rows */}
+          {/* Per-loan "Repay this loan" buttons */}
           <div className="divide-y divide-gray-50">
             {memberLoans.map(loan => (
-              <div key={loan.loan_id} className="px-4 py-3">
-                <div className="flex items-center justify-between mb-2">
+              <div key={loan.loan_id} className="flex items-center justify-between px-4 py-3">
+                <div className="min-w-0">
                   <p className="text-xs font-semibold text-gray-700">{loan.cycle_label}</p>
-                  <LoanStatusBadge status={loan.status} />
+                  <p className="text-xs text-gray-400">
+                    {formatPaise(loan.principal)}
+                    {loan.outstanding_interest > 0 && ` · ${formatPaise(loan.outstanding_interest)} interest`}
+                  </p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-2">
-                  <div className="bg-gray-50 rounded-lg px-2.5 py-2">
-                    <p className="text-[10px] text-gray-400 mb-0.5">Principal</p>
-                    <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
-                  </div>
-                  <div className={`rounded-lg px-2.5 py-2 ${loan.outstanding_interest > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
-                    <p className={`text-[10px] mb-0.5 ${loan.outstanding_interest > 0 ? 'text-amber-500' : 'text-gray-400'}`}>
-                      Interest due
-                    </p>
-                    <p className={`text-xs font-bold ${loan.outstanding_interest > 0 ? 'text-amber-600' : 'text-gray-800'}`}>
-                      {loan.outstanding_interest > 0 ? formatPaise(loan.outstanding_interest) : 'None'}
-                    </p>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg px-2.5 py-2">
-                    <p className="text-[10px] text-gray-400 mb-0.5">Expected close</p>
-                    <p className="text-xs font-bold text-gray-800">
-                      {loan.expected_close_date ? fmtDate(loan.expected_close_date) : '—'}
-                    </p>
-                  </div>
-                </div>
-                {isAdmin && !isClosed && (
-                  <button
-                    onClick={() => { setRepayLoansList([loan]); setShowRepayModal(true) }}
-                    className="text-xs font-medium text-maroon-600 hover:underline"
-                  >
-                    Repay this loan
-                  </button>
-                )}
+                <button
+                  onClick={() => { setRepayLoansList([loan]); setShowRepayModal(true) }}
+                  disabled={isClosed}
+                  className="ml-3 shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-maroon-200 text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Repay this loan
+                </button>
               </div>
             ))}
           </div>
 
-          {/* Bulk action buttons — admin only, group not closed */}
-          {isAdmin && !isClosed && (
-            <div className="px-4 pb-4 pt-2 space-y-2">
-              {bulkError && <p className="text-xs text-red-500">{bulkError}</p>}
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  { mode: 'interest_only'  as BulkMode, label: 'Pay Interest',   amount: totalInterest,   disabled: totalInterest <= 0 },
-                  { mode: 'principal_only' as BulkMode, label: 'Pay Principal',  amount: totalPrincipal,  disabled: totalPrincipal <= 0 },
-                  { mode: 'full_settlement'as BulkMode, label: 'Full Settlement', amount: totalOutstanding, disabled: totalOutstanding <= 0 },
-                ]).map(({ mode, label, amount, disabled }) => (
-                  <button
-                    key={mode}
-                    onClick={() => handleBulk(mode)}
-                    disabled={!!bulkLoading || disabled || isClosed}
-                    className="py-2 px-1 rounded-lg border border-maroon-200 text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex flex-col items-center gap-0.5"
-                  >
-                    <span className="text-[11px] font-semibold">
-                      {bulkLoading === mode ? 'Saving…' : label}
-                    </span>
-                    {bulkLoading !== mode && (
-                      <span className="text-[11px] font-bold">{formatPaise(amount)}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
+          {/* Bulk action buttons */}
+          <div className="px-4 pb-4 pt-3 space-y-2">
+            {bulkError && <p className="text-xs text-red-500">{bulkError}</p>}
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { mode: 'interest_only'   as BulkMode, label: 'Repay Entire Interest',   amount: totalInterest,    disabled: totalInterest <= 0 },
+                { mode: 'principal_only'  as BulkMode, label: 'Repay Entire Principal',  amount: totalPrincipal,   disabled: totalPrincipal <= 0 },
+                { mode: 'full_settlement' as BulkMode, label: 'Full Settlement',          amount: totalOutstanding, disabled: totalOutstanding <= 0 },
+              ]).map(({ mode, label, amount, disabled }) => (
+                <button
+                  key={mode}
+                  onClick={() => handleBulk(mode)}
+                  disabled={!!bulkLoading || disabled || isClosed}
+                  className="py-2 px-1 rounded-lg border border-maroon-200 text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-[11px] font-semibold text-center leading-tight">
+                    {bulkLoading === mode ? 'Saving…' : label}
+                  </span>
+                  {bulkLoading !== mode && (
+                    <span className="text-[11px] font-bold">{formatPaise(amount)}</span>
+                  )}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
         </div>
       )}
 
-      {/* Individual repay modal scoped to this member's loans */}
+      {/* Per-loan repay modal */}
       {showRepayModal && (
         <RepayLoanModal
           groupId={groupId}
@@ -1236,18 +1314,16 @@ function MemberLoanCard({
   )
 }
 
-function MemberLoanGroups({
-  groupId, loans: allLoans, isAdmin, isClosed, cycles, currentCycleId, onRepaid,
+function RepaymentGroups({
+  groupId, loans: allLoans, isClosed, cycles, currentCycleId, onRepaid,
 }: {
   groupId: string
   loans: Loan[]
-  isAdmin: boolean
   isClosed: boolean
   cycles: CycleItem[]
   currentCycleId: string | null
   onRepaid: (msg: string) => void
 }) {
-  // Group loans by borrower_user_id, preserving insertion order
   const groups = allLoans.reduce<Map<string, Loan[]>>((map, loan) => {
     const existing = map.get(loan.borrower_user_id)
     if (existing) existing.push(loan)
@@ -1258,11 +1334,10 @@ function MemberLoanGroups({
   return (
     <div className="space-y-2">
       {[...groups.values()].map(memberLoans => (
-        <MemberLoanCard
+        <RepaymentCard
           key={memberLoans[0].borrower_user_id}
           groupId={groupId}
           memberLoans={memberLoans}
-          isAdmin={isAdmin}
           isClosed={isClosed}
           cycles={cycles}
           currentCycleId={currentCycleId}
@@ -1467,25 +1542,42 @@ export default function BasketPage() {
           ))}
         </div>
 
-        {/* Active loans — grouped by member */}
+        {/* Active loans tab — two sections: info + repayment */}
         {tab === 'loans' && (
-          <div className="mx-3 mt-3">
-            {activeLoans.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-gray-100 px-4 py-10 text-center">
-                <p className="text-sm text-gray-400">No active loans.</p>
-                {isAdmin && <p className="text-xs text-gray-400 mt-1">Use "New loan" above to disburse one.</p>}
+          <div className="mx-3 mt-3 space-y-4">
+
+            {/* Section 1: Active Loans — tracking/information only */}
+            <div>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-1">
+                Active Loans
+              </p>
+              {activeLoans.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-gray-100 px-4 py-10 text-center">
+                  <p className="text-sm text-gray-400">No active loans.</p>
+                  {isAdmin && <p className="text-xs text-gray-400 mt-1">Use "New loan" above to disburse one.</p>}
+                </div>
+              ) : (
+                <ActiveLoanGroups loans={activeLoans} />
+              )}
+            </div>
+
+            {/* Section 2: Repayment — admin action workflow */}
+            {isAdmin && activeLoans.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-1">
+                  Repayment
+                </p>
+                <RepaymentGroups
+                  groupId={groupId!}
+                  loans={activeLoans}
+                  isClosed={isClosed}
+                  cycles={cycles}
+                  currentCycleId={group.current_cycle?.cycle_id ?? null}
+                  onRepaid={(msg: string) => { afterAction(); showToast(msg) }}
+                />
               </div>
-            ) : (
-              <MemberLoanGroups
-                groupId={groupId!}
-                loans={activeLoans}
-                isAdmin={isAdmin}
-                isClosed={isClosed}
-                cycles={cycles}
-                currentCycleId={group.current_cycle?.cycle_id ?? null}
-                onRepaid={(msg) => { afterAction(); showToast(msg) }}
-              />
             )}
+
           </div>
         )}
 
