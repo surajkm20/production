@@ -4,12 +4,12 @@ import { api, ApiError } from '../lib/api'
 import { formatPaise, initials } from '../lib/format'
 import type {
   GroupDetail, BasketOverview, Loan, BasketTransaction,
-  TransactionListResponse, Member, DisburseLoanResponse, CycleItem,
+  TransactionListResponse, Member, DisburseLoanResponse, CycleItem, BulkRepayResponse,
 } from '../types/api'
 
 type Tab = 'loans' | 'ledger' | 'closed'
 type LedgerView = 'byLoan' | 'byCycle'
-
+type BulkMode = 'interest_only' | 'principal_only' | 'full_settlement'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -1173,6 +1173,226 @@ function ActiveLoanGroups({ loans: allLoans }: { loans: Loan[] }) {
   )
 }
 
+// ─── RepaymentCard — admin action workflow, grouped by member ─────────────────
+
+function RepaymentCard({
+  groupId, memberLoans, isClosed, cycles, currentCycleId, onRepaid,
+}: {
+  groupId: string
+  memberLoans: Loan[]
+  isClosed: boolean
+  cycles: CycleItem[]
+  currentCycleId: string | null
+  onRepaid: (msg: string) => void
+}) {
+  const [expanded, setExpanded]             = useState(false)
+  const [bulkLoading, setBulkLoading]       = useState<BulkMode | null>(null)
+  const [bulkError, setBulkError]           = useState<string | null>(null)
+  const [showRepayModal, setShowRepayModal] = useState(false)
+  const [repayLoansList, setRepayLoansList] = useState<Loan[]>(memberLoans)
+
+  const representative   = memberLoans[0]
+  const totalPrincipal   = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
+  const totalInterest    = memberLoans.reduce((s, l) => s + Number(l.outstanding_interest), 0)
+  const totalOutstanding = totalPrincipal + totalInterest
+
+  async function handleBulk(mode: BulkMode) {
+    setBulkLoading(mode)
+    setBulkError(null)
+    try {
+      const res: BulkRepayResponse = await api.bulkRepayMember(groupId, {
+        member_user_id: representative.borrower_user_id,
+        mode,
+      })
+      const label = mode === 'interest_only'  ? 'Interest paid'
+                  : mode === 'principal_only' ? 'Principal repaid'
+                  : 'Fully settled'
+      onRepaid(`${label} — ${formatPaise(res.total_amount)}`)
+    } catch (err) {
+      setBulkError(err instanceof ApiError ? err.message : 'Bulk repayment failed.')
+    } finally {
+      setBulkLoading(null)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      {/* Header row */}
+      <button
+        className="w-full flex items-center gap-3 p-4 text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
+          {initials(representative.borrower_name)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800">{representative.borrower_name}</p>
+          <p className="text-xs text-gray-400">
+            {memberLoans.length} loan{memberLoans.length !== 1 ? 's' : ''} · {formatPaise(totalOutstanding)} outstanding
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {totalInterest > 0 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium">
+              {formatPaise(totalInterest)} interest
+            </span>
+          )}
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+
+      {/* Expanded: repayment options */}
+      {expanded && (
+        <div className="border-t border-gray-100">
+          {/* Per-loan "Repay this loan" buttons */}
+          <div className="divide-y divide-gray-50">
+            {memberLoans.map(loan => (
+              <div key={loan.loan_id} className="flex items-center justify-between px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-gray-700">{loan.cycle_label}</p>
+                  <p className="text-xs text-gray-400">
+                    {formatPaise(loan.principal)}
+                    {loan.outstanding_interest > 0 && ` · ${formatPaise(loan.outstanding_interest)} interest`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setRepayLoansList([loan]); setShowRepayModal(true) }}
+                  disabled={isClosed}
+                  className="ml-3 shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-maroon-200 text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Repay this loan
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Bulk action buttons */}
+          <div className="px-4 pb-4 pt-3 space-y-2">
+            {bulkError && <p className="text-xs text-red-500">{bulkError}</p>}
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { mode: 'interest_only'   as BulkMode, label: 'Repay Entire Interest',   amount: totalInterest,    disabled: totalInterest <= 0 },
+                { mode: 'principal_only'  as BulkMode, label: 'Repay Entire Principal',  amount: totalPrincipal,   disabled: totalPrincipal <= 0 },
+                { mode: 'full_settlement' as BulkMode, label: 'Full Settlement',          amount: totalOutstanding, disabled: totalOutstanding <= 0 },
+              ]).map(({ mode, label, amount, disabled }) => (
+                <button
+                  key={mode}
+                  onClick={() => handleBulk(mode)}
+                  disabled={!!bulkLoading || disabled || isClosed}
+                  className="py-2 px-1 rounded-lg border border-maroon-200 text-maroon-700 bg-maroon-50 hover:bg-maroon-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-[11px] font-semibold text-center leading-tight">
+                    {bulkLoading === mode ? 'Saving…' : label}
+                  </span>
+                  {bulkLoading !== mode && (
+                    <span className="text-[11px] font-bold">{formatPaise(amount)}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Per-loan repay modal */}
+      {showRepayModal && (
+        <RepayLoanModal
+          groupId={groupId}
+          loans={repayLoansList}
+          cycles={cycles}
+          currentCycleId={currentCycleId}
+          onClose={() => setShowRepayModal(false)}
+          onSaved={() => { setShowRepayModal(false); onRepaid('Repayment recorded!') }}
+        />
+      )}
+    </div>
+  )
+}
+
+function RepaymentGroups({
+  groupId, loans: allLoans, isClosed, cycles, currentCycleId, onRepaid,
+}: {
+  groupId: string
+  loans: Loan[]
+  isClosed: boolean
+  cycles: CycleItem[]
+  currentCycleId: string | null
+  onRepaid: (msg: string) => void
+}) {
+  const groups = allLoans.reduce<Map<string, Loan[]>>((map, loan) => {
+    const existing = map.get(loan.borrower_user_id)
+    if (existing) existing.push(loan)
+    else map.set(loan.borrower_user_id, [loan])
+    return map
+  }, new Map())
+
+  return (
+    <div className="space-y-2">
+      {[...groups.values()].map(memberLoans => (
+        <RepaymentCard
+          key={memberLoans[0].borrower_user_id}
+          groupId={groupId}
+          memberLoans={memberLoans}
+          isClosed={isClosed}
+          cycles={cycles}
+          currentCycleId={currentCycleId}
+          onRepaid={onRepaid}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ─── RepaymentSheet — bottom-sheet modal wrapping RepaymentGroups ────────────
+
+function RepaymentSheet({
+  groupId, loans, isClosed, cycles, currentCycleId, onClose, onRepaid,
+}: {
+  groupId: string
+  loans: Loan[]
+  isClosed: boolean
+  cycles: CycleItem[]
+  currentCycleId: string | null
+  onClose: () => void
+  onRepaid: (msg: string) => void
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
+      <div className="bg-white rounded-t-2xl w-full max-w-md max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+          <h2 className="text-base font-bold text-gray-900">Repayment</h2>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-3 py-3">
+          {loans.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="text-sm text-gray-400">No active loans to repay.</p>
+            </div>
+          ) : (
+            <RepaymentGroups
+              groupId={groupId}
+              loans={loans}
+              isClosed={isClosed}
+              cycles={cycles}
+              currentCycleId={currentCycleId}
+              onRepaid={onRepaid}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── BasketPage ───────────────────────────────────────────────────────────────
 
 export default function BasketPage() {
@@ -1469,14 +1689,15 @@ export default function BasketPage() {
           }}
         />
       )}
-      {showRepay && activeLoans.length > 0 && (
-        <RepayLoanModal
+      {showRepay && (
+        <RepaymentSheet
           groupId={groupId!}
           loans={activeLoans}
+          isClosed={isClosed}
           cycles={cycles}
           currentCycleId={group.current_cycle?.cycle_id ?? null}
           onClose={() => setShowRepay(false)}
-          onSaved={() => { setShowRepay(false); afterAction(); showToast('Repayment recorded!') }}
+          onRepaid={(msg) => { afterAction(); showToast(msg) }}
         />
       )}
       {showAdjust && (
