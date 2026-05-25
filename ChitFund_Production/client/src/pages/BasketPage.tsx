@@ -1073,10 +1073,141 @@ function AdjustBasketModal({ groupId, onClose, onSaved }: { groupId: string; onC
   )
 }
 
+// ─── EditLoanModal ────────────────────────────────────────────────────────────
+
+function EditLoanModal({
+  groupId,
+  loan,
+  onClose,
+  onSaved,
+}: {
+  groupId: string
+  loan: Loan
+  onClose: () => void
+  onSaved: () => void
+}) {
+  // principal input is in rupees (display), stored in paise
+  const [principalRupees, setPrincipalRupees] = useState(String(Math.round(loan.principal / 100)))
+  const [expectedCloseDate, setExpectedCloseDate] = useState(loan.expected_close_date ?? '')
+  const [notes, setNotes] = useState(loan.notes ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSave() {
+    setError(null)
+    const parsedRupees = Number(principalRupees)
+    if (!Number.isFinite(parsedRupees) || parsedRupees <= 0) {
+      setError('Principal must be a positive number.')
+      return
+    }
+    const principalPaise = Math.round(parsedRupees * 100)
+
+    const body: { principal?: number; expected_close_date?: string; notes?: string } = {}
+    if (principalPaise !== loan.principal) body.principal = principalPaise
+    if (expectedCloseDate !== (loan.expected_close_date ?? '')) {
+      body.expected_close_date = expectedCloseDate || undefined
+    }
+    const trimmedNotes = notes.trim()
+    if (trimmedNotes !== (loan.notes ?? '').trim()) body.notes = trimmedNotes
+
+    if (Object.keys(body).length === 0) {
+      onClose()
+      return
+    }
+
+    setSaving(true)
+    try {
+      await api.editLoan(groupId, loan.loan_id, body)
+      onSaved()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Failed to save changes.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-0">
+      <div className="w-full max-w-md bg-white rounded-t-2xl px-5 pt-5 pb-8 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-gray-900">Edit loan — {loan.borrower_name}</p>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+        </div>
+
+        <p className="text-xs text-gray-400">Disbursed in {loan.cycle_label}</p>
+
+        {/* Principal */}
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Principal (rupees)</label>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={principalRupees}
+            onChange={e => setPrincipalRupees(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-maroon-500"
+          />
+        </div>
+
+        {/* Expected close date */}
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Expected close date (optional)</label>
+          <input
+            type="date"
+            value={expectedCloseDate}
+            onChange={e => setExpectedCloseDate(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-maroon-500"
+          />
+        </div>
+
+        {/* Notes */}
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Notes (optional)</label>
+          <textarea
+            rows={2}
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-maroon-500 resize-none"
+          />
+        </div>
+
+        {error && <p className="text-xs text-red-500">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl bg-maroon-600 text-white text-sm font-semibold disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── ActiveLoanCard — purely informational, no action buttons ─────────────────
 
-function ActiveLoanCard({ memberLoans }: { memberLoans: Loan[] }) {
+function ActiveLoanCard({
+  groupId,
+  memberLoans,
+  isAdmin,
+  onEdited,
+}: {
+  groupId: string
+  memberLoans: Loan[]
+  isAdmin: boolean
+  onEdited: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
+  const [editingLoan, setEditingLoan] = useState<Loan | null>(null)
 
   const representative   = memberLoans[0]
   const totalPrincipal   = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
@@ -1084,76 +1215,110 @@ function ActiveLoanCard({ memberLoans }: { memberLoans: Loan[] }) {
   const totalOutstanding = totalPrincipal + totalInterest
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      {/* Header row */}
-      <button
-        className="w-full flex items-center gap-3 p-4 text-left"
-        onClick={() => setExpanded(v => !v)}
-      >
-        <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
-          {initials(representative.borrower_name)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-800">{representative.borrower_name}</p>
-          <p className="text-xs text-gray-400">
-            {memberLoans.length} loan{memberLoans.length !== 1 ? 's' : ''} · total outstanding {formatPaise(totalOutstanding)}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {totalInterest > 0 && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium">
-              {formatPaise(totalInterest)} interest
-            </span>
-          )}
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
-      </button>
-
-      {/* Expanded: loan details only, no action buttons */}
-      {expanded && (
-        <div className="border-t border-gray-100 divide-y divide-gray-50">
-          {memberLoans.map(loan => (
-            <div key={loan.loan_id} className="px-4 py-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-gray-700">{loan.cycle_label}</p>
-                <LoanStatusBadge status={loan.status} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-gray-50 rounded-lg px-2.5 py-2">
-                  <p className="text-[10px] text-gray-400 mb-0.5">Loan amount</p>
-                  <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg px-2.5 py-2">
-                  <p className="text-[10px] text-gray-400 mb-0.5">Taken in</p>
-                  <p className="text-xs font-bold text-gray-800">{loan.cycle_label ?? '—'}</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg px-2.5 py-2">
-                  <p className="text-[10px] text-gray-400 mb-0.5">Remaining principal</p>
-                  <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
-                </div>
-                <div className={`rounded-lg px-2.5 py-2 ${loan.outstanding_interest > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
-                  <p className={`text-[10px] mb-0.5 ${loan.outstanding_interest > 0 ? 'text-amber-500' : 'text-gray-400'}`}>
-                    Pending interest
-                  </p>
-                  <p className={`text-xs font-bold ${loan.outstanding_interest > 0 ? 'text-amber-600' : 'text-gray-800'}`}>
-                    {loan.outstanding_interest > 0 ? formatPaise(loan.outstanding_interest) : 'None'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+    <>
+      {editingLoan && (
+        <EditLoanModal
+          groupId={groupId}
+          loan={editingLoan}
+          onClose={() => setEditingLoan(null)}
+          onSaved={() => { setEditingLoan(null); onEdited() }}
+        />
       )}
-    </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        {/* Header row */}
+        <button
+          className="w-full flex items-center gap-3 p-4 text-left"
+          onClick={() => setExpanded(v => !v)}
+        >
+          <div className="w-9 h-9 rounded-full bg-maroon-100 flex items-center justify-center text-xs font-bold text-maroon-700 shrink-0">
+            {initials(representative.borrower_name)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-800">{representative.borrower_name}</p>
+            <p className="text-xs text-gray-400">
+              {memberLoans.length} loan{memberLoans.length !== 1 ? 's' : ''} · total outstanding {formatPaise(totalOutstanding)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {totalInterest > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium">
+                {formatPaise(totalInterest)} interest
+              </span>
+            )}
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </button>
+
+        {/* Expanded: loan details with optional Edit button for admin */}
+        {expanded && (
+          <div className="border-t border-gray-100 divide-y divide-gray-50">
+            {memberLoans.map(loan => (
+              <div key={loan.loan_id} className="px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-gray-700">{loan.cycle_label}</p>
+                  <div className="flex items-center gap-2">
+                    <LoanStatusBadge status={loan.status} />
+                    {isAdmin && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setEditingLoan(loan) }}
+                        className="text-[11px] px-2 py-0.5 rounded-full border border-maroon-200 text-maroon-600 font-medium hover:bg-maroon-50 transition"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-gray-50 rounded-lg px-2.5 py-2">
+                    <p className="text-[10px] text-gray-400 mb-0.5">Loan amount</p>
+                    <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg px-2.5 py-2">
+                    <p className="text-[10px] text-gray-400 mb-0.5">Taken in</p>
+                    <p className="text-xs font-bold text-gray-800">{loan.cycle_label ?? '—'}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg px-2.5 py-2">
+                    <p className="text-[10px] text-gray-400 mb-0.5">Remaining principal</p>
+                    <p className="text-xs font-bold text-gray-800">{formatPaise(loan.principal)}</p>
+                  </div>
+                  <div className={`rounded-lg px-2.5 py-2 ${loan.outstanding_interest > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                    <p className={`text-[10px] mb-0.5 ${loan.outstanding_interest > 0 ? 'text-amber-500' : 'text-gray-400'}`}>
+                      Pending interest
+                    </p>
+                    <p className={`text-xs font-bold ${loan.outstanding_interest > 0 ? 'text-amber-600' : 'text-gray-800'}`}>
+                      {loan.outstanding_interest > 0 ? formatPaise(loan.outstanding_interest) : 'None'}
+                    </p>
+                  </div>
+                </div>
+                {loan.notes && (
+                  <p className="mt-2 text-[11px] text-gray-400 italic">{loan.notes}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 
-function ActiveLoanGroups({ loans: allLoans }: { loans: Loan[] }) {
+function ActiveLoanGroups({
+  groupId,
+  loans: allLoans,
+  isAdmin,
+  onEdited,
+}: {
+  groupId: string
+  loans: Loan[]
+  isAdmin: boolean
+  onEdited: () => void
+}) {
   const groups = allLoans.reduce<Map<string, Loan[]>>((map, loan) => {
     const existing = map.get(loan.borrower_user_id)
     if (existing) existing.push(loan)
@@ -1166,7 +1331,10 @@ function ActiveLoanGroups({ loans: allLoans }: { loans: Loan[] }) {
       {[...groups.values()].map(memberLoans => (
         <ActiveLoanCard
           key={memberLoans[0].borrower_user_id}
+          groupId={groupId}
           memberLoans={memberLoans}
+          isAdmin={isAdmin}
+          onEdited={onEdited}
         />
       ))}
     </div>
@@ -1596,7 +1764,12 @@ export default function BasketPage() {
                 {isAdmin && <p className="text-xs text-gray-400 mt-1">Use "New loan" above to disburse one.</p>}
               </div>
             ) : (
-              <ActiveLoanGroups loans={activeLoans} />
+              <ActiveLoanGroups
+                groupId={groupId!}
+                loans={activeLoans}
+                isAdmin={isAdmin}
+                onEdited={load}
+              />
             )}
           </div>
         )}

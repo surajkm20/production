@@ -202,6 +202,7 @@ export interface Loan {
   expected_close_date: string | null
   status: 'Active' | 'Repaid' | 'WrittenOff'
   next_cycle_due_date: string | null
+  notes: string | null
 }
 
 export interface BulkRepayResponse {

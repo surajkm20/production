@@ -42,14 +42,18 @@ export const bulkRepaySchema = z.object({
 });
 
 // ─── PATCH /groups/:group_id/loans/:loan_id ──────────────────────────────────
-// Only two meaningful changes allowed: write-off (status = 'WrittenOff') or
-// extending the expected_close_date. notes alone is rejected by the controller.
-// status is a literal so the controller's INVALID_TRANSITION check is front-loaded.
+// Allowed changes:
+//   - status = 'WrittenOff'           → write off the loan
+//   - principal (positive paise int)  → correct the disbursed principal
+//   - expected_close_date             → extend / set the due date
+//   - notes                           → update notes (can be standalone)
+// At least one field must be present.
 export const updateLoanSchema = z.object({
   status:              z.literal('WrittenOff').optional(),
+  principal:           z.number().int().positive().optional(),
   expected_close_date: dateString.optional(),
   notes:               z.string().optional(),
 }).refine(
-  (data) => data.status !== undefined || data.expected_close_date !== undefined,
-  { message: 'Provide status (WrittenOff) or expected_close_date to update.' },
+  (data) => data.status !== undefined || data.principal !== undefined || data.expected_close_date !== undefined || data.notes !== undefined,
+  { message: 'Provide at least one field to update (status, principal, expected_close_date, or notes).' },
 );

@@ -761,12 +761,12 @@ export async function updateLoan(
   userId:   string,
   group_id: string,
   loan_id:  string,
-  data:     { status?: string; expected_close_date?: string; notes?: string },
+  data:     { status?: string; principal?: number; expected_close_date?: string; notes?: string },
 ) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
-  const { status: new_status, expected_close_date, notes } = data;
+  const { status: new_status, principal: new_principal, expected_close_date, notes } = data;
 
   const [basketRows] = await db
     .select({ id: baskets.id, total_lent_out: baskets.total_lent_out })
@@ -788,13 +788,22 @@ export async function updateLoan(
       throw new AppError(409, 'INVALID_TRANSITION', `Cannot transition from Active to '${new_status}'. Only 'WrittenOff' is allowed.`);
     }
     await db.transaction(async (tx) => {
-      await tx.update(loans).set({ status: 'WrittenOff', closed_at: now, updated_at: now, ...(notes ? { notes } : {}) }).where(eq(loans.id, loan_id));
+      await tx.update(loans).set({ status: 'WrittenOff', closed_at: now, updated_at: now, ...(notes !== undefined ? { notes } : {}) }).where(eq(loans.id, loan_id));
       await tx.update(baskets).set({ total_lent_out: Number(basketRows.total_lent_out) - Number(loanRow.principal) }).where(eq(baskets.id, basketRows.id));
     });
+  } else if (new_principal !== undefined) {
+    // Correct the principal: adjust basket.total_lent_out by the delta.
+    const oldPrincipal = Number(loanRow.principal);
+    const delta        = new_principal - oldPrincipal;
+    await db.transaction(async (tx) => {
+      await tx.update(loans).set({ principal: new_principal, updated_at: now, ...(notes !== undefined ? { notes } : {}) }).where(eq(loans.id, loan_id));
+      await tx.update(baskets).set({ total_lent_out: Number(basketRows.total_lent_out) + delta }).where(eq(baskets.id, basketRows.id));
+    });
   } else if (expected_close_date !== undefined) {
-    await db.update(loans).set({ expected_close_date, updated_at: now, ...(notes ? { notes } : {}) }).where(eq(loans.id, loan_id));
-  } else {
-    throw new AppError(400, 'INVALID_REQUEST', 'Provide status or expected_close_date to update.');
+    await db.update(loans).set({ expected_close_date, updated_at: now, ...(notes !== undefined ? { notes } : {}) }).where(eq(loans.id, loan_id));
+  } else if (notes !== undefined) {
+    // notes-only update
+    await db.update(loans).set({ notes, updated_at: now }).where(eq(loans.id, loan_id));
   }
 
   const [updated] = await db

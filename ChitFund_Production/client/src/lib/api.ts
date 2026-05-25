@@ -71,4 +71,7 @@ export const api = {
 
   bulkRepayMember: (groupId: string, body: { member_user_id: string; mode: 'interest_only' | 'principal_only' | 'full_settlement' }) =>
     request<import('../types/api').BulkRepayResponse>(`/groups/${groupId}/loans/bulk-repay`, { method: 'POST', body: JSON.stringify(body) }),
+
+  editLoan: (groupId: string, loanId: string, body: { principal?: number; expected_close_date?: string; notes?: string }) =>
+    request<import('../types/api').Loan>(`/groups/${groupId}/loans/${loanId}`, { method: 'PATCH', body: JSON.stringify(body) }),
 }
