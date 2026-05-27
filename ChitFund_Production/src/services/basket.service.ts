@@ -14,6 +14,7 @@ import {
 import { AppError } from '../utils/AppError';
 import { encodeCursor, decodeCursor } from '../utils/pagination';
 import { paiseToRupeeDisplay } from '../utils/money';
+import { checkIdempotency, storeIdempotency } from '../utils/idempotency';
 import { assertActiveMember } from './memberships.service';
 import { notify } from './notifications.service';
 import { insertActivity } from './activity.service';
@@ -76,7 +77,7 @@ export async function listTransactions(
 ) {
   const caller  = await assertActiveMember(group_id, userId);
   const isAdmin = caller.role === 'Admin';
-  const limit   = Math.min(filters.limit ?? 100, 100);
+  const limit   = Math.min(filters.limit ?? 100, 500);
 
   const [basketRows] = await db
     .select({ id: baskets.id })
@@ -527,12 +528,18 @@ export async function repayLoan(
   userId:   string,
   group_id: string,
   loan_id:  string,
-  data:     { principal_repaid?: number; interest_paid?: number; txn_date: string; cycle_id?: string; notes?: string },
+  data:     { principal_repaid?: number; interest_paid?: number; txn_date: string; cycle_id?: string; notes?: string; idempotency_key?: string },
 ) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
-  const { principal_repaid = 0, interest_paid = 0, txn_date, cycle_id, notes } = data;
+  const { principal_repaid = 0, interest_paid = 0, txn_date, cycle_id, notes, idempotency_key } = data;
+
+  // Idempotency check: if key provided and previously succeeded, return cached result.
+  if (idempotency_key) {
+    const cached = await checkIdempotency(userId, idempotency_key, 'LOAN_REPAY');
+    if (cached) return JSON.parse(cached);
+  }
 
   if (principal_repaid <= 0 && interest_paid <= 0) {
     throw new AppError(400, 'INVALID_REQUEST', 'At least one of principal_repaid or interest_paid must be > 0.');
@@ -613,13 +620,19 @@ export async function repayLoan(
     data:       { amount: principal_repaid + interest_paid },
   });
 
-  return {
+  const result = {
     loan_id,
     total_interest_paid:  newTotalInterestPaid,
     outstanding_interest: newOutstandingInterest,
     status:               loanFullyRepaid ? 'Repaid' : 'Active',
     basket_balance_after: newBalance,
   };
+
+  if (idempotency_key) {
+    await storeIdempotency(userId, idempotency_key, 'LOAN_REPAY', result);
+  }
+
+  return result;
 }
 
 // ─── bulkRepayMember ─────────────────────────────────────────────────────────
@@ -627,14 +640,21 @@ export async function bulkRepayMember(
   adminUserId: string,
   group_id:    string,
   data: {
-    member_user_id: string;
-    mode: 'interest_only' | 'principal_only' | 'full_settlement';
+    member_user_id:  string;
+    mode:            'interest_only' | 'principal_only' | 'full_settlement';
+    idempotency_key?: string;
   },
 ) {
   const caller = await assertActiveMember(group_id, adminUserId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
 
-  const { member_user_id, mode } = data;
+  const { member_user_id, mode, idempotency_key } = data;
+
+  // Idempotency check: if key provided and previously succeeded, return cached result.
+  if (idempotency_key) {
+    const cached = await checkIdempotency(adminUserId, idempotency_key, 'BULK_REPAY');
+    if (cached) return JSON.parse(cached);
+  }
 
   const [basketRows] = await db
     .select({ id: baskets.id, current_balance: baskets.current_balance, total_credited: baskets.total_credited, total_lent_out: baskets.total_lent_out, total_interest_earned: baskets.total_interest_earned })
@@ -753,7 +773,13 @@ export async function bulkRepayMember(
     data:       { amount: total_amount, bulk: true },
   });
 
-  return { loans_repaid, total_amount };
+  const bulkResult = { loans_repaid, total_amount };
+
+  if (idempotency_key) {
+    await storeIdempotency(adminUserId, idempotency_key, 'BULK_REPAY', bulkResult);
+  }
+
+  return bulkResult;
 }
 
 // ─── deleteLoan ──────────────────────────────────────────────────────────────

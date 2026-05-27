@@ -804,6 +804,9 @@ function RepayLoanModal({ groupId, loans, cycles, currentCycleId, onClose, onSav
   const [notes, setNotes]                 = useState('')
   const [loading, setLoading]             = useState(false)
   const [error, setError]                 = useState<string | null>(null)
+  // Idempotency key — generated once per modal open, rotated on success or error
+  // so each distinct submit attempt has a unique key.
+  const repayIdempotencyKey = useRef<string>(crypto.randomUUID())
 
   const selectedLoan      = loans.find(l => l.loan_id === loanId)
   const selectedCycle     = cycles.find(c => c.cycle_id === cycleId)
@@ -820,9 +823,12 @@ function RepayLoanModal({ groupId, loans, cycles, currentCycleId, onClose, onSav
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
+    // Guard: do not fire a second request if one is already in-flight.
+    if (loading) return
     if (!loanId || (!principalPaid && interestPaidPaise <= 0) || !selectedCycle) return
     setLoading(true)
     setError(null)
+    const key = repayIdempotencyKey.current
     try {
       await api.post(`/groups/${groupId}/loans/${loanId}/repay`, {
         ...(principalPaid         ? { principal_repaid: principalAmount }   : {}),
@@ -830,9 +836,14 @@ function RepayLoanModal({ groupId, loans, cycles, currentCycleId, onClose, onSav
         txn_date: selectedCycle.due_date,
         cycle_id: cycleId,
         ...(notes.trim() ? { notes: notes.trim() } : {}),
+        idempotency_key: key,
       })
+      // Rotate so a second successful submission (e.g. modal re-used) gets a fresh key.
+      repayIdempotencyKey.current = crypto.randomUUID()
       onSaved()
     } catch (err) {
+      // Rotate on error so a user retry is treated as a new request.
+      repayIdempotencyKey.current = crypto.randomUUID()
       setError(err instanceof ApiError ? err.message : 'Failed to record repayment.')
     } finally {
       setLoading(false)
@@ -1382,6 +1393,9 @@ function RepaymentCard({
   const [bulkError, setBulkError]           = useState<string | null>(null)
   const [showRepayModal, setShowRepayModal] = useState(false)
   const [repayLoansList, setRepayLoansList] = useState<Loan[]>(memberLoans)
+  // One idempotency key per pending bulk action — generated fresh on each attempt,
+  // so a retry after an error uses a new key (we don't cache failures).
+  const bulkIdempotencyKey = useRef<string>(crypto.randomUUID())
 
   const representative   = memberLoans[0]
   const totalPrincipal   = memberLoans.reduce((s, l) => s + Number(l.principal), 0)
@@ -1389,18 +1403,26 @@ function RepaymentCard({
   const totalOutstanding = totalPrincipal + totalInterest
 
   async function handleBulk(mode: BulkMode) {
+    // Guard: ignore tap if another bulk action is already in-flight.
+    if (bulkLoading !== null) return
     setBulkLoading(mode)
     setBulkError(null)
+    const key = bulkIdempotencyKey.current
     try {
       const res: BulkRepayResponse = await api.bulkRepayMember(groupId, {
         member_user_id: representative.borrower_user_id,
         mode,
+        idempotency_key: key,
       })
+      // Rotate the key so the next distinct action gets a fresh UUID.
+      bulkIdempotencyKey.current = crypto.randomUUID()
       const label = mode === 'interest_only'  ? 'Interest paid'
                   : mode === 'principal_only' ? 'Principal repaid'
                   : 'Fully settled'
       onRepaid(`${label} — ${formatPaise(res.total_amount)}`)
     } catch (err) {
+      // On error, rotate the key so a retry is treated as a new request.
+      bulkIdempotencyKey.current = crypto.randomUUID()
       setBulkError(err instanceof ApiError ? err.message : 'Bulk repayment failed.')
     } finally {
       setBulkLoading(null)
@@ -1626,7 +1648,7 @@ export default function BasketPage() {
       const isAdmin = g.my_membership.role === 'Admin'
       const parallel: Promise<unknown>[] = [
         api.get<Loan[]>(`/groups/${groupId}/loans?status=active`),
-        api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=100`),
+        api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=500`),
       ]
       if (isAdmin) {
         parallel.push(api.get<Member[]>(`/groups/${groupId}/members`))
@@ -1658,7 +1680,7 @@ export default function BasketPage() {
     const [basketRes, active, txns] = await Promise.all([
       api.get<BasketOverview>(`/groups/${groupId}/basket`),
       api.get<Loan[]>(`/groups/${groupId}/loans?status=active`),
-      api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=100`),
+      api.get<TransactionListResponse>(`/groups/${groupId}/basket/transactions?limit=500`),
     ])
     setBasket(basketRes)
     setActiveLoans(active)

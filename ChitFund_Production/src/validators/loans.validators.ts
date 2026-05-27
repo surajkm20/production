@@ -18,11 +18,15 @@ export const disburseLoanSchema = z.object({
 // ─── POST /groups/:group_id/loans/:loan_id/repay ─────────────────────────────
 // Both amounts are optional individually, but at least one must be > 0.
 // txn_date is required — the admin records the date the cash was received.
+// idempotency_key is optional — a client-generated UUID. If provided and the same
+// request was already processed successfully, the cached response is returned.
 export const repayLoanSchema = z.object({
   principal_repaid: z.number().int().min(0).optional(),
   interest_paid:    z.number().int().min(0).optional(),
   txn_date:         dateString,
+  cycle_id:         z.string().uuid().optional(),
   notes:            z.string().optional(),
+  idempotency_key:  z.string().uuid('idempotency_key must be a valid UUID').optional(),
 }).refine(
   (data) => (data.principal_repaid ?? 0) > 0 || (data.interest_paid ?? 0) > 0,
   { message: 'At least one of principal_repaid or interest_paid must be > 0.' },
@@ -37,8 +41,9 @@ export const basketAdjustmentSchema = z.object({
 
 // ─── POST /groups/:group_id/loans/bulk-repay ─────────────────────────────────
 export const bulkRepaySchema = z.object({
-  member_user_id: z.string().uuid(),
-  mode:           z.enum(['interest_only', 'principal_only', 'full_settlement']),
+  member_user_id:  z.string().uuid(),
+  mode:            z.enum(['interest_only', 'principal_only', 'full_settlement']),
+  idempotency_key: z.string().uuid('idempotency_key must be a valid UUID').optional(),
 });
 
 // ─── PATCH /groups/:group_id/loans/:loan_id ──────────────────────────────────

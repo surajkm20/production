@@ -12,4 +12,5 @@ export * from './notifications';
 export * from './basket';
 export * from './transfers';
 export * from './activity';
+export * from './idempotency';
 

@@ -69,7 +69,7 @@ export const api = {
   getMemberWins: (groupId: string, userId: string) =>
     request<import('../types/api').MemberWin[]>(`/groups/${groupId}/members/${userId}/wins`),
 
-  bulkRepayMember: (groupId: string, body: { member_user_id: string; mode: 'interest_only' | 'principal_only' | 'full_settlement' }) =>
+  bulkRepayMember: (groupId: string, body: { member_user_id: string; mode: 'interest_only' | 'principal_only' | 'full_settlement'; idempotency_key?: string }) =>
     request<import('../types/api').BulkRepayResponse>(`/groups/${groupId}/loans/bulk-repay`, { method: 'POST', body: JSON.stringify(body) }),
 
   editLoan: (groupId: string, loanId: string, body: { principal?: number; expected_close_date?: string; notes?: string }) =>
