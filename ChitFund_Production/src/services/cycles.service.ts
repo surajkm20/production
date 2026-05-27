@@ -789,7 +789,6 @@ export async function correctClosedCycle(
   const group       = groupRows[0];
 
   if (!cycle)                    throw new AppError(404, 'CYCLE_NOT_FOUND',  'Cycle not found in this group.');
-  if (cycle.status !== 'Closed') throw new AppError(409, 'CYCLE_NOT_CLOSED', 'Only closed cycles can be corrected via this endpoint.');
   if (!firstWinner)              throw new AppError(409, 'INVALID_STATE',    'No winner record found for this cycle.');
 
   const old_winner_id  = firstWinner.winner_user_id;
@@ -901,6 +900,40 @@ export async function correctClosedCycle(
   });
 
   return { cycle_id, is_skip_month: true, winner_user_id: new_winner_id, winner_takeaway: pool, basket_balance_after: Number(basket.current_balance) };
+}
+
+// ─── reopenCycle ─────────────────────────────────────────────────────────────
+export async function reopenCycle(userId: string, group_id: string, cycle_id: string) {
+  const caller = await assertActiveMember(group_id, userId);
+  if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
+
+  const [cycleRows] = await db
+    .select({ id: monthly_cycles.id, status: monthly_cycles.status, month_label: monthly_cycles.month_label })
+    .from(monthly_cycles)
+    .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
+    .limit(1);
+
+  if (!cycleRows)                     throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
+  if (cycleRows.status !== 'Closed')  throw new AppError(400, 'CYCLE_NOT_CLOSED', 'Cycle is not closed — only Closed cycles can be reopened.');
+
+  await db.update(monthly_cycles)
+    .set({ status: 'Open', closed_at: null })
+    .where(eq(monthly_cycles.id, cycle_id));
+
+  await insertActivity({
+    group_id,
+    event_type: 'CYCLE_REOPENED',
+    actor_id:   userId,
+    data: { month_label: cycleRows.month_label },
+  });
+
+  const [updated] = await db
+    .select({ id: monthly_cycles.id, status: monthly_cycles.status, closed_at: monthly_cycles.closed_at, month_label: monthly_cycles.month_label, month_number: monthly_cycles.month_number })
+    .from(monthly_cycles)
+    .where(eq(monthly_cycles.id, cycle_id))
+    .limit(1);
+
+  return updated;
 }
 
 // ─── closeCycle ──────────────────────────────────────────────────────────────

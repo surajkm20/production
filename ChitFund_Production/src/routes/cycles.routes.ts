@@ -27,3 +27,4 @@ cyclesRouter.post('/:group_id/cycles/:cycle_id/declare-skip-month', requireAdmin
 cyclesRouter.patch('/:group_id/cycles/:cycle_id',                   requireAdmin, validate(updateCycleSchema),      cycles.updateCycle);
 cyclesRouter.post('/:group_id/cycles/:cycle_id/close',              requireAdmin,                                   cycles.closeCycle);
 cyclesRouter.post('/:group_id/cycles/:cycle_id/correct',            requireAdmin, validate(correctCycleSchema),      cycles.correctClosedCycle);
+cyclesRouter.post('/:group_id/cycles/:cycle_id/reopen',             requireAdmin,                                       cycles.reopenCycle);

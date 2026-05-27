@@ -65,6 +65,10 @@ export default function CycleDetailPage() {
   const [correctError,      setCorrectError]      = useState<string | null>(null)
   const [correctWinnerNumber, setCorrectWinnerNumber] = useState(1)
 
+  // Reopen-cycle state
+  const [reopenLoading, setReopenLoading] = useState(false)
+  const [reopenError,   setReopenError]   = useState<string | null>(null)
+
   useEffect(() => { load() }, [groupId, cycleId])
 
   async function load() {
@@ -83,6 +87,20 @@ export default function CycleDetailPage() {
       else setError('Could not load cycle. Tap to retry.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleReopen() {
+    if (!cycle) return
+    setReopenLoading(true)
+    setReopenError(null)
+    try {
+      await api.reopenCycle(groupId!, cycleId!)
+      await load()
+    } catch (err) {
+      setReopenError(err instanceof ApiError ? err.message : 'Failed to reopen cycle.')
+    } finally {
+      setReopenLoading(false)
     }
   }
 
@@ -153,7 +171,8 @@ export default function CycleDetailPage() {
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length
-  const canCorrect     = isAdmin && cycle.status === 'Closed' && hasWinner
+  const canCorrect     = isAdmin && hasWinner
+  const canReopen      = isAdmin && cycle.status === 'Closed'
 
   // For the correction modal: show eligible members + the winner of the slot being corrected
   const slotWinner = cycle.winners?.[correctWinnerNumber - 1] ?? null
@@ -440,6 +459,26 @@ export default function CycleDetailPage() {
             </div>
           )}
         </div>
+
+        {/* ── Reopen Cycle — admin only, shown on Closed cycles ────────────── */}
+        {canReopen && (
+          <div className="bg-white rounded-2xl border border-gray-100 p-4">
+            <p className="text-[11px] font-semibold text-gray-400 tracking-widest mb-3">ADMIN ACTIONS</p>
+            {reopenError && (
+              <p className="text-xs text-red-600 mb-2">{reopenError}</p>
+            )}
+            <button
+              onClick={handleReopen}
+              disabled={reopenLoading}
+              className="w-full py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60 transition"
+            >
+              {reopenLoading ? 'Reopening…' : 'Reopen Cycle'}
+            </button>
+            <p className="text-[10px] text-gray-400 mt-2 text-center">
+              Reopening sets this cycle back to Open. Payments and basket transactions are not reversed.
+            </p>
+          </div>
+        )}
 
       </div>
 

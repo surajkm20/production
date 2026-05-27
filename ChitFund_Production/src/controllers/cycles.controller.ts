@@ -76,3 +76,12 @@ export async function correctClosedCycle(req: Request, res: Response, next: Next
     sendSuccess(res, result);
   } catch (err) { next(err); }
 }
+
+export async function reopenCycle(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const group_id = req.params.group_id as string;
+    const cycle_id = req.params.cycle_id as string;
+    const result = await CyclesService.reopenCycle(req.user!.userId, group_id, cycle_id);
+    sendSuccess(res, result);
+  } catch (err) { next(err); }
+}
