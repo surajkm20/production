@@ -155,7 +155,7 @@ export async function winnersLedger(req: Request, res: Response, next: NextFunct
 
     await assertActiveMember(group_id, userId);
 
-    // Each cycle may have multiple winners (X Chiti). Return one row per cycle_winner,
+    // Each cycle may have multiple winners (Double Chiti). Return one row per cycle_winner,
     // annotated with the cycle's month_number/label and is_skip_month flag.
     const rows = await db
       .select({
@@ -321,7 +321,7 @@ export async function bidTrend(req: Request, res: Response, next: NextFunction):
 
     await assertActiveMember(group_id, userId);
 
-    // For X Chiti cycles with multiple winners, sum their bid_amounts per cycle.
+    // For Double Chiti cycles with multiple winners, sum their bid_amounts per cycle.
     const [cycleRows, winnerAggs] = await Promise.all([
       db.select({ month_number: monthly_cycles.month_number, is_skip_month: monthly_cycles.is_skip_month, id: monthly_cycles.id })
         .from(monthly_cycles)

@@ -1,8 +1,8 @@
 // Routes for monthly cycle management (require JWT + group membership):
-//   GET   /groups/:group_id/chiti-eligibility                     — X Chiti eligibility (admin + member)
+//   GET   /groups/:group_id/chiti-eligibility                     — Double Chiti eligibility (admin + member)
 //   GET   /groups/:group_id/cycles                                — list all cycles
 //   GET   /groups/:group_id/cycles/:cycle_id                      — cycle detail
-//   POST  /groups/:group_id/cycles/:cycle_id/record-winner  [admin] — supports multiple calls (X Chiti)
+//   POST  /groups/:group_id/cycles/:cycle_id/record-winner  [admin] — supports multiple calls (Double Chiti)
 //   POST  /groups/:group_id/cycles/:cycle_id/declare-skip-month  [admin]
 //   PATCH /groups/:group_id/cycles/:cycle_id                [admin] — edit first winner within 24h window
 //   POST  /groups/:group_id/cycles/:cycle_id/close          [admin]

@@ -40,7 +40,7 @@ function txnLabel(txn_type: string): string {
     CREDIT_DISCOUNT:         'Bid discount',
     BID_TO_BASKET:           'Bid → basket',
     DEBIT_SKIP_MONTH:        'Skip month payout',
-    DEBIT_X_CHITI:           'X-Chiti payout',
+    DEBIT_DOUBLE_CHITI:      'Double Chiti payout',
     DEBIT_FINAL_CYCLE_OFFSET:'Final cycle offset',
     SKIP_MONTH_DEBIT:        'Skip month payout',
     ADJUSTMENT:              'Manual adjustment',
@@ -79,7 +79,7 @@ function loanTxnColors(txn: BasketTransaction): { bg: string; text: string; amou
 function otherTxnColors(txn_type: string): { icon: string; amount: string } {
   if (txn_type === 'CREDIT_DISCOUNT' || txn_type === 'BID_TO_BASKET')
     return { icon: 'text-green-600', amount: 'text-green-600' }
-  if (txn_type === 'DEBIT_FINAL_CYCLE_OFFSET' || txn_type === 'DEBIT_SKIP_MONTH' || txn_type === 'DEBIT_X_CHITI')
+  if (txn_type === 'DEBIT_FINAL_CYCLE_OFFSET' || txn_type === 'DEBIT_SKIP_MONTH' || txn_type === 'DEBIT_DOUBLE_CHITI')
     return { icon: 'text-red-500', amount: 'text-red-500' }
   if (txn_type === 'CLOSURE_SPLIT')
     return { icon: 'text-indigo-600', amount: 'text-indigo-600' }
@@ -310,7 +310,7 @@ function LedgerTimeline({ transactions }: { transactions: BasketTransaction[] })
 //
 // What IS shown per cycle:
 //   CREDIT_DISCOUNT / BID_TO_BASKET → Bid discount credited to basket  (+)
-//   DEBIT_X_CHITI                   → X-Chiti pool payout from basket  (-)
+//   DEBIT_DOUBLE_CHITI              → Double Chiti pool payout from basket  (-)
 //   DEBIT_SKIP_MONTH                → Skip-month payout from basket     (-)
 //   DEBIT_FINAL_CYCLE_OFFSET        → Final-cycle basket offset         (-)
 //   LOAN_DISBURSED                  → Loan disbursed from basket        (-)
@@ -336,7 +336,7 @@ function simpleTxnLabel(txn_type: string): string {
   const map: Record<string, string> = {
     CREDIT_DISCOUNT:          'Bid Discount to Basket',
     BID_TO_BASKET:            'Bid Discount to Basket',
-    DEBIT_X_CHITI:            'X-Chiti Payout',
+    DEBIT_DOUBLE_CHITI:       'Double Chiti Payout',
     DEBIT_SKIP_MONTH:         'Skip-Month Payout',
     SKIP_MONTH_DEBIT:         'Skip-Month Payout',
     DEBIT_FINAL_CYCLE_OFFSET: 'Final-Cycle Basket Offset',

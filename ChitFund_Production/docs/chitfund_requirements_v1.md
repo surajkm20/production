@@ -135,7 +135,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **Transaction types:**
   - `CREDIT_DISCOUNT` — basket credit from a regular cycle (= bid_amount − admin_commission). Admin commission is computed on pool_amount and collected offline — it never enters the basket.
   - `DEBIT_SKIP_MONTH` — basket pays the winner of a skip-month cycle.
-  - `DEBIT_X_CHITI` — basket funds the pool payout for winner slot 2+ in an X Chiti cycle (debit of `pool_amount`; followed by a `CREDIT_DISCOUNT` for that winner's `basket_credit`).
+  - `DEBIT_DOUBLE_CHITI` — basket funds the pool payout for winner slot 2+ in a Double Chiti cycle (debit of `pool_amount`; followed by a `CREDIT_DISCOUNT` for that winner's `basket_credit`).
   - `LOAN_DISBURSED` — loan given out to a member (debit).
   - `LOAN_REPAID` — principal repayment from a borrower (credit).
   - `INTEREST_ACCRUED` — monthly interest earned on an active loan (credit).
@@ -215,16 +215,16 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - **One-time use:** the special share can only be used once per group. Tracked via `admin_withdrawal_used` on the admin's membership row. If already used, the withdrawal option is blocked with `WITHDRAWAL_ALREADY_USED`.
   - If the admin wins without selecting withdrawal (regular bid), the normal three-way split applies and the special share remains available for a later cycle.
   - Notification sent to all members: "Admin withdrew the full pool of ₹X."
-- **F-11b** **X Chiti eligibility (display).** `X = floor(total_basket / pool_amount) + 1`. When X ≥ 2 (i.e., `total_basket >= pool_amount`), the group is eligible for X Chiti. The Record Winner screen displays an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` (X=2/3/4 respectively). The banner is hidden when X < 2 (i.e., normal single-winner cycle).
+- **F-11b** **Double Chiti eligibility (display).** `X = floor(total_basket / pool_amount) + 1`. When X ≥ 2 (i.e., `total_basket >= pool_amount`), the group is eligible for Double Chiti. The Record Winner screen displays an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` (X=2/3/4 respectively). The banner is hidden when X < 2 (i.e., normal single-winner cycle).
   - `total_basket = realized + unrealized`
   - `realized = baskets.current_balance` (actual cash in basket)
   - `unrealized = SUM(active loan principals) + SUM(outstanding accrued interest per active loan)` — money the basket is owed but hasn't received yet
-  - `x_chiti` is always ≥ 1; a value of 1 means a regular single-winner cycle. Threshold examples: basket = 0 → x=1; basket = pool → x=2; basket = 2×pool → x=3.
+  - `double_chiti` is always ≥ 1; a value of 1 means a regular single-winner cycle. Threshold examples: basket = 0 → x=1; basket = pool → x=2; basket = 2×pool → x=3.
   - Exposed via `GET /groups/:group_id/chiti-eligibility` (admin + member).
-- **F-11c** **Multiple winners per cycle (X Chiti recording).** For eligible cycles (X ≥ 2), admin can record up to X winners in the same cycle. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
+- **F-11c** **Multiple winners per cycle (Double Chiti recording).** For eligible cycles (X ≥ 2), admin can record up to X winners in the same cycle. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
   - Each winner has their own `bid_amount`, `admin_commission`, `basket_credit`, `winner_takeaway` computed independently using the same formulas as a regular single winner.
   - A member with multiple shares may win more than one slot within the same cycle, consuming one share per slot. They are excluded once `wins_count >= share_count` (`WINNER_INELIGIBLE` error).
-  - Total recorded winners per cycle is capped at `x_chiti` at the time of recording; further calls beyond that return `CHITI_SLOTS_FULL`.
+  - Total recorded winners per cycle is capped at `double_chiti` at the time of recording; further calls beyond that return `CHITI_SLOTS_FULL`.
   - Each winner occupies one "winner slot" numbered sequentially (`winner_number` 1, 2, 3…).
   - The Record Winner screen shows X separate bid-entry blocks — one per slot — when the group is eligible. Admin fills in each winner and their bid independently.
   - Winners list on the cycle detail and history screens shows all X winners (not just one).

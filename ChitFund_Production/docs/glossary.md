@@ -114,15 +114,15 @@ How many times a member has won so far. A member is ineligible to win again once
 
 When every active member's `wins_count` reaches their `share_count`, all shares are exhausted. Closing the cycle at that point triggers an **automatic group closure** (provided no active loans remain).
 
-### X Chiti
+### Double Chiti
 A cycle mode where more than one winner is recorded in the same month, enabled when the basket has grown large enough to fund multiple payouts.
 
-- `x_chiti = floor(total_basket / pool_amount) + 1`. Always ≥ 1.
-  - `x_chiti = 1` → normal single-winner cycle (basket < pool_amount).
-  - `x_chiti = 2` → Double Chiti (basket >= pool_amount).
-  - `x_chiti = 3` → Triple Chiti (basket >= 2 × pool_amount), and so on.
+- `double_chiti = floor(total_basket / pool_amount) + 1`. Always ≥ 1.
+  - `double_chiti = 1` → normal single-winner cycle (basket < pool_amount).
+  - `double_chiti = 2` → Double Chiti (basket >= pool_amount).
+  - `double_chiti = 3` → Triple Chiti (basket >= 2 × pool_amount), and so on.
 - `total_basket = realized (basket balance) + unrealized (active loan principals + outstanding accrued interest)`.
-- The X Chiti eligibility banner is shown on the Record Winner screen only when `x_chiti ≥ 2`.
+- The Double Chiti eligibility banner is shown on the Record Winner screen only when `double_chiti ≥ 2`.
 - Each winner is recorded as a separate `cycle_winners` row with their own bid, commission, basket credit, and takeaway. A member with multiple shares can win more than one slot within the same cycle, as long as they have remaining share allocations (`wins_count < share_count`).
 
 ### Eligible Winner
@@ -145,7 +145,7 @@ The current net cash available in the basket. Increases with bid credits and loa
 |---|---|---|
 | `CREDIT_DISCOUNT` | Credit | Regular cycle closes — `basket_credit` added |
 | `DEBIT_SKIP_MONTH` | Debit | Basket funds the winner of a skip-month cycle |
-| `DEBIT_X_CHITI` | Debit | Basket funds the pool payout for winner slot 2+ in an X Chiti cycle |
+| `DEBIT_DOUBLE_CHITI` | Debit | Basket funds the pool payout for winner slot 2+ in a Double Chiti cycle |
 | `LOAN_DISBURSED` | Debit | Admin gives a loan to a member |
 | `LOAN_REPAID` | Credit | Borrower repays principal |
 | `INTEREST_ACCRUED` | Credit | Monthly interest earned on an active loan |

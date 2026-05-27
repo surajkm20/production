@@ -1,6 +1,6 @@
 // Drizzle schema definitions for:
 //   - monthly_cycles : one row per month in a group's lifecycle, pre-created at group start.
-//                      Bid/winner data moved to cycle_winners to support multiple winners (X Chiti).
+//                      Bid/winner data moved to cycle_winners to support multiple winners (Double Chiti).
 //   - cycle_winners  : one row per winner per cycle. Single-winner cycles have 1 row;
 //                      Double/Triple/etc. Chiti cycles have 2-N rows.
 

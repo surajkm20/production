@@ -150,15 +150,15 @@ export default function RecordWinnerPage() {
 
       <div className="flex-1 overflow-y-auto pb-8 space-y-3 pt-3 px-3">
 
-        {/* X Chiti eligibility banner */}
-        {eligibility && eligibility.x_chiti >= 1 && (
+        {/* Double Chiti eligibility banner */}
+        {eligibility && eligibility.double_chiti >= 1 && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
             <div className="flex items-start gap-2">
               <span className="text-amber-500 text-base leading-none mt-0.5">★</span>
               <div>
                 <p className="text-sm font-bold text-amber-800">{group.name} is eligible for {eligibility.label}!</p>
                 <p className="text-xs text-amber-600 mt-0.5">
-                  Total basket: {formatPaise(eligibility.total_basket)} · {eligibility.x_chiti} winners this cycle
+                  Total basket: {formatPaise(eligibility.total_basket)} · {eligibility.double_chiti} winners this cycle
                 </p>
                 <p className="text-[10px] text-amber-500 mt-1">
                   Realized {formatPaise(eligibility.realized)} + Unrealized {formatPaise(eligibility.unrealized)}

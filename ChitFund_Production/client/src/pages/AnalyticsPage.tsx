@@ -406,24 +406,24 @@ export default function AnalyticsPage() {
                 const cyclesCompleted  = completedBids.length          // actual distinct cycles run
                 const cyclesPlanned    = group.total_months
                 const totalSlotsWon    = actualWinners.length          // total winner slots paid out
-                const extraFromXChiti  = totalSlotsWon - cyclesCompleted  // bonus payouts via X Chiti
+                const extraFromDoubleChiti  = totalSlotsWon - cyclesCompleted  // bonus payouts via Double Chiti
                 const slotsRemaining   = group.total_shares - totalSlotsWon  // effective remaining
 
                 return (
                   <div className="border-b border-gray-100">
 
-                    {/* X Chiti savings banner — primary metric when applicable */}
-                    {extraFromXChiti > 0 && (
+                    {/* Double Chiti savings banner — primary metric when applicable */}
+                    {extraFromDoubleChiti > 0 && (
                       <div className="mx-4 mt-4 mb-3 rounded-xl bg-teal-50 border border-teal-200 p-3 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
-                          <span className="text-lg font-extrabold text-teal-700">{extraFromXChiti}</span>
+                          <span className="text-lg font-extrabold text-teal-700">{extraFromDoubleChiti}</span>
                         </div>
                         <div>
                           <p className="text-sm font-bold text-teal-800">
-                            {extraFromXChiti === 1 ? 'Cycle' : 'Cycles'} saved by X Chiti
+                            {extraFromDoubleChiti === 1 ? 'Cycle' : 'Cycles'} saved by Double Chiti
                           </p>
                           <p className="text-[11px] text-teal-600 mt-0.5">
-                            {extraFromXChiti} extra payout{extraFromXChiti !== 1 ? 's' : ''} in fewer cycles · members finish sooner
+                            {extraFromDoubleChiti} extra payout{extraFromDoubleChiti !== 1 ? 's' : ''} in fewer cycles · members finish sooner
                           </p>
                         </div>
                       </div>
@@ -432,16 +432,16 @@ export default function AnalyticsPage() {
                     <div className="px-4 pb-3 pt-1">
                       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-3">Cycle Progress</p>
 
-                      {/* Stacked progress bar: actual cycles (maroon) + X Chiti bonus (teal) */}
+                      {/* Stacked progress bar: actual cycles (maroon) + Double Chiti bonus (teal) */}
                       <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden mb-2 flex gap-0.5">
                         <div
                           className="h-full bg-maroon-500 rounded-l-full transition-all"
                           style={{ width: `${cyclesPlanned > 0 ? Math.round((cyclesCompleted / cyclesPlanned) * 100) : 0}%` }}
                         />
-                        {extraFromXChiti > 0 && (
+                        {extraFromDoubleChiti > 0 && (
                           <div
                             className="h-full bg-teal-400 rounded-r-full transition-all"
-                            style={{ width: `${cyclesPlanned > 0 ? Math.round((extraFromXChiti / cyclesPlanned) * 100) : 0}%` }}
+                            style={{ width: `${cyclesPlanned > 0 ? Math.round((extraFromDoubleChiti / cyclesPlanned) * 100) : 0}%` }}
                           />
                         )}
                       </div>
@@ -452,10 +452,10 @@ export default function AnalyticsPage() {
                           <span className="w-2 h-2 rounded-full bg-maroon-500 inline-block" />
                           {cyclesCompleted} actual cycle{cyclesCompleted !== 1 ? 's' : ''}
                         </span>
-                        {extraFromXChiti > 0 && (
+                        {extraFromDoubleChiti > 0 && (
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />
-                            +{extraFromXChiti} via X Chiti
+                            +{extraFromDoubleChiti} via Double Chiti
                           </span>
                         )}
                       </div>
@@ -635,7 +635,7 @@ export default function AnalyticsPage() {
           <div className="mx-4">
             <SectionLabel>Cycle History</SectionLabel>
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              {/* Legend — shown only when there is at least one X Chiti cycle */}
+              {/* Legend — shown only when there is at least one Double Chiti cycle */}
               {(() => {
                 const counts = new Map<number, number>()
                 actualWinners.forEach(w => counts.set(w.month_number, (counts.get(w.month_number) ?? 0) + 1))
@@ -643,7 +643,7 @@ export default function AnalyticsPage() {
               })() && (
                 <div className="flex items-center gap-3 text-[10px] text-gray-400 mb-3">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-maroon-500 inline-block" />Normal bid</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />X Chiti 2nd bid</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />Double Chiti 2nd bid</span>
                 </div>
               )}
               {(() => {
@@ -669,7 +669,7 @@ export default function AnalyticsPage() {
                   <div className="space-y-4">
                     {rows.map(b => {
                       const cycleWinners = winnersByMonth.get(b.month_number) ?? []
-                      const isXChiti     = cycleWinners.length > 1
+                      const isDoubleChiti     = cycleWinners.length > 1
                       const monthLabel   = monthLabelMap.get(b.month_number) ?? ''
 
                       return (
@@ -686,8 +686,8 @@ export default function AnalyticsPage() {
                               <p className="text-sm italic text-amber-500">Skip month</p>
                               {monthLabel && <p className="text-xs text-gray-400 mt-0.5">{monthLabel}</p>}
                             </div>
-                          ) : isXChiti ? (
-                            /* X Chiti multi-winner cycle */
+                          ) : isDoubleChiti ? (
+                            /* Double Chiti multi-winner cycle */
                             <>
                               {/* Center: stacked bars + month label + badge */}
                               <div className="flex-1 min-w-0 space-y-1.5">
@@ -707,7 +707,7 @@ export default function AnalyticsPage() {
                                 <div className="flex items-center gap-2 mt-0.5">
                                   {monthLabel && <p className="text-xs text-gray-400">{monthLabel}</p>}
                                   <span className="inline-flex items-center text-[10px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
-                                    {cycleWinners.length} bids · X Chiti
+                                    {cycleWinners.length} bids · Double Chiti
                                   </span>
                                 </div>
                               </div>

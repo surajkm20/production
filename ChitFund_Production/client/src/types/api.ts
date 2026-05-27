@@ -46,7 +46,7 @@ export interface ChitiEligibility {
   unrealized: number
   total_basket: number
   pool_amount: number
-  x_chiti: number
+  double_chiti: number
   label: string
   eligible: boolean
 }

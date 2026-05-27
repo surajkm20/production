@@ -167,7 +167,7 @@ export default function CycleDetailPage() {
   const firstWinner    = cycle.winners?.[0] ?? null
   const winnerName     = firstWinner?.name ?? ''
   const hasWinner      = (cycle.winners?.length ?? 0) > 0
-  const isXChiti       = (cycle.winners?.length ?? 0) > 1
+  const isDoubleChiti       = (cycle.winners?.length ?? 0) > 1
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length
@@ -205,16 +205,16 @@ export default function CycleDetailPage() {
         <div className={`rounded-2xl p-4 border ${
           hasWinner ? 'bg-maroon-50 border-maroon-100' : 'bg-gray-50 border-gray-200'
         }`}>
-          {/* Regular month with winner — handles both single winner and X Chiti (2 winners) */}
+          {/* Regular month with winner — handles both single winner and Double Chiti (2 winners) */}
           {hasWinner && !cycle.is_skip_month && (
             <>
-              {isXChiti ? (
-                /* X Chiti: two winners */
+              {isDoubleChiti ? (
+                /* Double Chiti: two winners */
                 <>
                   <div className="flex items-center gap-2 mb-3">
                     <p className="text-[11px] font-semibold text-maroon-400 tracking-widest">WINNERS</p>
                     <span className="text-[9px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-1.5 py-0.5">
-                      X Chiti
+                      Double Chiti
                     </span>
                   </div>
                   {cycle.winners.map((winner, idx) => (
@@ -488,7 +488,7 @@ export default function CycleDetailPage() {
           <div className="w-full max-w-md bg-white rounded-t-3xl p-5 pb-8 shadow-xl">
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-bold text-gray-900">
-                {isXChiti ? `Correct Winner ${correctWinnerNumber}` : 'Correct cycle entry'}
+                {isDoubleChiti ? `Correct Winner ${correctWinnerNumber}` : 'Correct cycle entry'}
               </p>
               <button onClick={() => setShowCorrect(false)} className="text-gray-400 hover:text-gray-600 transition">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -796,7 +796,7 @@ Get full cycle detail.
 ---
 
 ### GET `/groups/:group_id/chiti-eligibility` **[admin + member]**
-Returns the group's current X Chiti eligibility based on realized + unrealized basket value.
+Returns the group's current Double Chiti eligibility based on realized + unrealized basket value.
 
 **Response 200**
 ```json
@@ -806,7 +806,7 @@ Returns the group's current X Chiti eligibility based on realized + unrealized b
     "unrealized":  15000000,
     "total_basket": 20420000,
     "pool_amount":  10000000,
-    "x_chiti":     2,
+    "double_chiti": 2,
     "label":       "Double Chiti",
     "eligible":    true
   }
@@ -814,14 +814,14 @@ Returns the group's current X Chiti eligibility based on realized + unrealized b
 ```
 - `realized` = `baskets.current_balance` (actual cash).
 - `unrealized` = sum of active loan principals + sum of outstanding accrued interest across all active loans in the group.
-- `x_chiti` = `floor(total_basket / pool_amount) + 1`. Always ≥ 1. Value of 1 means normal single-winner cycle; 2+ means X Chiti eligible.
-- `eligible` = `x_chiti >= 2`. `true` when `total_basket >= pool_amount`.
-- `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `x_chiti < 2`.
+- `double_chiti` = `floor(total_basket / pool_amount) + 1`. Always ≥ 1. Value of 1 means normal single-winner cycle; 2+ means Double Chiti eligible.
+- `eligible` = `double_chiti >= 2`. `true` when `total_basket >= pool_amount`.
+- `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `double_chiti < 2`.
 
 ---
 
 ### POST `/groups/:group_id/cycles/:cycle_id/record-winner` **[admin]**
-Record a winning bid for a cycle. Can be called up to `x_chiti` times per cycle (once per winner slot). Each call adds one winner row to `cycle_winners`.
+Record a winning bid for a cycle. Can be called up to `double_chiti` times per cycle (once per winner slot). Each call adds one winner row to `cycle_winners`.
 
 **Request — regular member winner (or admin winning via normal bid)**
 ```json

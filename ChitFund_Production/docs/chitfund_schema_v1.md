@@ -243,7 +243,7 @@ CREATE INDEX idx_cycles_status ON monthly_cycles(group_id, status);
 
 **Notes:**
 - **`due_date` derivation:** set at cycle pre-creation time as `payment_due_day` of that cycle's calendar month. Example: `payment_due_day = 10`, group starts May 2026 → cycle 1 due `2026-05-10`, cycle 2 due `2026-06-10`, etc.
-- Bid fields (`winner_user_id`, `bid_amount`, etc.) have been **moved to `cycle_winners`** (see below) to support multiple winners per cycle (X Chiti).
+- Bid fields (`winner_user_id`, `bid_amount`, etc.) have been **moved to `cycle_winners`** (see below) to support multiple winners per cycle (Double Chiti).
 - Cycles are pre-created (one per `total_months`) when the group is created.
 
 ---
@@ -276,12 +276,12 @@ CREATE INDEX idx_cycle_winners_user  ON cycle_winners(winner_user_id);
 ```
 
 **Notes:**
-- One row per winner per cycle. For single-winner cycles (normal), exactly 1 row. For X Chiti (Double/Triple/etc.), up to X rows.
+- One row per winner per cycle. For single-winner cycles (normal), exactly 1 row. For Double Chiti (Double/Triple/etc.), up to X rows.
 - `winner_number` is assigned sequentially as admin records each winner (first recorded = 1, second = 2, …).
 - **Bidding model:** same as before — highest bid wins, sacrifice model. Admin commission = `pool_amount × rate / 100` (offline cash); basket_credit = `bid_amount − admin_commission`; winner_takeaway = `pool_amount − bid_amount`.
 - **Admin withdrawal:** `bid_amount = 0`, `admin_commission = 0`, `basket_credit = 0`, `winner_takeaway = pool_amount`, `is_admin_withdrawal = true`. No basket transaction created.
 - **Skip month winner:** `bid_amount = 0`, `admin_commission = 0`, `basket_credit = 0`, `winner_takeaway = pool_amount`. A `DEBIT_SKIP_MONTH` basket transaction is created for the full pool.
-- The **X Chiti cap** (`x_chiti = floor(total_basket / pool_amount)`) is enforced at record time — admin cannot record more winners than the current eligibility allows.
+- The **Double Chiti cap** (`double_chiti = floor(total_basket / pool_amount)`) is enforced at record time — admin cannot record more winners than the current eligibility allows.
 - `total_basket = baskets.current_balance (realized) + SUM(active loan principals) + SUM(outstanding interest per active loan) (unrealized)`
 
 ---

@@ -45,7 +45,7 @@ export const basket_transactions = pgTable('basket_transactions', {
   check('chk_txn_type', sql`${table.txn_type} IN (
     'CREDIT_DISCOUNT',
     'DEBIT_SKIP_MONTH',
-    'DEBIT_X_CHITI',
+    'DEBIT_DOUBLE_CHITI',
     'DEBIT_FINAL_CYCLE_OFFSET',
     'LOAN_DISBURSED',
     'LOAN_REPAID',

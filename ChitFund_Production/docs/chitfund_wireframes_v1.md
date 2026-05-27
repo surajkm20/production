@@ -256,9 +256,9 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
 
 **Layout, top to bottom:**
 1. **Header bar** — back, "Record month outcome", cycle label (e.g., "Apr 2026") on right.
-2. **(When eligible) X Chiti eligibility banner** — amber/gold card shown at the top when `x_chiti ≥ 2`. Example: `"SunRise group is eligible for Double Chiti"`. Sub-text: `"Total basket ₹2,04,200 · Pool ₹1,00,000 · 2 winners this cycle"`. Hidden when `x_chiti < 2`.
+2. **(When eligible) Double Chiti eligibility banner** — amber/gold card shown at the top when `double_chiti ≥ 2`. Example: `"SunRise group is eligible for Double Chiti"`. Sub-text: `"Total basket ₹2,04,200 · Pool ₹1,00,000 · 2 winners this cycle"`. Hidden when `double_chiti < 2`.
 3. **Outcome toggle** — two cards side-by-side: "Regular month" (default selected) vs "Skip month". Selecting "Skip month" reshapes the form below.
-4. **(Regular month — X Chiti eligible) Winner slots** — when `x_chiti ≥ 2`, the form shows X numbered bid-entry blocks stacked vertically, e.g. "Winner 1", "Winner 2". Each block has its own winner picker + bid amount input + math preview. Admin can fill them in any order. Blocks not yet filled show dimmed placeholder text. When `x_chiti = 1`, only a single block (no numbering) is shown — the original UX.
+4. **(Regular month — Double Chiti eligible) Winner slots** — when `double_chiti ≥ 2`, the form shows X numbered bid-entry blocks stacked vertically, e.g. "Winner 1", "Winner 2". Each block has its own winner picker + bid amount input + math preview. Admin can fill them in any order. Blocks not yet filled show dimmed placeholder text. When `double_chiti = 1`, only a single block (no numbering) is shown — the original UX.
 5. **Winner picker (per block)** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count` AND not already picked in another block this cycle. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins. The admin's own name appears with a "(you)" suffix.
 6. **(When admin selects themselves) Admin withdrawal toggle (per block)** — a toggle labeled "Use special share (admin withdrawal)". When ON: bid input is hidden and the withdrawal math preview is shown. Disabled with a note if already used.
 7. **(Regular month — withdrawal OFF) Winning bid amount (per block)** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
@@ -285,8 +285,8 @@ For the cycle being recorded:
 Eligible winners list:
 - For each membership: { user_id, name, share_count, wins_count, is_eligible, role, admin_withdrawal_used }
 
-X Chiti eligibility:
-- GET /groups/:group_id/chiti-eligibility → { x_chiti, label, eligible, total_basket, realized, unrealized }
+Double Chiti eligibility:
+- GET /groups/:group_id/chiti-eligibility → { double_chiti, label, eligible, total_basket, realized, unrealized }
 
 Basket state:
 - current_balance (for skip-month gating and running basket preview)
@@ -301,7 +301,7 @@ Basket state:
 - After all saves → redirect to admin dashboard.
 
 **API endpoints used:**
-- `GET /groups/:group_id/chiti-eligibility` — X Chiti banner + slot count.
+- `GET /groups/:group_id/chiti-eligibility` — Double Chiti banner + slot count.
 - `GET /groups/:group_id/members?eligible_to_win=true` — winner picker options.
 - `GET /groups/:group_id/basket` — for skip-month gating.
 - `POST .../record-winner` (called once per winner slot) or `POST .../declare-skip-month`.

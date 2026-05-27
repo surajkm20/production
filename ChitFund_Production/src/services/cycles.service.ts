@@ -1,6 +1,6 @@
 // Business logic for monthly cycle management.
-// Bid/winner data lives in cycle_winners (supports X Chiti: multiple winners per cycle).
-// X Chiti eligibility: x_chiti = floor(total_basket / pool_amount) + 1,
+// Bid/winner data lives in cycle_winners (supports Double Chiti: multiple winners per cycle).
+// Double Chiti eligibility: double_chiti = floor(total_basket / pool_amount) + 1,
 //   total_basket = realized (current_balance) + unrealized (outstanding loan principals + accrued interest owed).
 
 import { eq, and, desc, sum, count, sql, inArray, gt } from 'drizzle-orm';
@@ -78,16 +78,16 @@ export async function getChitiEligibility(userId: string, group_id: string) {
   }, 0);
 
   const total_basket = realized + unrealized;
-  const x_chiti     = Math.floor(total_basket / pool) + 1;
-  const eligible     = x_chiti >= 2;
+  const double_chiti = Math.floor(total_basket / pool) + 1;
+  const eligible     = double_chiti >= 2;
 
   return {
     realized,
     unrealized,
     total_basket,
     pool_amount: pool,
-    x_chiti,
-    label:    eligible ? chitiLabel(x_chiti) : '',
+    double_chiti,
+    label:    eligible ? chitiLabel(double_chiti) : '',
     eligible,
   };
 }
@@ -441,13 +441,13 @@ export async function recordWinner(
     });
 
     if (!is_admin_withdrawal) {
-      // Compute aggregate deltas: +basket_credit credited, +pool debited for X Chiti slots
-      const xChitiDebit = nextSlot > 1 ? pool : 0;
+      // Compute aggregate deltas: +basket_credit credited, +pool debited for Double Chiti slots
+      const doubleChitiDebit = nextSlot > 1 ? pool : 0;
       await tx.update(baskets)
         .set({
           current_balance: basket_balance_after,
           total_credited:  Number(basket.total_credited) + basket_credit,
-          total_debited:   Number(basket.total_debited)  + xChitiDebit,
+          total_debited:   Number(basket.total_debited)  + doubleChitiDebit,
         })
         .where(eq(baskets.id, basket.id));
 
@@ -455,11 +455,11 @@ export async function recordWinner(
         await tx.insert(basket_transactions).values({
           basket_id:            basket.id,
           cycle_id,
-          txn_type:             'DEBIT_X_CHITI',
+          txn_type:             'DEBIT_DOUBLE_CHITI',
           amount:               pool,
           direction:            'D',
           counterparty_user_id: winner_user_id,
-          notes:                `X Chiti payout — winner ${nextSlot}`,
+          notes:                `Double Chiti payout — winner ${nextSlot}`,
           created_by:           userId,
         });
       }

@@ -23,7 +23,7 @@ function formatShortDate(iso: string) {
 
 // Each row is a button that navigates to CycleDetailPage.
 // Pending cycles are disabled (not yet started, no detail to show).
-// Payment-free cycles (saved by X Chiti) are also non-clickable but styled in teal.
+// Payment-free cycles (saved by Double Chiti) are also non-clickable but styled in teal.
 function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPaymentFree?: boolean; onClick?: () => void }) {
   const isPending = cycle.status === 'Pending'
   const isDisabled = isPending || isPaymentFree
@@ -53,17 +53,17 @@ function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPayme
         {isPaymentFree ? (
           <>
             <p className="text-xs font-medium text-teal-700">Payment-Free Month</p>
-            <p className="text-[11px] text-teal-500 mt-0.5">Saved by X Chiti — no payment needed</p>
+            <p className="text-[11px] text-teal-500 mt-0.5">Saved by Double Chiti — no payment needed</p>
           </>
         ) : isPending ? (
           <p className="text-xs text-gray-400">Opens {formatShortDate(cycle.due_date)}</p>
         ) : (cycle.winners?.length ?? 0) > 1 ? (
-          /* X Chiti: two winners */
+          /* Double Chiti: two winners */
           <>
             <p className="text-xs font-medium text-gray-800 truncate">{cycle.winners[0].name}</p>
             <p className="text-[10px] text-gray-500 truncate">{cycle.winners[1].name}</p>
             <span className="inline-block mt-0.5 text-[9px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-1.5 py-0.5">
-              2× X Chiti
+              2× Double Chiti
             </span>
           </>
         ) : (cycle.winners?.length ?? 0) === 1 ? (
