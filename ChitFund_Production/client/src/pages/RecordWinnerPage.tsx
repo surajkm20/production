@@ -90,11 +90,11 @@ export default function RecordWinnerPage() {
   const bid        = Math.round(parseFloat(bidRupees) * 100) || 0
   const poolAmount = group?.pool_amount ?? 0
 
-  const currentCycle   = group?.current_cycle
-  const xChiti         = eligibility?.x_chiti ?? 1
-  const slotsRecorded  = currentCycle?.winners?.length ?? 0
-  const slotsRemaining = Math.max(0, xChiti - slotsRecorded)
-  const canRecord      = !!currentCycle && currentCycle.status === 'Open' && slotsRemaining > 0
+  const currentCycle  = group?.current_cycle
+  const slotsRecorded = currentCycle?.winners?.length ?? 0
+  // Admin can always attempt to record a winner on an open cycle.
+  // The backend enforces the Double Chitti financial validation and the 2-winner cap.
+  const canRecord     = !!currentCycle && currentCycle.status === 'Open'
 
   const winnerTakeaway = bid > 0 && bid < poolAmount ? poolAmount - bid : null
 
@@ -158,7 +158,7 @@ export default function RecordWinnerPage() {
               <div>
                 <p className="text-sm font-bold text-amber-800">{group.name} is eligible for {eligibility.label}!</p>
                 <p className="text-xs text-amber-600 mt-0.5">
-                  Total basket: {formatPaise(eligibility.total_basket)} · {xChiti} winners this cycle
+                  Total basket: {formatPaise(eligibility.total_basket)} · {eligibility.x_chiti} winners this cycle
                 </p>
                 <p className="text-[10px] text-amber-500 mt-1">
                   Realized {formatPaise(eligibility.realized)} + Unrealized {formatPaise(eligibility.unrealized)}
@@ -200,9 +200,9 @@ export default function RecordWinnerPage() {
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <p className="text-sm font-semibold text-gray-900 mb-1">
               {currentCycle!.month_label}
-              {xChiti >= 2 && (
+              {slotsRecorded >= 1 && (
                 <span className="ml-2 text-xs font-medium text-amber-600">
-                  Winner #{slotsRecorded + 1} of {xChiti}
+                  Winner #{slotsRecorded + 1}
                 </span>
               )}
             </p>
@@ -315,7 +315,7 @@ export default function RecordWinnerPage() {
                 disabled={submitting || !winnerId || (!isAdminWithdrawal && (bid <= 0 || bid >= poolAmount))}
                 className="w-full py-2.5 rounded-xl bg-maroon-600 hover:bg-maroon-700 disabled:opacity-60 text-sm font-semibold text-white transition"
               >
-                {submitting ? 'Recording…' : `Confirm winner${xChiti >= 2 ? ` #${slotsRecorded + 1}` : ''}`}
+                {submitting ? 'Recording…' : `Confirm winner${slotsRecorded >= 1 ? ` #${slotsRecorded + 1}` : ''}`}
               </button>
             </form>
           </div>
@@ -324,10 +324,10 @@ export default function RecordWinnerPage() {
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
             {!currentCycle ? (
               <p className="text-sm text-gray-400">No open cycle to record a winner for.</p>
-            ) : slotsRemaining === 0 && slotsRecorded > 0 ? (
+            ) : slotsRecorded >= 2 ? (
               <p className="text-sm text-gray-500">
-                All {xChiti >= 2 ? `${xChiti} ` : ''}winner{xChiti >= 2 ? 's' : ''} recorded for{' '}
-                <span className="font-medium text-gray-800">{currentCycle.month_label}</span>.
+                Both Double Chitti winners recorded for{' '}
+                <span className="font-medium text-gray-800">{currentCycle!.month_label}</span>.
               </p>
             ) : (
               <p className="text-sm text-gray-400">No open cycle to record a winner for.</p>

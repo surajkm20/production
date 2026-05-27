@@ -329,7 +329,7 @@ export async function recordWinner(
 
   const { winner_user_id, bid_amount, is_admin_withdrawal = false, notes } = data;
 
-  const [cycleRows, basketRows, winnerMemberRows, winnerActiveLoanRows, existingWinnersRows, groupRows, currentCycleRows] = await Promise.all([
+  const [cycleRows, basketRows, winnerMemberRows, winnerActiveLoanRows, existingWinnersRows, groupRows] = await Promise.all([
     db.select({
       id: monthly_cycles.id, status: monthly_cycles.status,
       is_skip_month: monthly_cycles.is_skip_month,
@@ -353,20 +353,14 @@ export async function recordWinner(
       .where(and(eq(baskets.group_id, group_id), eq(loans.borrower_user_id, winner_user_id), eq(loans.status, 'Active')))
       .limit(1),
 
-    // current winners in this cycle — for slot number + cap check
-    db.select({ winner_user_id: cycle_winners.winner_user_id, winner_number: cycle_winners.winner_number })
+    // current winners in this cycle — for slot number
+    db.select({ winner_user_id: cycle_winners.winner_user_id, winner_number: cycle_winners.winner_number, basket_credit: cycle_winners.basket_credit })
       .from(cycle_winners)
       .where(eq(cycle_winners.cycle_id, cycle_id))
       .orderBy(cycle_winners.winner_number),
 
     db.select({ pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate, status: chit_groups.status })
       .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
-
-    db.select({ month_number: monthly_cycles.month_number })
-      .from(monthly_cycles)
-      .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open')))
-      .orderBy(monthly_cycles.month_number)
-      .limit(1),
   ]);
 
   const cycle  = cycleRows[0];
@@ -378,30 +372,12 @@ export async function recordWinner(
   if (!cycle)                     throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
   if (cycle.status === 'Closed')  throw new AppError(409, 'CYCLE_CLOSED',    'Cycle is already closed.');
 
-  // Compute X Chiti cap
-  const realized   = Number(basket.current_balance);
-  const pool       = Number(group.pool_amount);
-  const currentMonth = currentCycleRows[0]?.month_number ?? 1;
+  const realized = Number(basket.current_balance);
+  const pool     = Number(group.pool_amount);
+  const nextSlot = existingWinnersRows.length + 1;
 
-  const activeLoans = await db.select({
-    principal: loans.principal,
-    monthly_interest_rate: loans.monthly_interest_rate,
-    disbursement_month_number: loans.disbursement_month_number,
-    total_interest_paid: loans.total_interest_paid,
-  })
-  .from(loans)
-  .innerJoin(baskets, eq(baskets.id, loans.basket_id))
-  .where(and(eq(baskets.group_id, group_id), eq(loans.status, 'Active')));
-
-  const unrealized = activeLoans.reduce((acc, loan) => {
-    const elapsed = Math.max(0, currentMonth - Number(loan.disbursement_month_number));
-    return acc + Number(loan.principal) + computeOutstandingInterest(elapsed, Number(loan.principal), Number(loan.monthly_interest_rate), Number(loan.total_interest_paid));
-  }, 0);
-
-  const x_chiti     = Math.floor((realized + unrealized) / pool) + 1;
-  const nextSlot    = existingWinnersRows.length + 1;
-
-  if (nextSlot > x_chiti) throw new AppError(409, 'CHITI_SLOTS_FULL', `All ${x_chiti} winner slot(s) for this cycle are already filled.`);
+  // Double Chitti cap: maximum 2 winners per cycle.
+  if (nextSlot > 2) throw new AppError(409, 'CHITI_SLOTS_FULL', 'Double Chitti only supports 2 winners per cycle. Both slots are already filled.');
 
   const winner = winnerMemberRows[0];
   if (!winner || Number(winner.wins_count) >= Number(winner.share_count)) {
@@ -432,6 +408,21 @@ export async function recordWinner(
     winner_takeaway      = pool - bid_amount;
     // For slot > 1 the basket funds the payout, so deduct pool_amount and then credit back basket_credit
     basket_balance_after = realized + basket_credit - (nextSlot > 1 ? pool : 0);
+
+    // ── Double Chitti financial validation (slot 2 only) ────────────────────
+    // Validate at payout time: bid1_basket_credit + bid2_basket_credit + basket_balance >= pool_amount.
+    // If the condition is not met, the basket cannot fund the second payout.
+    if (nextSlot === 2) {
+      const winner1BasketCredit = Number(existingWinnersRows[0]?.basket_credit ?? 0);
+      const totalAvailable      = winner1BasketCredit + basket_credit + realized;
+      if (totalAvailable < pool) {
+        throw new AppError(
+          400,
+          'DOUBLE_CHITTI_INSUFFICIENT',
+          `Double Chitti not possible: Basket Balance + Bid Discounts (${paiseToRupeeDisplay(totalAvailable)}) is less than Pool Amount (${paiseToRupeeDisplay(pool)}).`,
+        );
+      }
+    }
   }
 
   await db.transaction(async (tx) => {
@@ -513,7 +504,7 @@ export async function recordWinner(
   ]);
 
   const winnerName = winnerRow?.name ?? 'A member';
-  const slotSuffix = x_chiti >= 2 ? ` (winner ${nextSlot} of ${x_chiti})` : '';
+  const slotSuffix = nextSlot >= 2 ? ` (winner ${nextSlot})` : '';
   const title      = `Winner announced — ${cycle.month_label}`;
   const body       = is_admin_withdrawal
     ? `${winnerName} (admin) withdrew the full pool of ${paiseToRupeeDisplay(pool)}.`
