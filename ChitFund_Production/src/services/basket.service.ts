@@ -431,16 +431,24 @@ export async function listLoans(
     conditions.push(eq(loans.status, dbStatus));
   }
 
+  // Alias for disbursement cycle lookup
+  const disbCycle = alias(monthly_cycles, 'disb_cycle');
+
   const [rows, [cycleRow]] = await Promise.all([
     db.select({
       loan_id: loans.id, borrower_user_id: loans.borrower_user_id, borrower_name: users.name,
       principal: loans.principal, monthly_interest_rate: loans.monthly_interest_rate,
       disbursement_month_number: loans.disbursement_month_number,
+      disbursement_month_label: disbCycle.month_label,
       total_interest_paid: loans.total_interest_paid,
       disbursed_at: loans.disbursed_at, expected_close_date: loans.expected_close_date, status: loans.status,
     })
     .from(loans)
     .innerJoin(users, eq(users.id, loans.borrower_user_id))
+    .leftJoin(disbCycle, and(
+      eq(disbCycle.group_id, group_id),
+      eq(disbCycle.month_number, loans.disbursement_month_number),
+    ))
     .where(and(...conditions))
     .orderBy(desc(loans.disbursed_at)),
 
@@ -452,15 +460,66 @@ export async function listLoans(
 
   const currentMonth = cycleRow?.current_month ?? 0;
 
+  if (rows.length === 0) return [];
+
+  // Fetch repayment basket_transactions for all loans in one query
+  const loanIds = rows.map(r => r.loan_id);
+  const repayTxns = await db
+    .select({
+      related_loan_id:  basket_transactions.related_loan_id,
+      txn_type:         basket_transactions.txn_type,
+      amount:           basket_transactions.amount,
+      cycle_month_number: monthly_cycles.month_number,
+      cycle_month_label:  monthly_cycles.month_label,
+      created_at:       basket_transactions.created_at,
+    })
+    .from(basket_transactions)
+    .leftJoin(monthly_cycles, eq(monthly_cycles.id, basket_transactions.cycle_id))
+    .where(and(
+      sql`${basket_transactions.related_loan_id} = ANY(${sql.raw(`ARRAY[${loanIds.map(id => `'${id}'`).join(',')}]::uuid[]`)})`,
+      sql`${basket_transactions.txn_type} IN ('LOAN_REPAID', 'INTEREST_ACCRUED')`,
+    ))
+    .orderBy(basket_transactions.created_at);
+
+  // Group repayment txns by loan_id
+  type RepayTxn = typeof repayTxns[number];
+  const repayByLoan = new Map<string, RepayTxn[]>();
+  for (const txn of repayTxns) {
+    if (!txn.related_loan_id) continue;
+    const list = repayByLoan.get(txn.related_loan_id) ?? [];
+    list.push(txn);
+    repayByLoan.set(txn.related_loan_id, list);
+  }
+
   return rows.map(r => {
     const cyclesElapsed = Math.max(0, currentMonth - r.disbursement_month_number);
+    const loanTxns      = repayByLoan.get(r.loan_id) ?? [];
+
+    // Build repayment_history: one entry per (cycle, txn_type)
+    const repaymentHistory = loanTxns.map(t => ({
+      txn_type:           t.txn_type,   // 'LOAN_REPAID' | 'INTEREST_ACCRUED'
+      amount:             t.amount,
+      cycle_month_number: t.cycle_month_number ?? null,
+      cycle_month_label:  t.cycle_month_label  ?? null,
+      cycle_label:        t.cycle_month_number ? `Cycle ${t.cycle_month_number}` : null,
+    }));
+
+    // Settlement cycle = the LOAN_REPAID txn (principal repayment closes the loan)
+    const settlementTxn = loanTxns.find(t => t.txn_type === 'LOAN_REPAID');
+    const settlement_cycle_number = settlementTxn?.cycle_month_number ?? null;
+    const settlement_cycle_label  = settlementTxn?.cycle_month_label  ?? null;
+
     return {
       ...r,
+      disbursement_month_label: r.disbursement_month_label ?? null,
       cycle_label: `Cycle ${r.disbursement_month_number}`,
       outstanding_interest: r.status === 'Active'
         ? computeOutstandingInterest(cyclesElapsed, Number(r.principal), Number(r.monthly_interest_rate), Number(r.total_interest_paid))
         : 0,
-      next_cycle_due_date: computeNextDueDate(r.disbursed_at, r.status),
+      next_cycle_due_date:     computeNextDueDate(r.disbursed_at, r.status),
+      repayment_history:       repaymentHistory,
+      settlement_cycle_number,
+      settlement_cycle_label,
     };
   });
 }

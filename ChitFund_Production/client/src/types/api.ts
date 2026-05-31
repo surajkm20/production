@@ -188,6 +188,16 @@ export interface BasketOverview {
   my_share_if_closed_today?: number
 }
 
+export interface LoanRepaymentHistoryItem {
+  /** 'LOAN_REPAID' = principal repayment; 'INTEREST_ACCRUED' = interest payment */
+  txn_type: 'LOAN_REPAID' | 'INTEREST_ACCRUED'
+  amount: number
+  cycle_month_number: number | null
+  cycle_month_label: string | null
+  /** e.g. "Cycle 5" */
+  cycle_label: string | null
+}
+
 export interface Loan {
   loan_id: string
   borrower_user_id: string
@@ -195,6 +205,8 @@ export interface Loan {
   principal: number
   monthly_interest_rate: string
   disbursement_month_number: number
+  /** e.g. "Nov 2025" */
+  disbursement_month_label: string | null
   cycle_label: string
   total_interest_paid: number
   outstanding_interest: number
@@ -203,6 +215,11 @@ export interface Loan {
   status: 'Active' | 'Repaid' | 'WrittenOff'
   next_cycle_due_date: string | null
   notes: string | null
+  repayment_history: LoanRepaymentHistoryItem[]
+  /** Cycle number in which the loan was fully settled (principal repaid) */
+  settlement_cycle_number: number | null
+  /** Month label of the settlement cycle, e.g. "Feb 2026" */
+  settlement_cycle_label: string | null
 }
 
 export interface BulkRepayResponse {
