@@ -391,23 +391,20 @@ export async function recordWinner(
     if (winner.admin_withdrawal_used) throw new AppError(409, 'WITHDRAWAL_ALREADY_USED', 'The admin withdrawal (special share) has already been used for this group.');
   }
 
-  let stored_bid: number, admin_commission: number, basket_credit: number, winner_takeaway: number, basket_balance_after: number;
+  let stored_bid: number, admin_commission: number, basket_credit: number, winner_takeaway: number;
   if (is_admin_withdrawal) {
-    stored_bid           = 0;
-    admin_commission     = 0;
-    basket_credit        = 0;
-    winner_takeaway      = pool;
-    basket_balance_after = realized;
+    stored_bid       = 0;
+    admin_commission = 0;
+    basket_credit    = 0;
+    winner_takeaway  = pool;
   } else {
     if (bid_amount <= 0)        throw new AppError(400, 'BID_NEGATIVE_OR_ZERO', 'bid_amount must be greater than 0.');
     if (bid_amount > pool)      throw new AppError(400, 'BID_EXCEEDS_POOL',     'bid_amount cannot exceed the group pool amount.');
-    stored_bid           = bid_amount;
-    admin_commission     = Math.round(pool * commission_rate / 100);
-    basket_credit        = bid_amount - admin_commission;
+    stored_bid       = bid_amount;
+    admin_commission = Math.round(pool * commission_rate / 100);
+    basket_credit    = bid_amount - admin_commission;
     if (basket_credit < 0)      throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${admin_commission} paise).`);
-    winner_takeaway      = pool - bid_amount;
-    // For slot > 1 the basket funds the payout, so deduct pool_amount and then credit back basket_credit
-    basket_balance_after = realized + basket_credit - (nextSlot > 1 ? pool : 0);
+    winner_takeaway  = pool - bid_amount;
 
     // ── Double Chitti financial validation (slot 2 only) ────────────────────
     // Validate at payout time: bid1_basket_credit + bid2_basket_credit + basket_balance >= pool_amount.
@@ -441,13 +438,13 @@ export async function recordWinner(
     });
 
     if (!is_admin_withdrawal) {
-      // Compute aggregate deltas: +basket_credit credited, +pool debited for Double Chiti slots
+      // Use atomic SQL increments — safe under retries; no stale snapshot math.
       const doubleChitiDebit = nextSlot > 1 ? pool : 0;
       await tx.update(baskets)
         .set({
-          current_balance: basket_balance_after,
-          total_credited:  Number(basket.total_credited) + basket_credit,
-          total_debited:   Number(basket.total_debited)  + doubleChitiDebit,
+          current_balance: sql`${baskets.current_balance} + ${basket_credit} - ${doubleChitiDebit}`,
+          total_credited:  sql`${baskets.total_credited} + ${basket_credit}`,
+          total_debited:   sql`${baskets.total_debited} + ${doubleChitiDebit}`,
         })
         .where(eq(baskets.id, basket.id));
 

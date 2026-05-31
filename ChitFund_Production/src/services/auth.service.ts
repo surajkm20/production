@@ -66,14 +66,56 @@ export async function signup(data: {
   password: string;
   username?: string;
 }): Promise<{ user_id: string; otp_sent: boolean; otp_expires_at: Date }> {
-  // Check mobile not already taken
+  // Check if the mobile number already exists in the users table
   const [existingMobile] = await db
-    .select({ id: users.id })
+    .select({ id: users.id, password_hash: users.password_hash, mobile_verified: users.mobile_verified })
     .from(users)
     .where(and(eq(users.mobile_number, data.mobile_number), isNull(users.deleted_at)))
     .limit(1);
+
   if (existingMobile) {
-    throw new AppError(409, 'MOBILE_TAKEN', 'This mobile number is already registered.');
+    // Stub accounts are created by admins pre-adding members before they sign up.
+    // A stub account has mobile_verified=false AND a non-bcrypt password_hash
+    // (the addMember service inserts randomBytes(32).toString('hex') — never starts with '$2').
+    // If the row is a stub, allow the real person to claim it by updating it in-place.
+    const isStub = !existingMobile.mobile_verified && !existingMobile.password_hash.startsWith('$2');
+    if (!isStub) {
+      throw new AppError(409, 'MOBILE_TAKEN', 'This mobile number is already registered.');
+    }
+
+    // Claiming a stub: check username uniqueness before mutating
+    if (data.username) {
+      const [existingUsername] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.username, data.username), isNull(users.deleted_at)))
+        .limit(1);
+      if (existingUsername) {
+        throw new AppError(409, 'USERNAME_TAKEN', 'This username is already taken.');
+      }
+    }
+
+    const password_hash = await bcrypt.hash(data.password, 10);
+
+    // Update the stub in-place — all memberships already reference this user_id,
+    // so payment history, loans, etc. remain intact automatically.
+    await db
+      .update(users)
+      .set({
+        name:            data.name,
+        password_hash,
+        username:        data.username ?? null,
+        mobile_verified: true, // OTP_BYPASS: set via OTP flow when MSG91/DLT is enabled
+        updated_at:      new Date(),
+      })
+      .where(eq(users.id, existingMobile.id));
+
+    // OTP_BYPASS: uncomment below and remove mobile_verified:true above when MSG91/DLT is ready
+    // const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
+    // return { user_id: existingMobile.id, otp_sent: true, otp_expires_at };
+
+    const otp_expires_at = new Date();
+    return { user_id: existingMobile.id, otp_sent: false, otp_expires_at };
   }
 
   // Check username not already taken (if provided)

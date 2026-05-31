@@ -90,3 +90,18 @@ npx tsc --noEmit     # type-check without building
 - Errors thrown via `AppError` (from `src/utils/AppError.ts`) — the global `errorHandler` catches them.
 - Response shape standardised via `src/utils/response.ts` helpers.
 - Validators live in `src/validators/` and are applied via `validate` middleware before controllers.
+
+## Known risks & gaps (gap analysis 2026-05-29)
+
+### Fixed
+- **`payments.service.ts:137`** — Waived payment now clears `paid_amount = 0`. Previously, transitioning a Paid payment to Waived left the old `paid_amount` in place.
+
+### Outstanding — Low
+- **Double-submit race in `recordWinner` (`cycles.service.ts`)** — Only one admin per group, so a true two-user race is impossible. Risk is limited to double-click / network retry: both requests pre-compute `basket_balance_after` from the same stale snapshot; the `uniq_cycle_slot` DB constraint rejects the duplicate winner insert and rolls back the whole transaction, so the basket update is also rolled back. The balance itself is safe; the only leak is if a retry lands after the first fully commits and updates `total_credited` twice. Fix (low priority): use SQL-level atomic increments (`sql\`${baskets.current_balance} + ${delta}\``) instead of snapshot-based absolute sets, and re-query winner count inside the transaction for a clean 409 instead of a raw DB error.
+
+### Outstanding — Medium
+- **Notification failures silently swallowed** — `notify(...).catch(() => {})` fire-and-forget pattern means missed notifications are never logged. Add at minimum an error log inside the catch.
+- **Interest rounding** — `Math.round(principal * rate / 100)` instead of `Math.floor`. Both are used; pick one and apply consistently to avoid sub-paise drift across many loans.
+
+### Resolved — Not a bug
+- **`total_needed = pool + adminCommission` in final cycle** — Intentional per requirements Locked Decision #21 and F-6a. In the final cycle there is no bid, so admin commission cannot be carved from a bid sacrifice; it is explicitly added to `total_needed` so members + basket collectively cover both the pool payout and the admin's fee for that month.

@@ -134,7 +134,7 @@ export async function updatePayment(
   } else if (new_status === 'Unpaid') {
     updateSet.status = 'Unpaid'; updateSet.paid_at = null; updateSet.marked_by = null; updateSet.paid_amount = 0;
   } else if (new_status === 'Waived') {
-    updateSet.status = 'Waived'; updateSet.paid_at = null; updateSet.marked_by = null;
+    updateSet.status = 'Waived'; updateSet.paid_at = null; updateSet.marked_by = null; updateSet.paid_amount = 0;
   } else {
     if (new_paid_amount != null) updateSet.paid_amount = new_paid_amount;
   }
