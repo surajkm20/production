@@ -24,6 +24,7 @@ const envSchema = z.object({
   OTP_MAX_ATTEMPTS:         z.coerce.number().default(5),
 
   MSG91_AUTH_KEY:                    z.string().default(''),
+  MSG91_SENDER_ID:                   z.string().default('HORNPY'),
   MSG91_TEMPLATE_ID_LOGIN:           z.string().default(''),
   MSG91_TEMPLATE_ID_PASSWORD_RESET:  z.string().default(''),
 

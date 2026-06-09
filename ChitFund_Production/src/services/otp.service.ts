@@ -106,7 +106,8 @@ async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose
         },
         body: JSON.stringify({
           template_id: templateId,
-          mobile: mobileNumber.replace('+', ''),
+          sender:      env.MSG91_SENDER_ID,
+          mobile:      mobileNumber.replace('+', ''),
           otp,
         }),
       });
