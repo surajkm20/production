@@ -97,6 +97,13 @@ async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose
       ? env.MSG91_TEMPLATE_ID_PASSWORD_RESET
       : env.MSG91_TEMPLATE_ID_LOGIN;
 
+    console.log('[MSG91] payload:', {
+      template_id: templateId,
+      sender:      env.MSG91_SENDER_ID,
+      mobile:      mobileNumber.replace('+', ''),
+      otp,
+    });
+
     try {
       const res = await fetch('https://control.msg91.com/api/v5/otp', {
         method: 'POST',
