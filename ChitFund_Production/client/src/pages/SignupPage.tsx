@@ -62,14 +62,6 @@ export default function SignupPage() {
       // On success, backend creates the user and sends an OTP SMS
       const data = await api.post<SignupResponse>('/auth/signup', payload)
 
-      // OTP_BYPASS: when otp_sent is false (MSG91 not configured), account is already
-      // verified — skip OTP and go straight to login.
-      // TODO: remove this branch and always navigate('/otp', ...) when MSG91/DLT is live.
-      if (!data.otp_sent) {
-        navigate('/login', { state: { accountCreated: true } })
-        return
-      }
-
       // Navigate to OTP page, passing context via router state (not URL params).
       // OtpPage reads this state to know which number to verify and when the OTP expires.
       navigate('/otp', {
@@ -198,7 +190,7 @@ export default function SignupPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Creating account...
+                  Sending OTP...
                 </span>
               ) : 'Create account'}
             </button>

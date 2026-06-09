@@ -102,20 +102,15 @@ export async function signup(data: {
     await db
       .update(users)
       .set({
-        name:            data.name,
+        name:       data.name,
         password_hash,
-        username:        data.username ?? null,
-        mobile_verified: true, // OTP_BYPASS: set via OTP flow when MSG91/DLT is enabled
-        updated_at:      new Date(),
+        username:   data.username ?? null,
+        updated_at: new Date(),
       })
       .where(eq(users.id, existingMobile.id));
 
-    // OTP_BYPASS: uncomment below and remove mobile_verified:true above when MSG91/DLT is ready
-    // const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
-    // return { user_id: existingMobile.id, otp_sent: true, otp_expires_at };
-
-    const otp_expires_at = new Date();
-    return { user_id: existingMobile.id, otp_sent: false, otp_expires_at };
+    const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
+    return { user_id: existingMobile.id, otp_sent: true, otp_expires_at };
   }
 
   // Check username not already taken (if provided)
@@ -139,16 +134,11 @@ export async function signup(data: {
       mobile_number: data.mobile_number,
       password_hash,
       username:      data.username,
-      mobile_verified: true, // OTP_BYPASS: remove this line when OTP is enabled
     })
     .returning({ id: users.id });
 
-  // OTP_BYPASS: uncomment below and remove mobile_verified:true above when MSG91/DLT is ready
-  // const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
-  // return { user_id: user.id, otp_sent: true, otp_expires_at };
-
-  const otp_expires_at = new Date();
-  return { user_id: user.id, otp_sent: false, otp_expires_at };
+  const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
+  return { user_id: user.id, otp_sent: true, otp_expires_at };
 }
 
 export async function verifySignupOtp(
@@ -197,10 +187,9 @@ export async function login(
     throw new AppError(404, 'USER_NOT_FOUND', 'No account found. Please sign up first.');
   }
 
-  // OTP_BYPASS: uncomment below when OTP is enabled
-  // if (!user.mobile_verified) {
-  //   throw new AppError(401, 'MOBILE_NOT_VERIFIED', 'Please verify your mobile number first.');
-  // }
+  if (!user.mobile_verified) {
+    throw new AppError(401, 'MOBILE_NOT_VERIFIED', 'Please verify your mobile number first.');
+  }
 
   const passwordMatch = await bcrypt.compare(password, user.password_hash);
   if (!passwordMatch) {
@@ -268,13 +257,7 @@ export async function forgotPassword(
   // Always return the same response shape — don't reveal whether mobile exists
   if (!user) {
     const fakeExpiry = new Date(Date.now() + env.OTP_EXPIRY_MINUTES * 60 * 1000);
-    return { otp_sent: false, otp_expires_at: fakeExpiry };
-  }
-
-  // OTP_BYPASS: skip OTP when MSG91 is not configured
-  if (!env.MSG91_AUTH_KEY) {
-    const fakeExpiry = new Date(Date.now() + env.OTP_EXPIRY_MINUTES * 60 * 1000);
-    return { otp_sent: false, otp_expires_at: fakeExpiry };
+    return { otp_sent: true, otp_expires_at: fakeExpiry };
   }
 
   const { otp_expires_at } = await otpService.sendOtp(mobileNumber, 'password_reset');
@@ -287,20 +270,6 @@ export async function resetPassword(
   newPassword: string,
 ): Promise<{ success: boolean }> {
   const now = new Date();
-
-  // OTP_BYPASS: skip OTP verification when MSG91 is not configured
-  if (!env.MSG91_AUTH_KEY) {
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.mobile_number, mobileNumber), isNull(users.deleted_at)))
-      .limit(1);
-    if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found.');
-    const newHash = await bcrypt.hash(newPassword, 10);
-    await db.update(users).set({ password_hash: newHash, updated_at: now }).where(eq(users.id, user.id));
-    await db.update(refresh_tokens).set({ revoked_at: now }).where(and(eq(refresh_tokens.user_id, user.id), isNull(refresh_tokens.revoked_at)));
-    return { success: true };
-  }
 
   // Accepts the OTP row whether or not verify-otp was called first (covers both UX flows)
   const [otpRow] = await db

@@ -28,10 +28,9 @@ export default function LoginPage() {
   // useLocation: read the current URL + any state passed via navigate()
   // OtpPage navigates here with { state: { verified: true } } after successful verification
   const location = useLocation()
-  const locationState = location.state as { verified?: boolean; passwordReset?: boolean; accountCreated?: boolean } | null
-  const verified       = locationState?.verified       ?? false
-  const passwordReset  = locationState?.passwordReset  ?? false
-  const accountCreated = locationState?.accountCreated ?? false
+  const locationState = location.state as { verified?: boolean; passwordReset?: boolean } | null
+  const verified      = locationState?.verified      ?? false
+  const passwordReset = locationState?.passwordReset ?? false
 
   // useState holds form field values. Every keystroke updates these variables
   // and React re-renders the input to show the new value.
@@ -102,12 +101,12 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 px-6 py-8">
 
           {/* Green banner shown after account creation, OTP verification, or password reset */}
-          {(verified || passwordReset || accountCreated) && (
+          {(verified || passwordReset) && (
             <div className="mb-5 flex gap-2 items-start bg-green-50 text-green-700 text-sm rounded-lg px-4 py-3 border border-green-200">
               <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
               </svg>
-              {passwordReset ? 'Password reset successfully! You can now sign in.' : accountCreated ? 'Account created! You can now sign in.' : 'Account verified! You can now sign in.'}
+              {passwordReset ? 'Password reset successfully! You can now sign in.' : 'Account verified! You can now sign in.'}
             </div>
           )}
 

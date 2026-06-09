@@ -33,7 +33,7 @@ export async function sendOtp(
     expires_at,
   });
 
-  await deliverSms(mobileNumber, otp);
+  await deliverSms(mobileNumber, otp, purpose);
 
   return { otp_expires_at: expires_at };
 }
@@ -84,15 +84,19 @@ export async function verifyOtp(
     .where(eq(otp_verifications.id, row.id));
 }
 
-async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
+async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose): Promise<void> {
   let status: 'Sent' | 'Failed' = 'Sent';
   let errorMessage: string | undefined;
   let providerMsgId: string | undefined;
 
-  if (env.NODE_ENV !== 'production' || !env.MSG91_AUTH_KEY) {
-    // Skip real SMS in dev/test, or when MSG91 is not yet configured
+  if (env.NODE_ENV !== 'production') {
+    // Skip real SMS in dev/test
     console.log(`[OTP] ${mobileNumber} → ${otp}`);
   } else {
+    const templateId = purpose === 'password_reset'
+      ? env.MSG91_TEMPLATE_ID_PASSWORD_RESET
+      : env.MSG91_TEMPLATE_ID_LOGIN;
+
     try {
       const res = await fetch('https://control.msg91.com/api/v5/otp', {
         method: 'POST',
@@ -101,7 +105,7 @@ async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
           authkey: env.MSG91_AUTH_KEY,
         },
         body: JSON.stringify({
-          template_id: env.MSG91_TEMPLATE_ID,
+          template_id: templateId,
           mobile: mobileNumber.replace('+', ''),
           otp,
         }),
