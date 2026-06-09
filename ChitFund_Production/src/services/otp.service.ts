@@ -111,11 +111,11 @@ async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose
         }),
       });
 
-      if (!res.ok) {
-        status        = 'Failed';
-        errorMessage  = `HTTP ${res.status}`;
+      const data = (await res.json()) as { request_id?: string; message?: string; type?: string };
+      if (!res.ok || data.type === 'error') {
+        status       = 'Failed';
+        errorMessage = data.message ?? `HTTP ${res.status}`;
       } else {
-        const data    = (await res.json()) as { request_id?: string };
         providerMsgId = data.request_id;
       }
     } catch (err) {
