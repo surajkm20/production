@@ -134,7 +134,10 @@ async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
         }),
       });
 
-      const data = (await res.json()) as { request_id?: string; message?: string; type?: string };
+      const responseText = await res.text();
+      console.log('MSG91 Status:', res.status);
+      console.log('MSG91 Response:', responseText);
+      const data = JSON.parse(responseText) as { request_id?: string; message?: string; type?: string };
       if (!res.ok || data.type === 'error') {
         status       = 'Failed';
         errorMessage = data.message ?? `HTTP ${res.status}`;
