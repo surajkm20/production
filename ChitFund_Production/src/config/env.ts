@@ -23,10 +23,9 @@ const envSchema = z.object({
   OTP_EXPIRY_MINUTES:       z.coerce.number().default(10),
   OTP_MAX_ATTEMPTS:         z.coerce.number().default(5),
 
-  MSG91_AUTH_KEY:                    z.string().default(''),
-  MSG91_SENDER_ID:                   z.string().default('HORNPY'),
-  MSG91_TEMPLATE_ID_LOGIN:           z.string().default(''),
-  MSG91_TEMPLATE_ID_PASSWORD_RESET:  z.string().default(''),
+  MSG91_AUTH_KEY:    z.string().default(''),
+  MSG91_SENDER_ID:   z.string().default('HORNPY'),
+  HORNPAY_OTP:       z.string().default(''),
 
   VAPID_PUBLIC_KEY:         z.string().default(''),
   VAPID_PRIVATE_KEY:        z.string().default(''),

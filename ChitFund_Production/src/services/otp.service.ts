@@ -33,7 +33,7 @@ export async function sendOtp(
     expires_at,
   });
 
-  await deliverSms(mobileNumber, otp, purpose);
+  await deliverSms(mobileNumber, otp);
 
   return { otp_expires_at: expires_at };
 }
@@ -84,7 +84,7 @@ export async function verifyOtp(
     .where(eq(otp_verifications.id, row.id));
 }
 
-async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose): Promise<void> {
+async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
   let status: 'Sent' | 'Failed' = 'Sent';
   let errorMessage: string | undefined;
   let providerMsgId: string | undefined;
@@ -93,10 +93,6 @@ async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose
     // Skip real SMS in dev/test
     console.log(`[OTP] ${mobileNumber} → ${otp}`);
   } else {
-    const templateId = purpose === 'password_reset'
-      ? env.MSG91_TEMPLATE_ID_PASSWORD_RESET
-      : env.MSG91_TEMPLATE_ID_LOGIN;
-
     try {
       const res = await fetch('https://control.msg91.com/api/v5/flow/', {
         method: 'POST',
@@ -105,7 +101,7 @@ async function deliverSms(mobileNumber: string, otp: string, purpose: OtpPurpose
           authkey: env.MSG91_AUTH_KEY,
         },
         body: JSON.stringify({
-          flow_id: templateId,
+          flow_id: env.HORNPAY_OTP,
           sender:  env.MSG91_SENDER_ID,
           mobiles: mobileNumber.replace('+', ''),
           OTP:     otp,
