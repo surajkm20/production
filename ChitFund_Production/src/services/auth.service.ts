@@ -113,12 +113,9 @@ export async function signup(data: {
       return { user_id: existingMobile.id, otp_sent: true, otp_expires_at };
     }
 
-    // Plain orphan (no memberships): soft-delete it and fall through to the new-user path.
-    // This lets the person retry signup cleanly without "mobile already registered" errors.
-    await db
-      .update(users)
-      .set({ deleted_at: new Date() })
-      .where(eq(users.id, existingMobile.id));
+    // Plain orphan (no memberships): hard-delete so the mobile_number unique slot is freed.
+    // Soft-delete would leave a ghost row that blocks the INSERT in verifySignupOtp.
+    await db.delete(users).where(eq(users.id, existingMobile.id));
   }
 
   // New user path — no existing record (or orphan was just soft-deleted above).
