@@ -31,6 +31,10 @@ export const otp_verifications = pgTable('otp_verifications', {
   verified_at:   timestamp('verified_at', { withTimezone: true }),
   attempts:      smallint('attempts').notNull().default(0),
   created_at:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // JSON blob for new-user signup path: { name, password_hash, username? }.
+  // Present when sendOtp is called before the user row exists; null for stub-claiming.
+  // Consumed by verifySignupOtp to create the user only after OTP is confirmed.
+  pending_data:  text('pending_data'),
 });
 
 export const refresh_tokens = pgTable('refresh_tokens', {

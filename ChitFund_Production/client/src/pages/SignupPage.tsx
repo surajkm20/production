@@ -14,7 +14,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 // Shape of the backend's response on successful signup.
 // Backend triggers OTP send and returns when it expires.
 interface SignupResponse {
-  user_id: string
+  user_id?: string   // present for stub/orphan-with-membership claiming; absent for new users
   otp_sent: boolean
   otp_expires_at: string
 }

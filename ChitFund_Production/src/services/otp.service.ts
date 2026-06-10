@@ -21,16 +21,36 @@ function generateOtp(): string {
 export async function sendOtp(
   mobileNumber: string,
   purpose: OtpPurpose,
+  pendingData?: string,
 ): Promise<{ otp_expires_at: Date }> {
   const otp        = generateOtp();
   const otp_hash   = await bcrypt.hash(otp, 10);
   const expires_at = new Date(Date.now() + env.OTP_EXPIRY_MINUTES * 60 * 1000);
+
+  // On a resend (no pendingData passed), carry forward pending_data from the
+  // most recent signup OTP so verifySignupOtp can still create the user row.
+  let resolvedPendingData = pendingData ?? null;
+  if (purpose === 'signup' && pendingData === undefined) {
+    const [prev] = await db
+      .select({ pending_data: otp_verifications.pending_data })
+      .from(otp_verifications)
+      .where(
+        and(
+          eq(otp_verifications.mobile_number, mobileNumber),
+          eq(otp_verifications.purpose, 'signup'),
+        ),
+      )
+      .orderBy(desc(otp_verifications.created_at))
+      .limit(1);
+    resolvedPendingData = prev?.pending_data ?? null;
+  }
 
   await db.insert(otp_verifications).values({
     mobile_number: mobileNumber,
     otp_hash,
     purpose,
     expires_at,
+    pending_data: resolvedPendingData,
   });
 
   await deliverSms(mobileNumber, otp);
@@ -94,6 +114,12 @@ async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
     console.log(`[OTP] ${mobileNumber} → ${otp}`);
   } else {
     try {
+      console.log('MSG91 Request', {
+        flow_id: env.HORNPAY_OTP,
+        sender:  env.MSG91_SENDER_ID,
+        mobiles: mobileNumber.replace('+', ''),
+        var1:    otp,
+      });
       const res = await fetch('https://control.msg91.com/api/v5/flow/', {
         method: 'POST',
         headers: {
@@ -104,7 +130,7 @@ async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
           flow_id: env.HORNPAY_OTP,
           sender:  env.MSG91_SENDER_ID,
           mobiles: mobileNumber.replace('+', ''),
-          OTP:     otp,
+          var1:    otp,
         }),
       });
 

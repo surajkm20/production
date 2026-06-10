@@ -6,9 +6,9 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { eq, and, or, gt, isNull, desc } from 'drizzle-orm';
+import { eq, and, or, gt, isNull, isNotNull, desc } from 'drizzle-orm';
 import { db } from '../config/db';
-import { users, refresh_tokens, otp_verifications } from '../db/schema';
+import { users, refresh_tokens, otp_verifications, memberships } from '../db/schema';
 import { env } from '../config/env';
 import { AppError } from '../utils/AppError';
 import * as otpService from './otp.service';
@@ -65,8 +65,7 @@ export async function signup(data: {
   mobile_number: string;
   password: string;
   username?: string;
-}): Promise<{ user_id: string; otp_sent: boolean; otp_expires_at: Date }> {
-  // Check if the mobile number already exists in the users table
+}): Promise<{ user_id?: string; otp_sent: boolean; otp_expires_at: Date }> {
   const [existingMobile] = await db
     .select({ id: users.id, password_hash: users.password_hash, mobile_verified: users.mobile_verified })
     .from(users)
@@ -74,71 +73,69 @@ export async function signup(data: {
     .limit(1);
 
   if (existingMobile) {
-    // Stub accounts are created by admins pre-adding members before they sign up.
-    // A stub account has mobile_verified=false AND a non-bcrypt password_hash
-    // (the addMember service inserts randomBytes(32).toString('hex') — never starts with '$2').
-    // If the row is a stub, allow the real person to claim it by updating it in-place.
-    const isStub = !existingMobile.mobile_verified && !existingMobile.password_hash.startsWith('$2');
-    if (!isStub) {
+    if (existingMobile.mobile_verified) {
       throw new AppError(409, 'MOBILE_TAKEN', 'This mobile number is already registered.');
     }
 
-    // Claiming a stub: check username uniqueness before mutating
-    if (data.username) {
-      const [existingUsername] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(eq(users.username, data.username), isNull(users.deleted_at)))
+    // Stub: created by admin via addMember — non-bcrypt placeholder hash, may have group memberships.
+    // Orphan: leftover from a previous incomplete signup — bcrypt hash, should have no memberships.
+    const isStub = !existingMobile.password_hash.startsWith('$2');
+
+    // For an orphan, check whether an admin linked it to a group before signup completed.
+    // If so, treat it like a stub (update in-place) to keep memberships intact.
+    let orphanHasMembership = false;
+    if (!isStub) {
+      const [m] = await db
+        .select({ id: memberships.id })
+        .from(memberships)
+        .where(eq(memberships.user_id, existingMobile.id))
         .limit(1);
-      if (existingUsername) {
-        throw new AppError(409, 'USERNAME_TAKEN', 'This username is already taken.');
-      }
+      orphanHasMembership = !!m;
     }
 
-    const password_hash = await bcrypt.hash(data.password, 10);
+    if (isStub || orphanHasMembership) {
+      // Claimable record: update in-place so existing memberships keep referencing this user_id.
+      if (data.username) {
+        const [existingUsername] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.username, data.username), isNull(users.deleted_at)))
+          .limit(1);
+        if (existingUsername) throw new AppError(409, 'USERNAME_TAKEN', 'This username is already taken.');
+      }
+      const password_hash = await bcrypt.hash(data.password, 10);
+      await db
+        .update(users)
+        .set({ name: data.name, password_hash, username: data.username ?? null, updated_at: new Date() })
+        .where(eq(users.id, existingMobile.id));
+      // No pending_data — user already exists; verifySignupOtp will find the row and mark it verified.
+      const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
+      return { user_id: existingMobile.id, otp_sent: true, otp_expires_at };
+    }
 
-    // Update the stub in-place — all memberships already reference this user_id,
-    // so payment history, loans, etc. remain intact automatically.
+    // Plain orphan (no memberships): soft-delete it and fall through to the new-user path.
+    // This lets the person retry signup cleanly without "mobile already registered" errors.
     await db
       .update(users)
-      .set({
-        name:       data.name,
-        password_hash,
-        username:   data.username ?? null,
-        updated_at: new Date(),
-      })
+      .set({ deleted_at: new Date() })
       .where(eq(users.id, existingMobile.id));
-
-    const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
-    return { user_id: existingMobile.id, otp_sent: true, otp_expires_at };
   }
 
-  // Check username not already taken (if provided)
+  // New user path — no existing record (or orphan was just soft-deleted above).
   if (data.username) {
     const [existingUsername] = await db
       .select({ id: users.id })
       .from(users)
       .where(and(eq(users.username, data.username), isNull(users.deleted_at)))
       .limit(1);
-    if (existingUsername) {
-      throw new AppError(409, 'USERNAME_TAKEN', 'This username is already taken.');
-    }
+    if (existingUsername) throw new AppError(409, 'USERNAME_TAKEN', 'This username is already taken.');
   }
 
   const password_hash = await bcrypt.hash(data.password, 10);
-
-  const [user] = await db
-    .insert(users)
-    .values({
-      name:          data.name,
-      mobile_number: data.mobile_number,
-      password_hash,
-      username:      data.username,
-    })
-    .returning({ id: users.id });
-
-  const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup');
-  return { user_id: user.id, otp_sent: true, otp_expires_at };
+  // Store user fields in the OTP row; the actual users row is created only after OTP is confirmed.
+  const pendingData = JSON.stringify({ name: data.name, password_hash, username: data.username ?? null });
+  const { otp_expires_at } = await otpService.sendOtp(data.mobile_number, 'signup', pendingData);
+  return { otp_sent: true, otp_expires_at };
 }
 
 export async function verifySignupOtp(
@@ -148,23 +145,60 @@ export async function verifySignupOtp(
 ): Promise<{ user_id: string; access_token: string; refresh_token: string; expires_in: number }> {
   await otpService.verifyOtp(mobileNumber, otp, 'signup');
 
-  const [user] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.mobile_number, mobileNumber), isNull(users.deleted_at)))
+  // Fetch the OTP row that was just verified to check for pending_data.
+  const [otpRow] = await db
+    .select({ pending_data: otp_verifications.pending_data })
+    .from(otp_verifications)
+    .where(
+      and(
+        eq(otp_verifications.mobile_number, mobileNumber),
+        eq(otp_verifications.purpose, 'signup'),
+        isNotNull(otp_verifications.verified_at),
+      ),
+    )
+    .orderBy(desc(otp_verifications.created_at))
     .limit(1);
 
-  if (!user) {
-    throw new AppError(404, 'NOT_FOUND', 'User not found.');
+  let userId: string;
+
+  if (otpRow?.pending_data) {
+    // New-user path: create the user row now that OTP is confirmed.
+    const pending = JSON.parse(otpRow.pending_data) as {
+      name: string;
+      password_hash: string;
+      username: string | null;
+    };
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        name:            pending.name,
+        mobile_number:   mobileNumber,
+        password_hash:   pending.password_hash,
+        username:        pending.username,
+        mobile_verified: true,
+      })
+      .returning({ id: users.id });
+    userId = newUser.id;
+  } else {
+    // Stub / orphan-with-membership path: user row already exists, just mark it verified.
+    const [existingUser] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.mobile_number, mobileNumber), isNull(users.deleted_at)))
+      .limit(1);
+
+    if (!existingUser) throw new AppError(404, 'NOT_FOUND', 'User not found.');
+
+    await db
+      .update(users)
+      .set({ mobile_verified: true, updated_at: new Date() })
+      .where(eq(users.id, existingUser.id));
+
+    userId = existingUser.id;
   }
 
-  await db
-    .update(users)
-    .set({ mobile_verified: true, updated_at: new Date() })
-    .where(eq(users.id, user.id));
-
-  const tokens = await issueTokenPair(user.id, deviceInfo);
-  return { user_id: user.id, ...tokens };
+  const tokens = await issueTokenPair(userId, deviceInfo);
+  return { user_id: userId, ...tokens };
 }
 
 export async function login(
