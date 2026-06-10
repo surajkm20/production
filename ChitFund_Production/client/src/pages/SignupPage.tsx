@@ -66,7 +66,7 @@ export default function SignupPage() {
       // OtpPage reads this state to know which number to verify and when the OTP expires.
       navigate('/otp', {
         state: {
-          mobile_number: form.mobile_number,
+          mobile_number: rawMobile,
           purpose: 'signup',
           otp_expires_at: data.otp_expires_at,
         },
