@@ -114,30 +114,35 @@ async function deliverSms(mobileNumber: string, otp: string): Promise<void> {
     console.log(`[OTP] ${mobileNumber} → ${otp}`);
   } else {
     try {
-      console.log('MSG91 Request', {
-        flow_id: env.HORNPAY_OTP,
-        sender:  env.MSG91_SENDER_ID,
-        mobiles: mobileNumber.replace('+', ''),
-        var1:    otp,
-      });
+      const payload = {
+        template_id: env.MSG91_TEMPLATE_ID,
+        recipients: [
+          {
+            mobiles: mobileNumber.replace('+', ''),
+            var1:    otp,
+          },
+        ],
+      };
+      console.log(JSON.stringify(payload, null, 2));
       const res = await fetch('https://control.msg91.com/api/v5/flow/', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          authkey: env.MSG91_AUTH_KEY,
+          accept:           'application/json',
+          'content-type':   'application/json',
+          authkey:          env.MSG91_AUTH_KEY,
         },
-        body: JSON.stringify({
-          flow_id: env.HORNPAY_OTP,
-          sender:  env.MSG91_SENDER_ID,
-          mobiles: mobileNumber.replace('+', ''),
-          var1:    otp,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const responseText = await res.text();
       console.log('MSG91 Status:', res.status);
       console.log('MSG91 Response:', responseText);
-      const data = JSON.parse(responseText) as { request_id?: string; message?: string; type?: string };
+      let data: { request_id?: string; message?: string; type?: string } = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = { message: responseText };
+      }
       if (!res.ok || data.type === 'error') {
         status       = 'Failed';
         errorMessage = data.message ?? `HTTP ${res.status}`;
