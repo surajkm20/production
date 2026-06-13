@@ -9,7 +9,7 @@
 //   POST /auth/reset-password
 
 import { Router } from 'express';
-import { otpLimiter } from '../middleware/rateLimiter';
+import { otpLimiter, loginLimiter } from '../middleware/rateLimiter';
 import { validate } from '../middleware/validate';
 import {
   signupSchema, verifyOtpSchema, resendOtpSchema, loginSchema,
@@ -22,7 +22,7 @@ export const authRouter = Router();
 authRouter.post('/signup',          otpLimiter, validate(signupSchema),          auth.signup);
 authRouter.post('/verify-otp',                  validate(verifyOtpSchema),        auth.verifyOtp);
 authRouter.post('/resend-otp',      otpLimiter, validate(resendOtpSchema),        auth.resendOtp);
-authRouter.post('/login',                       validate(loginSchema),             auth.login);
+authRouter.post('/login',           loginLimiter, validate(loginSchema),            auth.login);
 authRouter.post('/refresh',                     validate(refreshSchema),           auth.refresh);
 authRouter.post('/logout',                      validate(logoutSchema),            auth.logout);
 authRouter.post('/forgot-password', otpLimiter, validate(forgotPasswordSchema),   auth.forgotPassword);
