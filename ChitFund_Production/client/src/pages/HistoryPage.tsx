@@ -166,14 +166,18 @@ export default function HistoryPage() {
   //   - Across dimensions it's AND: (Regular OR Skip) AND (Open OR Closed)
   //   - Empty dimension = no restriction on that dimension
   const filtered = useMemo(() => {
-    if (activeFilters.size === 0) return cycles
     const typeF   = FILTER_PILLS.slice(0, 2).filter(f => activeFilters.has(f))
     const statusF = FILTER_PILLS.slice(2).filter(f => activeFilters.has(f))
-    return cycles.filter(c => {
-      const typeOk   = typeF.length   === 0 || typeF.some(f   => f === 'Skip' ? c.is_skip_month : !c.is_skip_month)
-      const statusOk = statusF.length === 0 || statusF.some(f => c.status === f)
-      return typeOk && statusOk
-    })
+    const base = activeFilters.size === 0
+      ? cycles
+      : cycles.filter(c => {
+          const typeOk   = typeF.length   === 0 || typeF.some(f   => f === 'Skip' ? c.is_skip_month : !c.is_skip_month)
+          const statusOk = statusF.length === 0 || statusF.some(f => c.status === f)
+          return typeOk && statusOk
+        })
+    // The API returns cycles newest-first (desc month_number); display them
+    // chronologically (Month 1 at the top) for the history timeline.
+    return [...base].sort((a, b) => a.month_number - b.month_number)
   }, [cycles, activeFilters])
 
   // Pill badge counts — pre-computed from the full list so pills show total counts, not filtered

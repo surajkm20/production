@@ -46,11 +46,29 @@ async function closeCycle(adminToken: string, group_id: string, cycle_id: string
 
 // Get the cycle with a given month_number for a group.
 async function getCycleByMonth(group_id: string, month_number: number) {
-  const [row] = await db.select({ id: monthly_cycles.id })
+  const [row] = await db.select({ id: monthly_cycles.id, month_label: monthly_cycles.month_label, is_skip_month: monthly_cycles.is_skip_month, status: monthly_cycles.status })
     .from(monthly_cycles)
     .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.month_number, month_number)));
   if (!row) throw new Error(`No cycle found for month_number=${month_number}`);
   return row;
+}
+
+// Record a winner returning the full response.data (includes auto_skip / warnings).
+async function recordWinnerRaw(adminToken: string, group_id: string, cycle_id: string, winner_user_id: string, bid_amount: number) {
+  const res = await request(app)
+    .post(`/v1/groups/${group_id}/cycles/${cycle_id}/record-winner`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ winner_user_id, bid_amount });
+  if (res.status !== 200) throw new Error(`recordWinner failed: ${JSON.stringify(res.body)}`);
+  return res.body.data as { winner_number: number; auto_skip: { cycle_id: string; month_label: string } | null; warnings: string[] };
+}
+
+async function creditBasket(adminToken: string, group_id: string, amount: number) {
+  const res = await request(app)
+    .post(`/v1/groups/${group_id}/basket/adjustments`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ direction: 'C', amount, notes: 'Test seed' });
+  if (res.status !== 201 && res.status !== 200) throw new Error(`creditBasket failed: ${JSON.stringify(res.body)}`);
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -221,6 +239,75 @@ describe('Final-cycle seeding via closeCycle', () => {
     const offsetTxn = txns.find(t => t.txn_type === 'DEBIT_FINAL_CYCLE_OFFSET');
     expect(offsetTxn).toBeDefined(); // basket had 2000 to contribute
     expect(Number(offsetTxn!.amount)).toBe(2000);
+  });
+
+  it('Double Chiti auto-marks the final remaining cycle as a payment-free skip, then closes consistently', async () => {
+    // 2 shares / 2 months. pool = 5000 × 2 = 10000. Admin holds both shares.
+    // In month 1 the admin takes a Double Chiti (wins both slots). That consumes the
+    // future winner slot, so month 2 must become a payment-free skip month:
+    //   - is_skip_month = true, NO winner, NO basket payout
+    //   - every member's payment for month 2 is Waived ₹0
+    const admin = await createUser();
+    const { group_id } = await createGroup(admin.token, {
+      monthly_contribution: 5000,
+      total_shares: 2,
+      admin_commission_rate: 0,
+      admin_share_count: 2,
+    });
+
+    // Basket must hold >= pool for the second winner to be fundable.
+    await creditBasket(admin.token, group_id, 12000);
+
+    await startGroup(admin.token, group_id);
+    const cycle1 = await getCycleByMonth(group_id, 1);
+    const month2Before = await getCycleByMonth(group_id, 2);
+
+    await markAllPaid(admin.token, group_id, cycle1.id);
+
+    // Slot 1 — no auto-skip yet.
+    const w1 = await recordWinnerRaw(admin.token, group_id, cycle1.id, admin.id, 1000);
+    expect(w1.winner_number).toBe(1);
+    expect(w1.auto_skip).toBeNull();
+
+    // Slot 2 (Double Chiti) — should auto-skip the final remaining cycle (month 2).
+    const w2 = await recordWinnerRaw(admin.token, group_id, cycle1.id, admin.id, 1000);
+    expect(w2.winner_number).toBe(2);
+    expect(w2.auto_skip).not.toBeNull();
+    expect(w2.auto_skip!.cycle_id).toBe(month2Before.id);
+    expect(w2.auto_skip!.month_label).toBe(month2Before.month_label);
+
+    // DB: month 2 is now a skip month.
+    const month2Skip = await getCycleByMonth(group_id, 2);
+    expect(month2Skip.is_skip_month).toBe(true);
+
+    // History/Skip count: GET /cycles must report exactly one skip cycle.
+    const listRes = await request(app)
+      .get(`/v1/groups/${group_id}/cycles`)
+      .set('Authorization', `Bearer ${admin.token}`);
+    expect(listRes.status).toBe(200);
+    const skipCycles = (listRes.body.data as Array<{ is_skip_month: boolean }>).filter(c => c.is_skip_month);
+    expect(skipCycles.length).toBe(1);
+
+    // Close month 1 → seeds month 2. Because month 2 is a skip, all payments are Waived ₹0,
+    // and with all shares won the group auto-closes (which also closes the trailing skip cycle).
+    const closeRes = await closeCycle(admin.token, group_id, cycle1.id);
+    expect(closeRes.group_closed).toBe(true);
+
+    const month2Payments = await db.select({ expected_amount: payments.expected_amount, status: payments.status })
+      .from(payments).where(eq(payments.cycle_id, month2Skip.id));
+    expect(month2Payments.length).toBe(1);
+    expect(Number(month2Payments[0].expected_amount)).toBe(0);
+    expect(month2Payments[0].status).toBe('Waived');
+
+    // The trailing skip cycle (no winner to record) is closed, not left dangling Open.
+    const month2After = await getCycleByMonth(group_id, 2);
+    expect(month2After.is_skip_month).toBe(true);
+    expect(month2After.status).toBe('Closed');
+
+    // No basket payout was created for the skip month (pure payment-free).
+    const month2Txns = await db.select({ txn_type: basket_transactions.txn_type })
+      .from(basket_transactions).where(eq(basket_transactions.cycle_id, month2Skip.id));
+    expect(month2Txns.find(t => t.txn_type === 'DEBIT_SKIP_MONTH')).toBeUndefined();
   });
 
   it('GET /cycles/:cycle_id returns is_final_cycle and basket_contribution in response', async () => {
