@@ -3,7 +3,7 @@
 // Double Chiti eligibility: double_chiti = floor(total_basket / pool_amount) + 1,
 //   total_basket = realized (current_balance) + unrealized (outstanding loan principals + accrued interest owed).
 
-import { eq, and, desc, sum, count, sql, inArray, gt } from 'drizzle-orm';
+import { eq, and, desc, sum, count, sql, inArray, gt, ne } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   chit_groups, memberships, monthly_cycles, cycle_winners,
@@ -334,6 +334,7 @@ export async function recordWinner(
       id: monthly_cycles.id, status: monthly_cycles.status,
       is_skip_month: monthly_cycles.is_skip_month,
       month_label: monthly_cycles.month_label,
+      month_number: monthly_cycles.month_number,
     })
     .from(monthly_cycles)
     .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
@@ -422,6 +423,11 @@ export async function recordWinner(
     }
   }
 
+  // Captured inside the transaction so the response can report the auto-generated
+  // payment-free skip month (or warn when no future cycle was available for one).
+  let autoSkip: { cycle_id: string; month_label: string } | null = null;
+  let autoSkipUnavailable = false;
+
   await db.transaction(async (tx) => {
     await tx.insert(cycle_winners).values({
       cycle_id,
@@ -481,6 +487,41 @@ export async function recordWinner(
         ...(is_admin_withdrawal ? { admin_withdrawal_used: true } : {}),
       })
       .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, winner_user_id)));
+
+    // ── Double Chiti auto-skip ──────────────────────────────────────────────
+    // Each extra winner (slot 2+) consumes a future winner slot, so the chit ends
+    // one month early: the final remaining cycle becomes a payment-free skip month.
+    // No winner, no basket payout — the basket already funded this extra payout above.
+    if (nextSlot >= 2) {
+      const [targetCycle] = await tx
+        .select({ id: monthly_cycles.id, month_label: monthly_cycles.month_label })
+        .from(monthly_cycles)
+        .where(and(
+          eq(monthly_cycles.group_id, group_id),
+          eq(monthly_cycles.status, 'Open'),
+          eq(monthly_cycles.is_skip_month, false),
+          gt(monthly_cycles.month_number, cycle.month_number),
+          sql`NOT EXISTS (SELECT 1 FROM ${cycle_winners} cw WHERE cw.cycle_id = ${monthly_cycles.id})`,
+        ))
+        .orderBy(desc(monthly_cycles.month_number))
+        .limit(1);
+
+      if (targetCycle) {
+        autoSkip = { cycle_id: targetCycle.id, month_label: targetCycle.month_label };
+
+        await tx.update(monthly_cycles)
+          .set({ is_skip_month: true, notes: `Payment-free month — saved by Double Chiti (${cycle.month_label})` })
+          .where(eq(monthly_cycles.id, targetCycle.id));
+
+        // Waive any payment rows that already exist for that cycle. Final cycles are
+        // usually seeded lazily at close time — closeCycle honours is_skip_month then.
+        await tx.update(payments)
+          .set({ expected_amount: 0, paid_amount: 0, status: 'Waived', updated_at: new Date() })
+          .where(and(eq(payments.cycle_id, targetCycle.id), ne(payments.status, 'Paid')));
+      } else {
+        autoSkipUnavailable = true;
+      }
+    }
   });
 
   const [freshBasket] = await db.select({ current_balance: baskets.current_balance })
@@ -527,9 +568,11 @@ export async function recordWinner(
     basket_credit,
     winner_takeaway,
     basket_balance_after: freshBasket.current_balance,
-    warnings: hasActiveLoan
-      ? ['This member has an active loan. The admin should ensure it is settled.']
-      : [],
+    auto_skip: autoSkip,
+    warnings: [
+      ...(hasActiveLoan ? ['This member has an active loan. The admin should ensure it is settled.'] : []),
+      ...(autoSkipUnavailable ? ['Double Chiti recorded, but no future cycle was available to mark as a payment-free skip month.'] : []),
+    ],
   };
 }
 
@@ -600,6 +643,12 @@ export async function declareSkipMonth(
     await tx.update(monthly_cycles)
       .set({ is_skip_month: true, ...(notes ? { notes } : {}) })
       .where(eq(monthly_cycles.id, cycle_id));
+
+    // Skip month: members owe nothing (spec F-12). Waive every non-Paid payment row
+    // so member/admin views, the Defaulters screen, and closeCycle stay consistent.
+    await tx.update(payments)
+      .set({ expected_amount: 0, paid_amount: 0, status: 'Waived', updated_at: new Date() })
+      .where(and(eq(payments.cycle_id, cycle_id), ne(payments.status, 'Paid')));
 
     await tx.insert(cycle_winners).values({
       cycle_id,
@@ -983,12 +1032,38 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
     await tx.update(monthly_cycles).set({ status: 'Closed', closed_at: closedAt }).where(eq(monthly_cycles.id, cycle_id));
 
     const [nextCycle] = await tx
-      .select({ id: monthly_cycles.id })
+      .select({ id: monthly_cycles.id, is_skip_month: monthly_cycles.is_skip_month })
       .from(monthly_cycles)
       .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.month_number, nextMonthNumber)))
       .limit(1);
 
-    if (nextCycle) {
+    if (nextCycle && nextCycle.is_skip_month) {
+      // ── Next cycle is a payment-free skip (e.g. saved by Double Chiti) ──────────
+      // Members owe nothing; the basket already funded the early payout. No winner,
+      // no basket activity here — just seed/waive every member's payment as Waived ₹0.
+      const skipMembers = (await tx
+        .select({ user_id: memberships.user_id, share_count: memberships.share_count })
+        .from(memberships)
+        .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active'))))
+        .filter(m => Number(m.share_count) > 0);
+
+      const [skipExists] = await tx.select({ id: payments.id }).from(payments).where(eq(payments.cycle_id, nextCycle.id)).limit(1);
+
+      if (skipExists) {
+        await tx.update(payments)
+          .set({ expected_amount: 0, paid_amount: 0, status: 'Waived', updated_at: new Date() })
+          .where(and(eq(payments.cycle_id, nextCycle.id), ne(payments.status, 'Paid')));
+      } else if (skipMembers.length > 0) {
+        await tx.insert(payments).values(
+          skipMembers.map(m => ({
+            cycle_id:        nextCycle.id,
+            member_user_id:  m.user_id,
+            expected_amount: 0,
+            status:          'Waived' as const,
+          })),
+        );
+      }
+    } else if (nextCycle) {
       const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance, total_debited: baskets.total_debited })
         .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
 
@@ -1119,6 +1194,11 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
 
     if (!activeLoan) {
       const groupClosedAt = new Date();
+      // Close any remaining Open cycles (e.g. a trailing payment-free skip month saved by
+      // Double Chiti, which has no winner to record) so the closed group has no dangling cycles.
+      await db.update(monthly_cycles)
+        .set({ status: 'Closed', closed_at: groupClosedAt })
+        .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open')));
       await db.update(chit_groups)
         .set({ status: 'Closed', closed_at: groupClosedAt, updated_at: groupClosedAt })
         .where(eq(chit_groups.id, group_id));

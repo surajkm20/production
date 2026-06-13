@@ -64,7 +64,7 @@ export default function RecordWinnerPage() {
     setSuccessMsg(null)
     setWarnings([])
     try {
-      const result = await api.post<{ winner_number: number; warnings?: string[] }>(
+      const result = await api.post<{ winner_number: number; warnings?: string[]; auto_skip?: { cycle_id: string; month_label: string } | null }>(
         `/groups/${groupId}/cycles/${group.current_cycle.cycle_id}/record-winner`,
         {
           winner_user_id:      winnerId,
@@ -73,7 +73,11 @@ export default function RecordWinnerPage() {
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         },
       )
-      setSuccessMsg(`Winner #${result.winner_number} recorded successfully.`)
+      setSuccessMsg(
+        result.auto_skip
+          ? `Winner #${result.winner_number} recorded. ${result.auto_skip.month_label} is now a payment-free month (saved by Double Chiti).`
+          : `Winner #${result.winner_number} recorded successfully.`,
+      )
       if (result.warnings?.length) setWarnings(result.warnings)
       setWinnerId('')
       setBidRupees('')
