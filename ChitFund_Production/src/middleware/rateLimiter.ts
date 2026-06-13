@@ -15,7 +15,7 @@ export const apiLimiter = rateLimit({
 });
 
 // OTP send/resend limiter: 5 OTPs / 1 hour per mobile number (keyed by body.mobile_number).
-// Used on POST /auth/signup, POST /auth/login, POST /auth/resend-otp.
+// Used on POST /auth/signup, POST /auth/resend-otp, POST /auth/forgot-password.
 export const otpLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -23,4 +23,15 @@ export const otpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'OTP_RATE_LIMITED', message: 'Too many OTP requests. Try again in an hour.' } },
+});
+
+// Login brute-force limiter: 10 attempts / 15 min per mobile number (keyed by body.mobile_number).
+// Used on POST /auth/login to throttle password guessing.
+export const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => (req.body as { mobile_number?: string }).mobile_number ?? 'unknown',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'LOGIN_RATE_LIMITED', message: 'Too many login attempts. Try again in 15 minutes.' } },
 });
