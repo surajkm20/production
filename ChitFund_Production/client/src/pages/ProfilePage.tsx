@@ -11,6 +11,7 @@ interface UserProfile {
   mobile_number: string
   username: string | null
   mobile_verified: boolean
+  role: string
   created_at: string
 }
 
@@ -356,6 +357,30 @@ export default function ProfilePage() {
               </button>
             </div>
           </div>
+
+          {/* Section: Platform — SuperAdmin only */}
+          {user.role === 'SuperAdmin' && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2 px-1">Platform</p>
+              <div className="bg-white rounded-2xl border border-gray-200">
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-left hover:bg-gray-50 transition rounded-2xl"
+                >
+                  <div className="flex items-center gap-3">
+                    <svg className="w-[18px] h-[18px] text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Admin Console</p>
+                      <p className="text-xs text-gray-400">Platform-wide analytics</p>
+                    </div>
+                  </div>
+                  <ChevronRight />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Section: Account */}
           <div>
