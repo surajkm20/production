@@ -30,6 +30,9 @@ export async function getMe(req: Request, res: Response, next: NextFunction): Pr
         mobile_number:   users.mobile_number,
         username:        users.username,
         mobile_verified: users.mobile_verified,
+        // Platform-level role — the client uses it to show the Admin Console entry point
+        // and guard the /admin route. Not the per-group membership role.
+        role:            users.role,
         created_at:      users.created_at,
       })
       .from(users)
@@ -89,6 +92,7 @@ export async function updateMe(req: Request, res: Response, next: NextFunction):
         mobile_number:   users.mobile_number,
         username:        users.username,
         mobile_verified: users.mobile_verified,
+        role:            users.role,
         created_at:      users.created_at,
       });
 

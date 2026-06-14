@@ -1,8 +1,8 @@
 # ChitFund App — UI Wireframes (v1)
 
-**Status:** Draft v12 (admin withdrawal refined — Screen 5 shows toggle for withdrawal vs regular bid when admin is selected; one-time-use guard shown; Screen 11 distinct outcome card)
-**Scope:** 11 screens that anchor the API design
-**Last updated:** 2026-05-20
+**Status:** Draft v13 (added Screen 12: SuperAdmin Analytics Dashboard with 4 tabs — Growth / Engagement / Money / Reliability; separate admin web app at admin.chitfund.app)
+**Scope:** 12 screens that anchor the API design
+**Last updated:** 2026-06-14
 
 ---
 
@@ -788,6 +788,318 @@ Audit log entries (loaded lazily when section expanded):
 - The audit log lazy-load is intentional — it's bulky and rarely viewed. Don't include it in the main detail response.
 - For a skip month cycle, payments still exist in the DB (one per member with `expected_amount = 0` and `status = 'Waived'`). Display them in the section but with the special "Waived" pill.
 - Closed cycles are immutable except for the 24h post-record edit window. The `is_editable` flag in the response (see Data needed) is the authoritative signal for the admin's UI to show edit affordances.
+
+---
+
+## Screen 12: SuperAdmin Analytics Dashboard
+
+**Purpose:** Platform-owner view of how the chit fund product is performing — growth, engagement, money flowing through, and reliability. **Not** a chit-group-level analytics screen; this is one-level-up, across every group on the platform.
+
+**Authorization:** `users.role = 'SuperAdmin'` only. All other users (including group Admins) cannot access this screen or its endpoints. Every endpoint enforces this server-side; the URL itself is also hosted on a separate domain.
+
+**Where it lives:**
+- **Separate web app** at `admin.chitfund.app` — not part of the consumer mobile app bundle. Desktop / laptop first; the screen assumes wide horizontal space.
+- Logged into via the same `/auth/login` endpoint as the main app. After login, server checks `role`; if not `SuperAdmin`, login is rejected from this domain.
+- Stricter session: shorter access-token expiry (5 min vs the regular 15), no "remember me," forced re-login on day rollover.
+
+> **v1 implementation note (2026-06-14).** The above describes the Phase 2 target. **In v1 the console ships as a guarded `/admin` route inside the existing PWA** (not a separate domain), using the standard `/auth/login` + 15-min token. A promoted user who also runs real groups lands on their normal **Home (My Groups)** and reaches the console via an **"Admin Console" entry point** shown only when `GET /me` returns `role = 'SuperAdmin'` (landing **Model A**). The console links back to "My Groups". Tabs are built in order: **Money → Growth → Engagement → Reliability**. See requirements §8.1.
+
+**Why separate, not in-app:**
+1. **Security surface.** SuperAdmin can see every group's money. Separate URL = smaller blast radius if any other account is ever compromised.
+2. **Bundle size.** Dashboard chart libraries and table renderers don't ship to the consumer app.
+3. **Form factor.** Wide tables and trend charts are desktop-shaped. The main app is mobile-shaped.
+
+---
+
+### Layout — overall structure
+
+**Top header bar (sticky):**
+- Left: ChitFund logo + "Admin Console" label.
+- Center: time-range selector (`24h / 7d / 30d / 90d / All time`). Default `30d`. Changes update every metric on the current tab.
+- Right: SuperAdmin's name + avatar + signout.
+
+**Tab strip (below header, sticky):**
+- 4 tabs: `Growth / Engagement / Money / Reliability`.
+- Default tab: `Growth`.
+- Each tab shows a count badge if there's a noteworthy alert (e.g., Reliability badge in red if error rate > 1% this hour).
+
+**Body:** the active tab's content (described below per-tab).
+
+**Footer (sticky):** "Data last computed at 14:32:08" — for the on-the-fly compute model, this is the timestamp of the most recent metric query. Refresh button.
+
+---
+
+### Tab 1: Growth
+
+**Purpose:** Is the product getting bigger?
+
+**Layout, top to bottom:**
+
+1. **KPI tile row** (5 tiles, equal width):
+   - Total users (lifetime, with "+X this period" delta).
+   - New signups (in selected time range).
+   - MAU (last 30d, regardless of selected range).
+   - Stickiness (DAU ÷ MAU, %).
+   - Total groups created (lifetime, with "+X this period" delta).
+
+2. **Signup velocity chart** (full-width, ~300px tall):
+   - X-axis: date (granularity adapts to range — hourly for 24h, daily for 7d/30d, weekly for 90d, monthly for all-time).
+   - Y-axis: new signups.
+   - Single line, area-filled below.
+
+3. **Group lifecycle chart** (full-width, ~300px tall — your specific ask):
+   - X-axis: same date granularity.
+   - **Two lines:**
+     - Green line: groups created per bucket.
+     - Gray line: groups closed per bucket.
+   - Subtitle below chart: "Net growth this period: +12 groups (15 created, 3 closed)".
+   - Legend toggle to show/hide either line.
+
+4. **Active vs Closed groups breakdown** (table):
+   - 3 rows: Active, Closed, Pending (created but never started).
+   - Columns: Count / % of total / Avg age.
+
+5. **DAU / WAU / MAU mini-chart** (half-width):
+   - Three lines on one chart, last 30 days.
+   - Quick read: are users coming back?
+
+6. **Signup source breakdown** (half-width, table):
+   - Where users came from: `direct`, `invitation_code`, `share_link`, `web_signup`. Counts + %.
+   - Note: requires tracking a `signup_source` column on `users` — not in current schema, would need to be added separately when this tab is built.
+
+**Data needed:**
+```
+GET /admin/analytics/growth?range=30d
+- total_users, new_signups_in_range, delta_pct
+- mau, wau, dau, stickiness_pct
+- total_groups, new_groups_in_range, closed_groups_in_range, net_growth
+- signup_velocity_series: [{ date, count }, ...]
+- group_lifecycle_series: [{ date, created, closed }, ...]
+- group_status_breakdown: { active, closed, pending }
+- dau_wau_mau_series: [{ date, dau, wau, mau }, ...]
+- signup_source_breakdown: [{ source, count, pct }, ...]
+```
+
+---
+
+### Tab 2: Engagement
+
+**Purpose:** Is the product actually being used?
+
+**Layout:**
+
+1. **KPI tile row** (5 tiles):
+   - Avg groups per user.
+   - Avg shares per group.
+   - Avg people per group.
+   - Group completion rate (% of groups that reached `Closed`).
+   - Payment recording rate (% of payments marked within 7 days of `due_date`).
+
+2. **Group size distribution chart** (histogram, full-width):
+   - X-axis: shares per group, bucketed (1–5, 6–10, 11–15, 16–20, 21+).
+   - Y-axis: count of groups in that bucket.
+   - Tells you whether most groups are small or large.
+
+3. **Cohort completion table** (full-width):
+   - Rows: groups started in each month (last 12 months).
+   - Columns: month started, total groups, completed, abandoned, still active, completion %.
+   - Helps see if completion is trending up or down.
+
+4. **Loans summary** (4 tiles):
+   - Total loans disbursed (lifetime).
+   - Active loan portfolio (sum of `outstanding_principal`).
+   - Total interest earned (sum across all baskets).
+   - Skip months used (aggregate count across all groups).
+
+5. **Admin engagement table** (full-width):
+   - Last login + activity for every group-admin in the system.
+   - Columns: admin name, # of groups managed, last login, last admin action.
+   - Sorted by last_active DESC.
+   - Helps spot inactive admins whose groups might be at risk.
+
+6. **Notification CTR** (half-width chart):
+   - Notifications sent vs notifications tapped (last 30d).
+   - Two lines or stacked bars.
+
+**Data needed:**
+```
+GET /admin/analytics/engagement?range=30d
+- avg_groups_per_user, avg_shares_per_group, avg_people_per_group
+- group_completion_rate_pct, payment_recording_rate_pct
+- group_size_distribution: [{ bucket, count }, ...]
+- cohort_completion: [{ start_month, total, completed, abandoned, active, completion_pct }, ...]
+- total_loans, active_loan_principal, total_interest_earned, skip_months_used
+- admin_engagement: [{ user_id, name, groups_count, last_login, last_action, last_action_at }, ...]
+- notification_ctr_series: [{ date, sent, tapped, ctr_pct }, ...]
+```
+
+---
+
+### Tab 3: Money
+
+**Purpose:** How much real value flows through the platform?
+
+**Layout:**
+
+1. **KPI tile row** (5 tiles):
+   - GMV (lifetime).
+   - GMV (in selected time range).
+   - Average pool size (across active groups).
+   - Cumulative basket value (sum of all baskets' current_balance).
+   - Default rate (% of loans `WrittenOff`).
+
+2. **GMV trend chart** (full-width, ~400px tall — the headline chart of this tab):
+   - X-axis: date.
+   - Y-axis: rupees (paise on backend, formatted to lakhs/crores client-side).
+   - Single line. Tooltip on hover shows exact value + breakdown (payments vs winner takeaways vs loan disbursements).
+
+3. **Pool size distribution** (histogram, half-width):
+   - Buckets: ₹0–50k, ₹50k–1L, ₹1L–5L, ₹5L–10L, ₹10L+.
+   - Counts of groups in each bucket.
+
+4. **Top 10 groups by GMV** (table, half-width):
+   - Columns: group name, admin name, members, GMV this period, status.
+   - Click row → opens that group's detail in a new tab.
+
+5. **Loan portfolio breakdown** (full-width):
+   - Two side-by-side cards:
+     - Active: total principal lent, average interest rate, total accrued interest.
+     - Closed: count repaid in full, count written off, default rate.
+
+6. **Basket aggregate trend** (half-width line chart):
+   - Sum of all `baskets.current_balance` over time.
+   - Goes up over time as groups accumulate; should never decrease unless many groups close at once.
+
+**Data needed:**
+```
+GET /admin/analytics/money?range=30d
+- gmv_lifetime, gmv_in_range
+- avg_pool_size, cumulative_basket_value
+- default_rate_pct
+- gmv_series: [{ date, total, payments, winner_takeaways, loan_disbursements }, ...]
+- pool_size_distribution: [{ bucket_label, count }, ...]
+- top_groups_by_gmv: [{ group_id, name, admin_name, member_count, gmv, status }, ...]
+- loan_portfolio: {
+    active: { count, total_principal, avg_interest_rate, accrued_interest },
+    closed: { repaid_count, written_off_count, default_rate_pct }
+  }
+- basket_aggregate_series: [{ date, total_balance }, ...]
+```
+
+---
+
+### Tab 4: Reliability
+
+**Purpose:** Is the product working?
+
+**Layout:**
+
+1. **KPI tile row** (5 tiles):
+   - API uptime (selected range, %).
+   - Error rate (% of 5xx).
+   - p95 latency (ms).
+   - OTP success rate (verified ÷ sent).
+   - SMS delivery rate.
+
+2. **Error rate over time** (full-width chart):
+   - X-axis: date with finer granularity than other tabs (hourly for 24h/7d, every 6h for 30d).
+   - Y-axis: error rate %.
+   - Red threshold line at 1% — anything above is a problem.
+   - Tooltip shows actual 5xx count + sample error messages.
+
+3. **Latency percentiles chart** (full-width):
+   - Three lines: p50, p95, p99.
+   - Stacked or grouped — your call. Stacked shows the spread.
+
+4. **Recent errors table** (full-width):
+   - Last 50 errors, paginated.
+   - Columns: timestamp, endpoint, status code, user_id (if logged-in), error message snippet.
+   - Click row → expands to show full stack trace.
+   - Filter by endpoint, status code, time range.
+
+5. **External service status** (4 tiles, color-coded green/amber/red):
+   - MSG91 (SMS).
+   - Web Push.
+   - Postgres (Neon).
+   - Vercel host.
+   - Each tile shows: status + last successful check time + 24h uptime %.
+
+6. **Failed action breakdown** (table):
+   - Failed payment edits (24h).
+   - Failed group creations.
+   - Failed OTP verifications.
+   - Each shows count + most common failure reason.
+
+**Data needed:**
+```
+GET /admin/analytics/reliability?range=30d
+- api_uptime_pct, error_rate_pct, p50_ms, p95_ms, p99_ms
+- otp_success_rate_pct, sms_delivery_rate_pct
+- error_rate_series: [{ timestamp, error_rate_pct, error_count }, ...]
+- latency_series: [{ timestamp, p50_ms, p95_ms, p99_ms }, ...]
+- recent_errors: [{ timestamp, endpoint, status_code, user_id, message }, ...]
+- external_services: [{ name, status, last_checked, uptime_24h_pct }, ...]
+- failed_actions: [{ action_type, count, top_reason }, ...]
+```
+
+**Backend note for Reliability tab:** uptime, latency, and external-service checks are not naturally in your application database. They come from infrastructure monitoring tools (Vercel observability, Better Stack, Sentry, etc.). The endpoint for this tab proxies to those tools' APIs (or, simpler, the SuperAdmin opens those tools' dashboards directly from links on this screen and we only show the data we *can* compute from our DB — request logs, failed actions, error counts).
+
+---
+
+### Cross-cutting design rules for the dashboard
+
+**Time-range behavior:**
+- Top header has one global time-range selector that applies to all tabs.
+- A few metrics ignore the range and always show lifetime values (Total users, Total groups, Cumulative basket value). These are labeled "Lifetime" explicitly so it's clear.
+
+**Empty / zero states:**
+- For your single-user case today, every chart will be flat or single-point. That's expected. Show "Insufficient data for trend — need at least 7 days of activity" for charts that need more data points.
+- KPIs default to "0" or "—" if no data; never blank.
+
+**Real-time vs lag:**
+- Compute on the fly. Each load runs aggregation SQL against the live DB. Acceptable up to ~1,000 users / 10,000 events. Beyond that, migrate to a `daily_metrics` aggregation table.
+- Show "Data last computed at HH:MM:SS" timestamp in footer so the viewer knows the freshness.
+
+**Performance hint:**
+- Each tab's endpoint should return in under 2 seconds. If a query is slow, cache the result for 60 seconds at the API layer — fine for dashboard freshness.
+- Use materialized views or pre-aggregation only if individual queries exceed 2s; not before.
+
+**Export:**
+- Each tab has a "Download CSV" button that exports the table data. Useful for sharing with future investors or board members.
+
+---
+
+### Schema implications
+
+This screen requires changes to the schema:
+
+1. **`users.role` column** — `'User'` (default) or `'SuperAdmin'`. Promoted by direct DB update; no UI flow.
+2. **`users.signup_source` column** (optional, for the Growth tab) — `'direct' | 'invitation_code' | 'share_link' | 'web_signup'`. Captured at signup. Can be added later when the Growth tab is actually built.
+3. **Existing tables suffice for everything else.** All the metrics derive from `users`, `chit_groups`, `memberships`, `payments`, `monthly_cycles`, `baskets`, `loans`, `notifications`, and (for reliability) request logs / external service health.
+
+---
+
+### API endpoints summary
+
+All endpoints require `users.role = 'SuperAdmin'`:
+
+- `GET /admin/analytics/growth?range=...` — Tab 1.
+- `GET /admin/analytics/engagement?range=...` — Tab 2.
+- `GET /admin/analytics/money?range=...` — Tab 3.
+- `GET /admin/analytics/reliability?range=...` — Tab 4.
+- `GET /admin/analytics/<tab>/export.csv?range=...` — CSV download per tab.
+
+Each endpoint is a single aggregation query. Compute on the fly; cache at API layer for 60s if needed.
+
+---
+
+### Things deliberately NOT shown in v1
+
+- **Cohort retention table (the "users who signed up in month X, % active in months X+1, X+2..." matrix).** Industry standard but expensive to compute and meaningless until you have 6+ months of data and 100+ users. Add in v2.
+- **Funnels.** "Of users who signed up, what % created a group, what % invited members, what % recorded their first winner?" — useful for finding drop-off, but premature here.
+- **Real-time activity feed.** Tempting but adds websocket complexity. Defer.
+- **Per-region / per-language breakdowns.** Need real users first. Add when there are at least 200 users from 3+ regions.
+- **Revenue / monetization metrics (MRR, ARR, churn, LTV, CAC).** Skip until the product charges money. Today it doesn't.
 
 ---
 

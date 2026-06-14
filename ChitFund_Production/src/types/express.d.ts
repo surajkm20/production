@@ -11,6 +11,7 @@ declare global {
       user?: {
         userId: string;
         jti: string;  // JWT ID — links the access token to a refresh_tokens.session_id row
+        role?: string; // platform-level users.role ('User' | 'SuperAdmin'); set by requireSuperAdmin
       };
       membership?: {
         id: string;

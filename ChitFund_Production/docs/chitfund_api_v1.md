@@ -1,10 +1,10 @@
 # ChitFund App — API Specification (v1)
 
-**Status:** Draft v12 (final-cycle reduced contributions — basket offsets pool_amount + admin_commission; DEBIT_FINAL_CYCLE_OFFSET transaction type added; payments seeded with reduced amounts at penultimate cycle close)
+**Status:** Draft v13 (SuperAdmin admin-console endpoints added under /admin/analytics/*; users.role gating)
 **Style:** REST over HTTPS
 **Base URL:** `https://api.chitfund.app/v1`
 **Auth:** JWT (access token in `Authorization: Bearer <token>` header)
-**Last updated:** 2026-05-23
+**Last updated:** 2026-06-14
 
 ---
 
@@ -266,10 +266,12 @@ Get current user's profile.
     "mobile_number": "+919876543210",
     "username": "suraj_k",
     "mobile_verified": true,
+    "role": "User",
     "created_at": "2026-04-01T08:00:00Z"
   }
 }
 ```
+- `role` — platform-level role: `"User"` (default) or `"SuperAdmin"`. The client uses it to decide whether to show the Admin Console entry point and to guard the `/admin` route. **Not** the per-group admin/member role (that lives on the membership).
 
 ---
 
@@ -1632,7 +1634,125 @@ Basket balance month by month (for charting).
 
 ---
 
-## 12. Errors
+## 12. SuperAdmin (Admin Console)
+
+Endpoints powering the SuperAdmin dashboard at `admin.chitfund.app`. **All endpoints require `users.role = 'SuperAdmin'`.** Non-SuperAdmin requests return `403 FORBIDDEN_SUPERADMIN_ONLY`.
+
+These are platform-wide aggregates (across all groups, all users). Different from `/groups/:group_id/analytics/*` which are scoped to a single group.
+
+> **v1 implementation note (2026-06-14).** In v1 these endpoints are mounted on the main API under `/v1/admin/analytics/*` (not a separate service) and consumed by a guarded `/admin` route inside the existing PWA — not the standalone `admin.chitfund.app` app. Gating is by `users.role = 'SuperAdmin'` via the `requireSuperAdmin` middleware, using the **standard 15-min access token** (no separate hardened console session yet). Build order: **Money tab first**, then Growth, Engagement, Reliability. See requirements §8.1.
+
+**Common query params** (apply to all four tabs):
+- `range`: `24h` | `7d` | `30d` | `90d` | `all` (default `30d`).
+- `granularity`: `hour` | `day` | `week` | `month` (server picks a sensible default based on range; client can override).
+
+### GET `/admin/analytics/growth` **[superadmin]**
+
+Returns Growth tab data. See wireframes Screen 12 → Tab 1 for the consuming UI.
+
+**Response 200**
+```json
+{
+  "data": {
+    "total_users": 1247,
+    "new_signups_in_range": 89,
+    "delta_pct": 12.4,
+    "mau": 412, "wau": 198, "dau": 67, "stickiness_pct": 16.3,
+    "total_groups": 156, "new_groups_in_range": 18, "closed_groups_in_range": 3, "net_growth": 15,
+    "signup_velocity_series": [{ "date": "2026-05-15", "count": 4 }],
+    "group_lifecycle_series": [{ "date": "2026-05-15", "created": 1, "closed": 0 }],
+    "group_status_breakdown": { "active": 142, "closed": 11, "pending": 3 },
+    "dau_wau_mau_series": [{ "date": "2026-05-15", "dau": 65, "wau": 195, "mau": 410 }],
+    "signup_source_breakdown": [{ "source": "invitation_code", "count": 67, "pct": 75.3 }]
+  }
+}
+```
+
+### GET `/admin/analytics/engagement` **[superadmin]**
+
+Returns Engagement tab data. See wireframes Screen 12 → Tab 2.
+
+**Response 200**
+```json
+{
+  "data": {
+    "avg_groups_per_user": 1.4,
+    "avg_shares_per_group": 8.2,
+    "avg_people_per_group": 6.1,
+    "group_completion_rate_pct": 78.6,
+    "payment_recording_rate_pct": 92.4,
+    "group_size_distribution": [{ "bucket": "1-5", "count": 42 }],
+    "cohort_completion": [{ "start_month": "2025-08", "total": 12, "completed": 10, "abandoned": 1, "active": 1, "completion_pct": 83.3 }],
+    "total_loans": 38, "active_loan_principal": 18500000, "total_interest_earned": 124800, "skip_months_used": 7,
+    "admin_engagement": [{ "user_id": "uuid", "name": "Suraj", "groups_count": 3, "last_login": "...", "last_action": "Recorded winner", "last_action_at": "..." }],
+    "notification_ctr_series": [{ "date": "2026-05-15", "sent": 240, "tapped": 89, "ctr_pct": 37.1 }]
+  }
+}
+```
+
+### GET `/admin/analytics/money` **[superadmin]**
+
+Returns Money tab data. See wireframes Screen 12 → Tab 3. All money values in paise (BIGINT).
+
+**Response 200**
+```json
+{
+  "data": {
+    "gmv_lifetime": 458200000000,
+    "gmv_in_range": 38400000000,
+    "avg_pool_size": 7800000,
+    "cumulative_basket_value": 14200000,
+    "default_rate_pct": 2.1,
+    "gmv_series": [{ "date": "2026-05-15", "total": 1820000, "payments": 1500000, "winner_takeaways": 280000, "loan_disbursements": 40000 }],
+    "pool_size_distribution": [{ "bucket_label": "1L-5L", "count": 84 }],
+    "top_groups_by_gmv": [{ "group_id": "uuid", "name": "Sunrise Chits 2026", "admin_name": "Suraj", "member_count": 10, "gmv": 3200000, "status": "Active" }],
+    "loan_portfolio": {
+      "active": { "count": 12, "total_principal": 18500000, "avg_interest_rate": 3.2, "accrued_interest": 124800 },
+      "closed": { "repaid_count": 24, "written_off_count": 2, "default_rate_pct": 7.7 }
+    },
+    "basket_aggregate_series": [{ "date": "2026-05-15", "total_balance": 14100000 }]
+  }
+}
+```
+
+### GET `/admin/analytics/reliability` **[superadmin]**
+
+Returns Reliability tab data. See wireframes Screen 12 → Tab 4.
+
+**Response 200**
+```json
+{
+  "data": {
+    "api_uptime_pct": 99.94,
+    "error_rate_pct": 0.32,
+    "p50_ms": 84, "p95_ms": 412, "p99_ms": 1840,
+    "otp_success_rate_pct": 96.2,
+    "sms_delivery_rate_pct": 98.8,
+    "error_rate_series": [{ "timestamp": "2026-06-14T13:00:00Z", "error_rate_pct": 0.4, "error_count": 12 }],
+    "latency_series": [{ "timestamp": "2026-06-14T13:00:00Z", "p50_ms": 82, "p95_ms": 401, "p99_ms": 1720 }],
+    "recent_errors": [{ "timestamp": "...", "endpoint": "POST /groups/:id/loans", "status_code": 500, "user_id": "uuid", "message": "BASKET_INSUFFICIENT raised unexpectedly" }],
+    "external_services": [{ "name": "MSG91", "status": "healthy", "last_checked": "...", "uptime_24h_pct": 100.0 }],
+    "failed_actions": [{ "action_type": "payment_edit", "count": 4, "top_reason": "PAST_EDIT_WINDOW" }]
+  }
+}
+```
+
+**Note:** uptime, latency, and external-service health typically come from infrastructure monitoring (Vercel, Sentry, Better Stack), not from the application DB. In v1, this endpoint may proxy partial data from those tools or return only the metrics computable from request logs + DB state. Document which fields are stub vs real when implementing.
+
+### GET `/admin/analytics/:tab/export.csv` **[superadmin]**
+
+CSV export for any tab's primary table. `:tab` ∈ `growth | engagement | money | reliability`.
+
+**Response 200**: `text/csv` body with columns matching the tab's primary table.
+
+### Errors (all SuperAdmin endpoints)
+- `FORBIDDEN_SUPERADMIN_ONLY` — caller's `users.role ≠ 'SuperAdmin'`.
+- `INVALID_RANGE` — range param outside the allowed set.
+- `COMPUTATION_TIMEOUT` — aggregation took longer than 30s (rare; signals need to migrate to pre-aggregated tables).
+
+---
+
+## 13. Errors
 
 ### Standard error response
 
