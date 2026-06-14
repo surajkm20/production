@@ -709,7 +709,10 @@ export async function repayLoan(
       .where(and(eq(loans.id, loan_id), eq(loans.basket_id, basketRows.id)))
       .limit(1),
 
-    db.select({ id: monthly_cycles.id, current_month: sql<number>`min(${monthly_cycles.month_number})` })
+    // Only the aggregated current_month is needed here. Selecting a plain column (id)
+    // alongside min() with no GROUP BY is invalid SQL — and cycleRow.id is unused anyway
+    // (effective_cycle_id falls back to txnDateCycleRow.id). See sibling queries above.
+    db.select({ current_month: sql<number>`min(${monthly_cycles.month_number})` })
       .from(monthly_cycles)
       .innerJoin(payments, eq(payments.cycle_id, monthly_cycles.id))
       .where(and(eq(monthly_cycles.group_id, group_id), eq(monthly_cycles.status, 'Open'))),
