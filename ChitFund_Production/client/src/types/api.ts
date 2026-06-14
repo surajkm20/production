@@ -4,7 +4,24 @@ export interface User {
   mobile_number: string
   username: string | null
   mobile_verified: boolean
+  role: string
   created_at: string
+}
+
+export interface MoneyAnalytics {
+  gmv_lifetime: number
+  gmv_in_range: number
+  avg_pool_size: number
+  cumulative_basket_value: number
+  default_rate_pct: number
+  gmv_series: { date: string; total: number; payments: number; winner_takeaways: number; loan_disbursements: number }[]
+  pool_size_distribution: { bucket_label: string; count: number }[]
+  top_groups_by_gmv: { group_id: string; name: string; admin_name: string; member_count: number; gmv: number; status: string }[]
+  loan_portfolio: {
+    active: { count: number; total_principal: number; avg_interest_rate: number; accrued_interest: number }
+    closed: { repaid_count: number; written_off_count: number; default_rate_pct: number }
+  }
+  basket_aggregate_series: { date: string; total_balance: number }[]
 }
 
 export type GroupRole = 'Admin' | 'Member'

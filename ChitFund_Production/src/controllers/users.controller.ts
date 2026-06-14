@@ -43,6 +43,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction): Pr
 
     if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found.');
 
+    res.setHeader('Cache-Control', 'no-store');
     sendSuccess(res, user);
   } catch (err) {
     next(err);
