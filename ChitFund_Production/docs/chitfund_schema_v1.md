@@ -1,8 +1,8 @@
 # ChitFund App — Database Schema (v1)
 
-**Status:** Draft v13 (final-cycle reduced contributions — DEBIT_FINAL_CYCLE_OFFSET transaction type added; payments.expected_amount seeded with reduced amounts at penultimate cycle close)
+**Status:** Draft v14 (users.role added for platform-level SuperAdmin)
 **Database:** PostgreSQL 14+
-**Last updated:** 2026-05-23
+**Last updated:** 2026-06-14
 
 ---
 
@@ -60,19 +60,25 @@ CREATE TABLE users (
     username        VARCHAR(50) UNIQUE,                 -- optional alternate login
     password_hash   VARCHAR(255) NOT NULL,              -- bcrypt/argon2 hash
     mobile_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    role            VARCHAR(20) NOT NULL DEFAULT 'User',-- platform-level: 'User' | 'SuperAdmin'
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at      TIMESTAMPTZ                         -- soft delete
+    deleted_at      TIMESTAMPTZ,                        -- soft delete
+
+    CONSTRAINT chk_user_role CHECK (role IN ('User', 'SuperAdmin'))
 );
 
 CREATE INDEX idx_users_mobile ON users(mobile_number) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_username ON users(username) WHERE deleted_at IS NULL AND username IS NOT NULL;
+CREATE INDEX idx_users_superadmin ON users(role) WHERE role = 'SuperAdmin' AND deleted_at IS NULL;
 ```
 
 **Notes:**
 - Mobile is the primary identifier; username is optional (some users may never set one).
 - `mobile_verified` flips to true after OTP success. Login is blocked until then (enforced in app code).
 - Partial indexes ignore soft-deleted rows for faster lookups.
+- **`users.role` is platform-level**, distinct from `memberships.role` (which is per-group: Admin vs Member). A `SuperAdmin` can access the admin console at `admin.chitfund.app` and the `/admin/*` endpoints; a regular `User` cannot. The default is `User` for all signups; promoting to `SuperAdmin` is a manual `UPDATE` run by the platform owner out-of-band — there is no UI for it.
+- The partial index on `role='SuperAdmin'` keeps SuperAdmin lookups O(1) since this row will be queried on every admin-console request.
 
 ---
 

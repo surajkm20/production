@@ -22,6 +22,7 @@ import { paymentsRouter } from './payments.routes';
 import { basketRouter } from './basket.routes';
 import { analyticsRouter } from './analytics.routes';
 import { reportsRouter } from './reports.routes';
+import { adminRouter } from './admin.routes';
 
 /** Aggregate `/v1` router mounting every domain sub-router; import this in `app.ts`. */
 export const v1Router = Router();
@@ -35,3 +36,4 @@ v1Router.use('/groups', paymentsRouter);
 v1Router.use('/groups', basketRouter);
 v1Router.use('/groups', analyticsRouter);
 v1Router.use('/groups', reportsRouter);
+v1Router.use('/admin', adminRouter);

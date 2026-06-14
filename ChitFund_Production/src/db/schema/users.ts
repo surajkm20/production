@@ -4,7 +4,8 @@
 //   - refresh_tokens   : long-lived tokens (30 days) stored hashed, one row per device
 //   - push_subscriptions: Web Push API endpoint + keys per device, for push notifications
 
-import { pgTable, uuid, varchar, boolean, timestamp, smallint, text, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, boolean, timestamp, smallint, text, unique, index, check } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const users = pgTable('users', {
   id:              uuid('id').primaryKey().defaultRandom(),
@@ -13,6 +14,10 @@ export const users = pgTable('users', {
   username:        varchar('username', { length: 50 }).unique(),
   password_hash:   varchar('password_hash', { length: 255 }).notNull(),
   mobile_verified: boolean('mobile_verified').notNull().default(false),
+  // Platform-level role, distinct from memberships.role (per-group Admin/Member).
+  // 'User' for everyone by default; 'SuperAdmin' powers the read-only Admin Console.
+  // Promoted only via a direct DB UPDATE by the platform owner — there is no API/UI to set it.
+  role:            varchar('role', { length: 20 }).notNull().default('User'),
   created_at:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updated_at:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deleted_at:      timestamp('deleted_at', { withTimezone: true }),
@@ -20,6 +25,10 @@ export const users = pgTable('users', {
   // NOTE: these should be partial indexes (WHERE deleted_at IS NULL) — add that manually in the migration SQL
   index('idx_users_mobile').on(table.mobile_number),
   index('idx_users_username').on(table.username),
+  // NOTE: should be partial (WHERE role = 'SuperAdmin' AND deleted_at IS NULL) — made partial in the migration SQL.
+  // SuperAdmin rows are a tiny minority, so a partial index keeps the per-request role lookup cheap.
+  index('idx_users_superadmin').on(table.role),
+  check('chk_user_role', sql`${table.role} IN ('User', 'SuperAdmin')`),
 ]);
 
 export const otp_verifications = pgTable('otp_verifications', {
