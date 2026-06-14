@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { app } from '../src/app';
-import { createUser, createGroup } from './helpers/seed';
+import { createUser, createGroup, makeInterestAccrue } from './helpers/seed';
 
 describe('GET /v1/groups/:group_id/basket', () => {
 
@@ -53,10 +53,9 @@ async function arrangeActiveLoan() {
     .send({ direction: 'C', amount: 10000, notes: 'Initial credit' });
 
   // Disburse to the admin (group creator is automatically an active member).
-  // monthly_interest_rate = 5% (seed default), so:
-  //   first_month_interest = round(5000 × 5%) = 250
-  //   net_disbursed        = 5000 - 250        = 4750
-  //   basket after         = 10000 - 4750       = 5250
+  // Deployed interest model: the FULL principal is disbursed (no upfront interest
+  // deduction), so basket after = 10000 − 5000 = 5000. Interest accrues only from
+  // the cycle AFTER disbursement — see makeInterestAccrue.
   const disburseRes = await request(app)
     .post(`/v1/groups/${group_id}/loans`)
     .set('Authorization', `Bearer ${admin.token}`)
@@ -71,8 +70,9 @@ async function arrangeActiveLoan() {
 describe('POST /v1/groups/:group_id/loans', () => {
 
   it('admin can disburse a loan to a member', async () => {
-    // Scenario: basket has ₹10000, admin disburses ₹5000 to themselves (valid member) —
-    //           first month interest (5% = ₹250) is deducted upfront, only ₹4750 leaves the basket.
+    // Scenario: basket has ₹10000, admin disburses ₹5000 to themselves (valid member).
+    //           Deployed model disburses the FULL principal — no upfront interest deduction —
+    //           so ₹5000 leaves the basket and the balance becomes ₹5000.
     // Arrange
     const admin = await createUser();
     const { group_id } = await createGroup(admin.token);
@@ -101,11 +101,8 @@ describe('POST /v1/groups/:group_id/loans', () => {
     // res.body.data (not res.body) because the API wraps all responses in { data: ... }.
     expect(res.status).toBe(201);
 
-    // first month interest is deducted upfront at disbursement
-    // monthly_interest_rate = 5% (group default), principal = 5000
-    // first_month_interest = round(5000 × 5%) = 250
-    // amount_disbursed_to_borrower = 5000 - 250 = 4750
-    // basket_balance_after = 10000 - 4750 = 5250
+    // Deployed model: full principal disbursed, no upfront interest deduction.
+    // basket_balance_after = 10000 - 5000 = 5000
     const data = res.body.data;
     expect(typeof data.loan_id).toBe('string');
     expect(data.principal).toBe(5000);
@@ -151,6 +148,10 @@ describe('POST /v1/groups/:group_id/loans/:loan_id/repay', () => {
     // Arrange: get a funded group with an active loan
     const { admin, group_id, loan_id, basketAfterDisburse } = await arrangeActiveLoan();
 
+    // Deployed model: interest accrues only from the cycle AFTER disbursement.
+    // Advance one cycle so one month of interest (5% × ₹5000 = ₹250) becomes owed.
+    await makeInterestAccrue(group_id, admin.id);
+
     // Act: pay interest only — principal_repaid is omitted (defaults to 0 in the service)
     // txn_date is required by the validator — it's the date the cash was physically received
     const res = await request(app)
@@ -165,30 +166,35 @@ describe('POST /v1/groups/:group_id/loans/:loan_id/repay', () => {
     // loan stays Active because principal was not included in this repayment
     expect(data.status).toBe('Active');
     expect(data.total_interest_paid).toBe(200);
+    expect(data.outstanding_interest).toBe(50); // ₹250 accrued − ₹200 paid
     // basket goes up by the interest amount (money flows back in)
-    expect(data.basket_balance_after).toBe(basketAfterDisburse + 200); // 5250 + 200 = 5450
+    expect(data.basket_balance_after).toBe(basketAfterDisburse + 200); // 5000 + 200 = 5200
   });
 
   it('admin can fully repay a loan — status becomes Repaid', async () => {
-    // Scenario: admin repays full principal (₹5000) plus ₹100 interest in one call —
-    //           loan must close (status = Repaid), full amount returns to basket.
+    // Scenario: admin repays full principal (₹5000) plus the ₹250 accrued interest in one
+    //           call — loan must close (status = Repaid), full amount returns to basket.
     const { admin, group_id, loan_id, basketAfterDisburse } = await arrangeActiveLoan();
 
+    // Advance one cycle so ₹250 interest has accrued (deployed model — see helper).
+    await makeInterestAccrue(group_id, admin.id);
+
     // Act: repay full principal (must match exactly — partial repayment is not allowed)
-    // plus some interest accumulated this month
+    // plus the full outstanding interest in the same call (full settlement)
     const res = await request(app)
       .post(`/v1/groups/${group_id}/loans/${loan_id}/repay`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ principal_repaid: 5000, interest_paid: 100, txn_date: '2026-06-01' });
+      .send({ principal_repaid: 5000, interest_paid: 250, txn_date: '2026-06-01' });
 
     expect(res.status).toBe(200);
 
     const data = res.body.data;
     // including principal in the repayment triggers loan closure
     expect(data.status).toBe('Repaid');
-    expect(data.total_interest_paid).toBe(100);
+    expect(data.total_interest_paid).toBe(250);
+    expect(data.outstanding_interest).toBe(0);
     // basket gets back the full principal + interest
-    expect(data.basket_balance_after).toBe(basketAfterDisburse + 5000 + 100); // 5250 + 5100 = 10350
+    expect(data.basket_balance_after).toBe(basketAfterDisburse + 5000 + 250); // 5000 + 5250 = 10250
   });
 
   it('returns 409 when trying to repay a partial principal', async () => {
@@ -266,7 +272,9 @@ describe('GET /v1/groups/:group_id/loans/:loan_id', () => {
     //           response must include the full loan object plus a non-empty transactions array.
     const { admin, group_id, loan_id } = await arrangeActiveLoan();
 
-    // Record an interest payment so there is at least one loan_transaction row
+    // Advance one cycle so ₹250 interest accrues (deployed model), then record an
+    // interest payment so there is at least one loan_transaction row to fetch.
+    await makeInterestAccrue(group_id, admin.id);
     await request(app)
       .post(`/v1/groups/${group_id}/loans/${loan_id}/repay`)
       .set('Authorization', `Bearer ${admin.token}`)

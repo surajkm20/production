@@ -1,8 +1,8 @@
 # ChitFund Management App — Requirements (v1)
 
-**Status:** Draft v14 (final-cycle reduced contributions — basket offsets the pool + admin commission; payments seeded at reduced amounts and auto-Waived when basket covers everything)
+**Status:** Draft v15 (SuperAdmin platform role added as locked decision 22)
 **Owner:** Suraj
-**Last updated:** 2026-05-23
+**Last updated:** 2026-06-14
 
 ---
 
@@ -147,6 +147,12 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - `outstanding_interest` is always derived: `total_interest_accrued − total_interest_paid`.
 - Monthly interest accrual: each cycle adds `principal × monthly_interest_rate` to `total_interest_accrued` (e.g. 2% on ₹1,00,000 = ₹2,000 per cycle).
 - **Upfront deduction:** when a loan is disbursed, the first month's interest is deducted immediately. Borrower receives `principal − monthly_interest`; the deducted amount is credited to the basket as `INTEREST_ACCRUED` and added to `total_interest_accrued`.
+- **⚠️ v1 implementation note — interest model diverges from the upfront-deduction design above (intentional, confirmed 2026-06-14).** The deployed code does **not** deduct the first month's interest upfront and does **not** store `total_interest_accrued`. Instead:
+  - The **full principal** is disbursed to the borrower (basket is debited by the full `principal`; no `INTEREST_ACCRUED` credit at disbursement).
+  - `outstanding_interest` is **fully derived**, not stored: `outstanding_interest = max(0, cyclesElapsed × round(principal × monthly_interest_rate) − total_interest_paid)`, where `cyclesElapsed = max(0, currentActiveMonth − disbursement_month_number)`.
+  - Interest therefore starts accruing from the **cycle after** disbursement — there is **₹0 outstanding interest in the disbursement month**, and attempting to record an interest payment then returns `409 INTEREST_EXCEEDS_OUTSTANDING`.
+  - Only `disbursement_month_number`, `monthly_interest_rate`, `principal`, and `total_interest_paid` are stored on the loan row. The `total_interest_accrued` column described above does not exist in the deployed schema.
+  - This is the **intended** behavior for v1. Do **not** "fix" it back to the upfront-deduction model without an explicit decision and a migration of existing production loans.
 - **Repayment rule:** monthly interest payments are pure interest — they do not reduce the principal. The loan can only be closed by repaying the **full principal** in one lump sum. Partial principal repayments are not allowed.
 - **Eligibility to borrow:** member must have `wins_count < share_count` (at least one un-won share remaining) — hard block. If the member already has an active loan in this group, the disbursement proceeds but the API returns a warning in the response (`warnings` array).
 - **Max loan cap:** `min(basket_balance, (share_count − wins_count) × (pool_amount / total_shares))`. The per-share value used is always the fixed total share value (`pool_amount / total_shares`), regardless of how many months remain in the cycle.
@@ -356,6 +362,23 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 | 19 | Member self-join flow | Via invitation code: member submits a join request with a requested share count → admin approves / approves-with-change / rejects. No immediate self-add. Code is locked once cycle 1 starts. |
 | 20 | Admin withdrawal | Admin has ONE special share (counted within their regular share_count). Withdrawal is an explicit opt-in flag at record time (`is_admin_withdrawal: true`). One-time use per group, tracked via `admin_withdrawal_used` on the membership. Admin can still win other shares via normal bid. |
 | 21 | Final-cycle offset formula | `total_needed = pool_amount + admin_commission_for_cycle`. Basket covers `min(basket_balance, total_needed)`. Admin commission is NOT waived and NOT separate — it is included in total_needed. Remaining collected from members proportional to share_count. Member with most shares absorbs residual paisa. If remaining ≤ 0, all payments are seeded at 0 and auto-Waived. Basket is debited by `basket_contribution = min(basket_balance, total_needed)` immediately at final-cycle payment seeding time. |
+| 22 | SuperAdmin role | Platform-level role on `users.role` ('User' default, 'SuperAdmin' for platform owner). Powers the Admin Console at `admin.chitfund.app` (separate web app). Sees aggregates across all groups: growth, engagement, money flow, reliability. No UI to promote — done via direct DB update by the platform owner. |
+
+---
+
+## 8.1 SuperAdmin — v1 implementation decisions (2026-06-14)
+
+These refine Locked Decision #22 for the actual v1 build. They are deliberate, pragmatic deviations from the "separate app / hardened session" target described in the API & wireframe docs; the target remains the Phase 2 direction.
+
+| # | Topic | v1 decision | Rationale / Phase 2 target |
+|---|---|---|---|
+| 22a | Console hosting | Served as a **guarded `/admin` route inside the existing PWA**, gated by `users.role = 'SuperAdmin'`. | Avoids standing up a second deploy now. Phase 2: split out to the separate `admin.chitfund.app` app. |
+| 22b | Promotion is additive | Promoting an existing user to SuperAdmin **does not touch `memberships`**. They keep every group, payment, winner, basket and loan exactly as before. `users.role` (platform) and `memberships.role` (per-group) are orthogonal. | — |
+| 22c | Landing / navigation ("two hats") | **Model A:** a promoted user lands on their normal **Home (My Groups)** on login. An **"Admin Console" entry point** (header/profile) — visible **only** to SuperAdmins — opens `/admin`. The console links back to "My Groups". No forced redirect. | Lets the same person run real groups *and* view platform analytics. Phase 2 separate-domain hosting changes only where the console lives, not this dual-hat model. |
+| 22d | Role exposure | The caller's `role` is returned on **`GET /me`** so the client can decide whether to render the Admin Console entry point and guard the `/admin` route. | — |
+| 22e | Session hardening | **Reuse the standard `/auth/login` + 15-min access token.** Gating is by `users.role` only. | Phase 2: stricter console session (5-min token, no remember-me, forced daily re-login) per wireframe Screen 12. |
+| 22f | Build order | Ship the **Money tab first** (fully computable from existing tables), then Growth, Engagement, and Reliability (last — mostly external monitoring data). | Each tab is one aggregation endpoint, built page-by-page. |
+| 22g | Read-only | The console is **strictly read-only**. It exposes no platform-level mutation; group edits still happen through the normal consumer pages. | — |
 
 ---
 
