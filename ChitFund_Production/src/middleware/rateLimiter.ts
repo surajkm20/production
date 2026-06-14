@@ -1,10 +1,20 @@
-// Rate limiting middleware factory. Returns pre-configured limiters for specific routes.
-// Used on OTP resend (1 per 30s, 5 per hour) and general API abuse prevention.
-// Built on top of express-rate-limit.
+/**
+ * @fileoverview Pre-configured rate limiters for the ChitFund API, built on
+ * `express-rate-limit`. It bundles a general IP-based API limiter alongside
+ * abuse-specific limiters keyed by mobile number for OTP issuance and login
+ * attempts. It exists to protect sensitive auth flows from brute-force and
+ * spam — capping password guessing and SMS/OTP costs — while keeping all
+ * throttling policy in one place so routes can simply import and apply the
+ * limiter they need.
+ * @module middleware/rateLimiter
+ * @author TODO
+ */
 
 import { rateLimit } from 'express-rate-limit';
 
-// General API limiter: 500 req / 15 min per IP.
+/**
+ * General-purpose IP-based limiter (500 requests / 15 min) for blanket API abuse prevention; disabled outside production.
+ */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
@@ -14,8 +24,9 @@ export const apiLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many requests, please try again later.' } },
 });
 
-// OTP send/resend limiter: 5 OTPs / 1 hour per mobile number (keyed by body.mobile_number).
-// Used on POST /auth/signup, POST /auth/resend-otp, POST /auth/forgot-password.
+/**
+ * Caps OTP issuance at 5 / hour per mobile number; apply to `POST /auth/signup`, `/auth/resend-otp`, and `/auth/forgot-password`.
+ */
 export const otpLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -25,8 +36,9 @@ export const otpLimiter = rateLimit({
   message: { error: { code: 'OTP_RATE_LIMITED', message: 'Too many OTP requests. Try again in an hour.' } },
 });
 
-// Login brute-force limiter: 10 attempts / 15 min per mobile number (keyed by body.mobile_number).
-// Used on POST /auth/login to throttle password guessing.
+/**
+ * Throttles password guessing at 10 attempts / 15 min per mobile number; apply to `POST /auth/login`.
+ */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,

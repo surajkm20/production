@@ -1,7 +1,18 @@
-// Business logic for monthly cycle management.
-// Bid/winner data lives in cycle_winners (supports Double Chiti: multiple winners per cycle).
-// Double Chiti eligibility: double_chiti = floor(total_basket / pool_amount) + 1,
-//   total_basket = realized (current_balance) + unrealized (outstanding loan principals + accrued interest owed).
+/**
+ * @fileoverview Monthly-cycle business logic for the ChitFund API. It computes
+ * Double Chiti eligibility from the realized + unrealized basket, lists and reads
+ * cycles with their winners and payment rollups, records winners (with admin
+ * withdrawal and up-to-two-winner Double Chiti support, plus the basket payout
+ * math), declares skip months, edits the first winner's bid inside a 24-hour
+ * window, corrects or reopens a closed cycle, and closes a cycle (handling the
+ * final-cycle basket offset and skip-month bookkeeping). Bid/winner data lives in
+ * `cycle_winners`; every basket-affecting step is written transactionally with
+ * its ledger entry. Double Chiti eligibility is `floor(total_basket / pool) + 1`,
+ * where `total_basket` = realized balance plus outstanding loan principal and
+ * accrued interest.
+ * @module services/cycles
+ * @author Suraj KM
+ */
 
 import { eq, and, desc, sum, count, sql, inArray, gt, ne } from 'drizzle-orm';
 import { db } from '../config/db';
@@ -32,7 +43,15 @@ function computeOutstandingInterest(cyclesElapsed: number, principal: number, ra
   return Math.max(0, cyclesElapsed * monthlyInterest - totalInterestPaid);
 }
 
-// ─── getChitiEligibility ─────────────────────────────────────────────────────
+/**
+ * Computes how many winners the basket could fund this cycle (Double Chiti and beyond) from the realized balance plus unrealized loan principal and interest.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group whose chiti eligibility to evaluate
+ * @returns A promise resolving to the realized/unrealized/total basket, pool amount, the `double_chiti` multiplier, a display label, and an `eligible` flag
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ * @throws {AppError} 404 GROUP_NOT_FOUND if the group or basket is missing
+ */
 export async function getChitiEligibility(userId: string, group_id: string) {
   await assertActiveMember(group_id, userId);
 
@@ -92,7 +111,16 @@ export async function getChitiEligibility(userId: string, group_id: string) {
   };
 }
 
-// ─── listCycles ──────────────────────────────────────────────────────────────
+/**
+ * Lists a group's cycles (newest first) with their winners and per-cycle payment rollups (collected/expected amounts and counts).
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group whose cycles to list
+ * @param filters - Optional filters
+ * @param filters.status - Restrict to `'open'` or `'closed'` cycles
+ * @returns A promise resolving to the cycles with embedded winners and payment aggregates
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ */
 export async function listCycles(userId: string, group_id: string, filters: { status?: string }) {
   await assertActiveMember(group_id, userId);
 
@@ -173,7 +201,16 @@ export async function listCycles(userId: string, group_id: string, filters: { st
   }));
 }
 
-// ─── getCycle ────────────────────────────────────────────────────────────────
+/**
+ * Returns full detail for one cycle: winners, every payment, payment totals, the 24-hour editability flag, and any basket impact from skip-month or final-cycle offset transactions.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Cycle to fetch
+ * @returns A promise resolving to the assembled cycle-detail object
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle does not exist in this group
+ */
 export async function getCycle(userId: string, group_id: string, cycle_id: string) {
   await assertActiveMember(group_id, userId);
 
@@ -317,7 +354,23 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
   };
 }
 
-// ─── recordWinner ────────────────────────────────────────────────────────────
+/**
+ * Records a winner for a cycle (admin only): validates eligibility and bid, computes the commission/basket-credit/takeaway split, and updates the basket transactionally — supports admin withdrawal and a second Double Chiti winner.
+ *
+ * @param userId - The requesting admin, recorded as the winner-record creator
+ * @param group_id - Group the cycle belongs to; must not be closed
+ * @param cycle_id - Cycle to record the winner for; must be open
+ * @param data - Winner details
+ * @param data.winner_user_id - Active, win-eligible member taking the slot
+ * @param data.bid_amount - Bid in paise (0 and ignored when `is_admin_withdrawal` is set); must be > 0 and ≤ pool otherwise
+ * @param data.is_admin_withdrawal - Records the admin's special bid-free withdrawal instead of a normal bid
+ * @param data.notes - Optional note stored on the winner row
+ * @returns A promise resolving to the recorded winner's financial breakdown, resulting basket balance, and any auto-generated payment-free skip month
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 GROUP_NOT_FOUND / CYCLE_NOT_FOUND if missing
+ * @throws {AppError} 409 GROUP_CLOSED, CYCLE_CLOSED, CHITI_SLOTS_FULL, WINNER_INELIGIBLE, or WITHDRAWAL_ALREADY_USED
+ * @throws {AppError} 400 BID_NEGATIVE_OR_ZERO, BID_EXCEEDS_POOL, BID_BELOW_COMMISSION, NOT_ADMIN, or DOUBLE_CHITTI_INSUFFICIENT
+ */
 export async function recordWinner(
   userId:   string,
   group_id: string,
@@ -576,7 +629,20 @@ export async function recordWinner(
   };
 }
 
-// ─── declareSkipMonth ────────────────────────────────────────────────────────
+/**
+ * Declares a cycle a skip month (admin only): the winner takes the full pool funded from the basket with no member contributions collected for that month.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Cycle to mark as a skip month; must be open with no payments collected or winner recorded
+ * @param data - Skip-month details
+ * @param data.winner_user_id - Active, win-eligible member who takes the pool
+ * @param data.notes - Optional note stored on the winner row
+ * @returns A promise resolving to the skip-month winner and resulting basket state
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle is missing
+ * @throws {AppError} 409 CYCLE_CLOSED, PAYMENTS_ALREADY_COLLECTED, WINNER_ALREADY_RECORDED, WINNER_INELIGIBLE, or BASKET_INSUFFICIENT
+ */
 export async function declareSkipMonth(
   userId:   string,
   group_id: string,
@@ -703,7 +769,21 @@ export async function declareSkipMonth(
   };
 }
 
-// ─── updateCycle (edit bid — only first winner, within 24h) ──────────────────
+/**
+ * Corrects the first winner's bid within the 24-hour edit window (admin only), recomputing the commission/credit/takeaway split and posting an adjustment for the basket-credit delta.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Open, non-skip cycle whose first winner's bid is being edited
+ * @param data - Edit details
+ * @param data.bid_amount - Corrected bid in paise; must be > 0, ≤ pool, and at least the admin commission
+ * @param data.notes - Optional note stored on the winner row
+ * @returns A promise resolving to the recomputed winner breakdown and resulting basket balance
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle is missing
+ * @throws {AppError} 409 CYCLE_CLOSED, INVALID_REQUEST (skip/admin-withdrawal/no winner), or EDIT_WINDOW_EXPIRED
+ * @throws {AppError} 400 BID_NEGATIVE_OR_ZERO, BID_EXCEEDS_POOL, or BID_BELOW_COMMISSION
+ */
 export async function updateCycle(
   userId:   string,
   group_id: string,
@@ -795,7 +875,22 @@ export async function updateCycle(
   return { cycle_id, winner_number: 1, winner_user_id: winnerW.winner_user_id, bid_amount: new_bid, admin_commission: new_commission, basket_credit: new_basket_credit, winner_takeaway: new_takeaway, basket_balance_after: balance_after };
 }
 
-// ─── correctClosedCycle ───────────────────────────────────────────────────────
+/**
+ * Corrects the recorded winner (and optionally bid) of an already-closed cycle (admin only), re-deriving the financial split and reconciling the basket.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Closed cycle being corrected
+ * @param data - Correction details
+ * @param data.winner_user_id - The corrected winning member
+ * @param data.bid_amount - Corrected bid in paise (if the bid is being changed)
+ * @param data.notes - Optional note stored on the winner row
+ * @param data.winner_number - Which winner slot to correct (defaults to 1)
+ * @returns A promise resolving to the corrected winner breakdown and resulting basket state
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle is missing
+ * @throws {AppError} 409 on invalid cycle state or winner-eligibility conflicts
+ */
 export async function correctClosedCycle(
   userId:   string,
   group_id: string,
@@ -948,7 +1043,17 @@ export async function correctClosedCycle(
   return { cycle_id, is_skip_month: true, winner_user_id: new_winner_id, winner_takeaway: pool, basket_balance_after: Number(basket.current_balance) };
 }
 
-// ─── reopenCycle ─────────────────────────────────────────────────────────────
+/**
+ * Reopens a closed cycle (admin only), setting it back to Open and clearing its closed timestamp.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Closed cycle to reopen
+ * @returns A promise resolving to the reopened cycle's id, status, and labels
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle is missing
+ * @throws {AppError} 400 CYCLE_NOT_CLOSED if the cycle is not currently closed
+ */
 export async function reopenCycle(userId: string, group_id: string, cycle_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
@@ -982,7 +1087,17 @@ export async function reopenCycle(userId: string, group_id: string, cycle_id: st
   return updated;
 }
 
-// ─── closeCycle ──────────────────────────────────────────────────────────────
+/**
+ * Closes a cycle (admin only) once all payments are settled and a winner is recorded (unless it is a skip month), then advances bookkeeping — seeding the next cycle, auto-waiving a payment-free skip month, and applying the final-cycle basket offset.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Open cycle to close
+ * @returns A promise resolving to the closed cycle's summary and any follow-on cycle/basket effects
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle is missing
+ * @throws {AppError} 409 CYCLE_ALREADY_CLOSED, PAYMENTS_OUTSTANDING, or WINNER_NOT_RECORDED
+ */
 export async function closeCycle(userId: string, group_id: string, cycle_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');

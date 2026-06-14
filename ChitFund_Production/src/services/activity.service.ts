@@ -1,6 +1,14 @@
-// Activity feed service for group_activity table.
-// insertActivity: fire-and-forget helper imported by other services.
-// getGroupActivity: powers GET /groups/:group_id/activity.
+/**
+ * @fileoverview Activity-feed service backing the `group_activity` table. It
+ * provides a fire-and-forget writer that other services call to record domain
+ * events (member joined, payment marked, winner recorded, loan disbursed, etc.)
+ * and a reader that powers the group activity feed, enriching each row with the
+ * actor's name and a human-readable summary line. It exists to give every group
+ * an audit-style timeline without letting feed writes ever interfere with the
+ * core mutation that triggered them.
+ * @module services/activity
+ * @author Suraj KM
+ */
 
 import { eq, desc } from 'drizzle-orm';
 import { db } from '../config/db';
@@ -8,8 +16,16 @@ import { group_activity, users } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { assertActiveMember } from './memberships.service';
 
-// ─── insertActivity ───────────────────────────────────────────────────────────
-// Non-critical: errors are swallowed so a failed insert never breaks a mutation.
+/**
+ * Records a group activity event; safe to call fire-and-forget since any failure is logged, not thrown, so it never breaks the triggering mutation.
+ *
+ * @param params - Event payload
+ * @param params.group_id - Group the event belongs to
+ * @param params.event_type - Event type key (e.g. `'WINNER_RECORDED'`) used to build the feed summary
+ * @param params.actor_id - User who triggered the event, or null for system events
+ * @param params.data - Event-specific structured payload rendered into the summary
+ * @returns A promise that always resolves, even when the insert fails
+ */
 export async function insertActivity(params: {
   group_id:   string;
   event_type: string;
@@ -68,7 +84,15 @@ function buildSummary(
   }
 }
 
-// ─── getGroupActivity ─────────────────────────────────────────────────────────
+/**
+ * Returns the most recent activity-feed entries for a group, each enriched with the actor's name and a display summary; the caller must be an active member.
+ *
+ * @param userId - The requesting user, validated as an active member of the group
+ * @param group_id - Group whose activity feed to read
+ * @param limit - Maximum number of entries to return (capped at 50)
+ * @returns A promise resolving to feed entries ordered newest-first, or an empty array if none exist
+ * @throws {AppError} 403 NOT_A_MEMBER if the user is not an active member of the group
+ */
 export async function getGroupActivity(
   userId:   string,
   group_id: string,

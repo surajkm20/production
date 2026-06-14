@@ -1,3 +1,14 @@
+/**
+ * @fileoverview Group membership route definitions for the ChitFund API. It
+ * declares endpoints for listing members, adding/updating/soft-removing members,
+ * editing member profiles, viewing a member's wins, the two-step admin transfer
+ * flow, payment reminders, and the admin-only join-request approval/rejection
+ * queue. It exists to group all member-administration routes under one router
+ * while enforcing membership, admin authorisation, and Zod validation per action.
+ * @module routes/memberships
+ * @author Suraj KM
+ */
+
 // Routes for group membership management (require JWT + group membership):
 //   GET    /groups/:group_id/members                              — list members
 //   POST   /groups/:group_id/members                [admin]      — add member by mobile
@@ -15,6 +26,7 @@ import { validate } from '../middleware/validate';
 import { addMemberSchema, updateMemberSchema, removeMemberSchema, remindMemberSchema, confirmTransferAdminSchema, approveJoinRequestSchema, rejectJoinRequestSchema, updateMemberProfileSchema } from '../validators/memberships.validators';
 import * as memberships from '../controllers/memberships.controller';
 
+/** Router for group membership and join-request endpoints, mounted under `/groups`. */
 export const membershipsRouter = Router();
 
 membershipsRouter.use('/:group_id/members',      authenticate, requireMember);

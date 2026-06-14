@@ -1,8 +1,15 @@
-// Business logic for the basket (communal kitty) and loans.
-// Responsibilities: disburse loan (validate basket balance, write LOAN_DISBURSED txn,
-// decrement basket), record repayment (principal + interest, write LOAN_REPAID /
-// INTEREST_ACCRUED txn, update outstanding_principal), compute monthly interest accrual,
-// write-off loan, recompute cached basket balance from ledger for integrity checks.
+/**
+ * @fileoverview Basket (communal kitty) and loan business logic for the ChitFund
+ * API. It reads basket state and the transaction ledger, records manual basket
+ * adjustments, disburses loans against the balance, lists/fetches loans with
+ * computed outstanding interest, records single and bulk repayments (idempotent
+ * via the idempotency helpers), deletes Active loans by reversing their basket
+ * effects, and write-offs/edits loans. Every balance change is written inside a
+ * transaction alongside its ledger entry, all amounts are integer paise, and
+ * monthly interest is accrued per elapsed cycle.
+ * @module services/basket
+ * @author Suraj KM
+ */
 
 import { eq, and, desc, gte, lte, count, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -19,7 +26,15 @@ import { assertActiveMember } from './memberships.service';
 import { notify } from './notifications.service';
 import { insertActivity } from './activity.service';
 
-// ─── getBasket ───────────────────────────────────────────────────────────────
+/**
+ * Returns the group's basket overview, giving admins full totals and active-loan count while members see only the balance and their projected closure share.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group whose basket to read
+ * @returns A promise resolving to the admin basket view or the limited member view
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ * @throws {AppError} 404 BASKET_NOT_FOUND if the group has no basket
+ */
 export async function getBasket(userId: string, group_id: string) {
   const caller  = await assertActiveMember(group_id, userId);
   const isAdmin = caller.role === 'Admin';
@@ -69,7 +84,22 @@ export async function getBasket(userId: string, group_id: string) {
   };
 }
 
-// ─── listTransactions ────────────────────────────────────────────────────────
+/**
+ * Lists basket ledger entries (cursor-paginated), scoping non-admins to only their own transactions and enriching each row with cycle and counterparty labels.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group whose basket ledger to read
+ * @param filters - Filtering and pagination options
+ * @param filters.type - Restrict to a specific transaction type
+ * @param filters.cycle_id - Restrict to transactions tagged with a cycle
+ * @param filters.from - Inclusive lower bound on `created_at` (ISO date)
+ * @param filters.to - Inclusive upper bound on `created_at` (ISO date)
+ * @param filters.cursor - Opaque pagination cursor from a previous page
+ * @param filters.limit - Page size (defaults to 100, capped at 500)
+ * @returns A promise resolving to the ledger rows, the next cursor, and a `has_more` flag
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ * @throws {AppError} 404 BASKET_NOT_FOUND if the group has no basket
+ */
 export async function listTransactions(
   userId:   string,
   group_id: string,
@@ -164,7 +194,20 @@ export async function listTransactions(
   };
 }
 
-// ─── recordAdjustment ────────────────────────────────────────────────────────
+/**
+ * Records a manual basket credit or debit (admin only), updating the balance and totals in a transaction and notifying all active members.
+ *
+ * @param userId - The requesting admin, recorded as the transaction creator
+ * @param group_id - Group whose basket is adjusted; must not be closed
+ * @param data - Adjustment details
+ * @param data.direction - `'C'` to credit the basket or `'D'` to debit it
+ * @param data.amount - Adjustment amount in paise
+ * @param data.notes - Required reason, surfaced to members in the notification
+ * @returns A promise resolving to the new transaction's id, amounts, and resulting balance
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 GROUP_NOT_FOUND / BASKET_NOT_FOUND if missing
+ * @throws {AppError} 409 GROUP_CLOSED, or BASKET_INSUFFICIENT if a debit exceeds the balance
+ */
 export async function recordAdjustment(
   userId:   string,
   group_id: string,
@@ -239,7 +282,21 @@ export async function recordAdjustment(
   return { txn_id: txn.id, txn_type: 'ADJUSTMENT' as const, direction, amount, notes, basket_balance_after: balanceAfter, created_at: txn.created_at };
 }
 
-// ─── disburseLoan ────────────────────────────────────────────────────────────
+/**
+ * Disburses a loan from the basket to an active member (admin only), writing the LOAN_DISBURSED ledger entry and decrementing the balance, with soft warnings for eligibility/multiple-loan cases.
+ *
+ * @param userId - The requesting admin, recorded as the transaction creator
+ * @param group_id - Group whose basket funds the loan; must not be closed
+ * @param data - Loan details
+ * @param data.borrower_user_id - Active member receiving the loan
+ * @param data.principal - Loan principal in paise; must not exceed the basket balance
+ * @param data.expected_close_date - Optional expected repayment date
+ * @param data.notes - Optional note stored on the loan and ledger entry
+ * @returns A promise resolving to the new loan summary, resulting balance, and any advisory `warnings`
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 GROUP_NOT_FOUND if the group is missing
+ * @throws {AppError} 409 GROUP_CLOSED, BORROWER_NOT_MEMBER, or INSUFFICIENT_BASKET_BALANCE
+ */
 export async function disburseLoan(
   userId:   string,
   group_id: string,
@@ -401,7 +458,18 @@ function computeNextDueDate(disbursedAt: Date | null, status: string): string | 
   return fmt(clamp(nextY, nextM % 12));
 }
 
-// ─── listLoans ───────────────────────────────────────────────────────────────
+/**
+ * Lists basket loans with computed outstanding interest, next due date, and repayment history; non-admins see only their own loans.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group whose loans to list
+ * @param filters - Optional filters
+ * @param filters.status - Restrict to `'active'`, `'repaid'`, or `'written_off'`
+ * @param filters.borrower_user_id - Admin-only filter to a single borrower
+ * @returns A promise resolving to the matching loans, each enriched with interest and repayment fields (empty array if none)
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ * @throws {AppError} 404 BASKET_NOT_FOUND if the group has no basket
+ */
 export async function listLoans(
   userId:   string,
   group_id: string,
@@ -524,7 +592,16 @@ export async function listLoans(
   });
 }
 
-// ─── getLoan ─────────────────────────────────────────────────────────────────
+/**
+ * Returns one loan's detail with its outstanding interest and full transaction history; members may view only their own loans.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group the loan belongs to
+ * @param loan_id - Loan to fetch
+ * @returns A promise resolving to the loan detail including borrower, amounts, status, and transactions
+ * @throws {AppError} 404 BASKET_NOT_FOUND / LOAN_NOT_FOUND if missing
+ * @throws {AppError} 403 FORBIDDEN if a non-admin requests another member's loan
+ */
 export async function getLoan(userId: string, group_id: string, loan_id: string) {
   const caller  = await assertActiveMember(group_id, userId);
   const isAdmin = caller.role === 'Admin';
@@ -582,7 +659,25 @@ export async function getLoan(userId: string, group_id: string, loan_id: string)
   };
 }
 
-// ─── repayLoan ───────────────────────────────────────────────────────────────
+/**
+ * Records a repayment of principal and/or interest on an active loan (admin only), crediting the basket in a transaction and closing the loan when principal is fully repaid; idempotent when a key is supplied.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the loan belongs to
+ * @param loan_id - Active loan being repaid
+ * @param data - Repayment details
+ * @param data.principal_repaid - Principal repaid in paise; if non-zero it must equal the full outstanding principal
+ * @param data.interest_paid - Interest paid in paise; must not exceed cumulative outstanding interest
+ * @param data.txn_date - Repayment date; also used to resolve the cycle when `cycle_id` is omitted (supports backdating)
+ * @param data.cycle_id - Explicit cycle to tag the repayment to
+ * @param data.notes - Optional note stored on the transactions
+ * @param data.idempotency_key - Optional key; a repeated call returns the cached result
+ * @returns A promise resolving to the updated interest totals, loan status, and resulting basket balance
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 400 INVALID_REQUEST if neither amount is positive
+ * @throws {AppError} 404 LOAN_NOT_FOUND if the loan is missing
+ * @throws {AppError} 409 LOAN_CLOSED, PRINCIPAL_EXCEEDS_OUTSTANDING, PARTIAL_PRINCIPAL_NOT_ALLOWED, or INTEREST_EXCEEDS_OUTSTANDING
+ */
 export async function repayLoan(
   userId:   string,
   group_id: string,
@@ -694,7 +789,20 @@ export async function repayLoan(
   return result;
 }
 
-// ─── bulkRepayMember ─────────────────────────────────────────────────────────
+/**
+ * Repays all of a member's active loans in one transaction per the chosen mode (admin only); idempotent when a key is supplied.
+ *
+ * @param adminUserId - The requesting admin
+ * @param group_id - Group the member's loans belong to
+ * @param data - Bulk repayment parameters
+ * @param data.member_user_id - Member whose active loans are repaid
+ * @param data.mode - `'interest_only'`, `'principal_only'`, or `'full_settlement'` (principal plus any outstanding interest)
+ * @param data.idempotency_key - Optional key; a repeated call returns the cached result
+ * @returns A promise resolving to the count of loans fully repaid and the total amount applied
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 BASKET_NOT_FOUND if the group has no basket
+ * @throws {AppError} 409 NO_ACTIVE_LOANS or NOTHING_TO_REPAY if there is nothing to apply
+ */
 export async function bulkRepayMember(
   adminUserId: string,
   group_id:    string,
@@ -841,7 +949,17 @@ export async function bulkRepayMember(
   return bulkResult;
 }
 
-// ─── deleteLoan ──────────────────────────────────────────────────────────────
+/**
+ * Hard-deletes an Active loan (admin only), removing its loan and basket transactions and reversing the disbursement's effect on the basket balance.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the loan belongs to
+ * @param loan_id - Active loan to delete
+ * @returns A promise resolving to `{ deleted: true, loan_id }`
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 BASKET_NOT_FOUND / LOAN_NOT_FOUND if missing
+ * @throws {AppError} 409 LOAN_NOT_ACTIVE if the loan is not Active
+ */
 export async function deleteLoan(
   userId:   string,
   group_id: string,
@@ -888,7 +1006,22 @@ export async function deleteLoan(
   return { deleted: true, loan_id };
 }
 
-// ─── updateLoan ──────────────────────────────────────────────────────────────
+/**
+ * Updates an Active loan (admin only): write it off, correct its principal (adjusting basket lent-out by the delta), reschedule the close date, or edit notes.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the loan belongs to
+ * @param loan_id - Active loan to update
+ * @param data - Fields to change (one of status/principal/date/notes per call)
+ * @param data.status - Only `'WrittenOff'` is permitted from Active
+ * @param data.principal - Corrected principal in paise; basket `total_lent_out` is adjusted by the delta
+ * @param data.expected_close_date - New expected close date
+ * @param data.notes - Updated note
+ * @returns A promise resolving to the refreshed loan record
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 LOAN_NOT_FOUND if the loan is missing
+ * @throws {AppError} 409 LOAN_CLOSED if not Active, or INVALID_TRANSITION for a disallowed status change
+ */
 export async function updateLoan(
   userId:   string,
   group_id: string,

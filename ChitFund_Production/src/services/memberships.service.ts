@@ -1,7 +1,15 @@
-// Business logic for group membership management.
-// Responsibilities: add member (look up by mobile or create placeholder + SMS invite),
-// enforce total_shares cap, update share_count (prevent reducing below wins_count),
-// soft-deactivate with audit log, two-step OTP admin transfer flow.
+/**
+ * @fileoverview Group-membership business logic for the ChitFund API. It owns
+ * adding members (looking up by mobile or creating a stub account with an SMS
+ * invite), updating share counts under the group's total-shares cap and
+ * wins-count floor, soft-deactivating members, the two-step OTP-confirmed admin
+ * transfer flow, the join-request approve/reject queue, member win history, and
+ * admin edits to a member's global profile. It also exports `assertActiveMember`,
+ * the shared membership guard reused by every other service to authorise
+ * group-scoped operations.
+ * @module services/memberships
+ * @author Suraj KM
+ */
 
 import { randomBytes } from 'crypto';
 import { eq, and, ilike, sum, gt, isNull, asc } from 'drizzle-orm';
@@ -11,9 +19,15 @@ import { AppError } from '../utils/AppError';
 import * as otpService from './otp.service';
 import { insertActivity } from './activity.service';
 
-// ─── Shared guard (imported by all other services) ───────────────────────────
-// Returns { id, role, share_count } for the caller's Active membership.
-// Throws GROUP_NOT_FOUND if the group doesn't exist, NOT_A_MEMBER otherwise.
+/**
+ * Shared guard that asserts a user holds an active membership in a group and returns it; reused by every service to authorise group-scoped work.
+ *
+ * @param group_id - Group to check membership in
+ * @param userId - User whose membership is required
+ * @returns A promise resolving to the caller's active membership `{ id, role, share_count }`
+ * @throws {AppError} 404 GROUP_NOT_FOUND if the group does not exist
+ * @throws {AppError} 403 NOT_A_MEMBER if the user has no active membership
+ */
 export async function assertActiveMember(group_id: string, userId: string) {
   const [m] = await db
     .select({ id: memberships.id, role: memberships.role, share_count: memberships.share_count })
@@ -37,7 +51,17 @@ export async function assertActiveMember(group_id: string, userId: string) {
   return m;
 }
 
-// ─── listMembers ─────────────────────────────────────────────────────────────
+/**
+ * Lists a group's members with their share/win counts and a computed win-eligibility flag; any active member may call it.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group whose members to list
+ * @param filters - Optional filters
+ * @param filters.status - `'active'` (default) or `'inactive'`
+ * @param filters.q - Case-insensitive name search
+ * @returns A promise resolving to the matching member rows, each with `is_eligible_to_win`
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ */
 export async function listMembers(
   userId:   string,
   group_id: string,
@@ -74,7 +98,20 @@ export async function listMembers(
   }));
 }
 
-// ─── addMember ───────────────────────────────────────────────────────────────
+/**
+ * Adds a member to a group before it starts (admin only), reusing an existing user or creating a stub account + SMS invite, while enforcing the share-capacity cap.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group to add the member to; must not have started or be closed
+ * @param data - New member details
+ * @param data.name - Member's display name (used when creating a stub account)
+ * @param data.mobile_number - E.164 mobile number used to find or create the user
+ * @param data.share_count - Shares to allocate (defaults to 1)
+ * @returns A promise resolving to the new membership id, user id, invitation flag, and status
+ * @throws {AppError} 400 INVALID_MOBILE if the number is not E.164
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 409 GROUP_LOCKED, SHARES_EXCEEDED, or ALREADY_MEMBER on capacity/state conflicts
+ */
 export async function addMember(
   userId:   string,
   group_id: string,
@@ -164,7 +201,20 @@ export async function addMember(
   return { ...result, status: 'Active' };
 }
 
-// ─── updateMember ────────────────────────────────────────────────────────────
+/**
+ * Changes a member's share count before the group starts (admin only), enforcing the capacity cap and refusing to drop below the member's win count.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the membership belongs to
+ * @param membership_id - Membership to update
+ * @param data - Update payload
+ * @param data.share_count - New share count; only the admin may hold 0
+ * @returns A promise resolving to the updated member view including `is_eligible_to_win`
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the membership is not in this group
+ * @throws {AppError} 409 FIELD_LOCKED, WINS_EXCEED_SHARES, or SHARES_EXCEEDED on conflicts
+ * @throws {AppError} 400 INVALID_SHARE_COUNT if a non-admin is set to 0 shares
+ */
 export async function updateMember(
   userId:        string,
   group_id:      string,
@@ -242,7 +292,20 @@ export async function updateMember(
   };
 }
 
-// ─── removeMember ────────────────────────────────────────────────────────────
+/**
+ * Soft-deactivates a member (admin only), requiring explicit confirmation when the group already has an active cycle and refusing to remove the admin.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the membership belongs to
+ * @param membership_id - Membership to deactivate
+ * @param data - Removal options
+ * @param data.reason - Optional note stored on the membership
+ * @param data.confirm_active_cycle - Must be `true` to remove once a cycle has started
+ * @returns A promise resolving to the membership id, new `'Inactive'` status, and deactivation timestamp
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the membership is not in this group
+ * @throws {AppError} 409 LAST_ADMIN if removing the admin, or CONFIRMATION_REQUIRED when a cycle is active
+ */
 export async function removeMember(
   userId:        string,
   group_id:      string,
@@ -291,7 +354,17 @@ export async function removeMember(
   return { membership_id, status: 'Inactive', deactivated_at: deactivatedAt };
 }
 
-// ─── initiateTransferAdmin ───────────────────────────────────────────────────
+/**
+ * Starts the two-step admin transfer (current admin only) by creating a 24-hour pending transfer and sending an OTP to both the current and prospective admin.
+ *
+ * @param userId - The current admin initiating the transfer
+ * @param group_id - Group whose admin role is being transferred
+ * @param membership_id - Membership of the active member who will become admin
+ * @returns A promise resolving to the new transfer id and its expiry timestamp
+ * @throws {AppError} 403 FORBIDDEN if the caller is not the current admin
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the target membership does not exist
+ * @throws {AppError} 409 INVALID_REQUEST if the target is inactive, already admin, or a transfer is already pending
+ */
 export async function initiateTransferAdmin(
   userId:        string,
   group_id:      string,
@@ -342,7 +415,17 @@ export async function initiateTransferAdmin(
   return { transfer_id: record.id, expires_at: record.expires_at };
 }
 
-// ─── confirmTransferAdmin ────────────────────────────────────────────────────
+/**
+ * Records one party's OTP confirmation of an admin transfer, swapping the admin role in a transaction once both the outgoing and incoming admin have confirmed.
+ *
+ * @param transferId - The pending transfer being confirmed
+ * @param otp - The admin-transfer OTP sent to the confirming party
+ * @param userId - The confirming user; must be either party to the transfer
+ * @returns A promise resolving to `{ status: 'completed' }` when both have confirmed, otherwise `{ status: 'pending' }`
+ * @throws {AppError} 404 NOT_FOUND if the transfer does not exist
+ * @throws {AppError} 403 FORBIDDEN if the caller is not a party to the transfer
+ * @throws {AppError} 409 INVALID_REQUEST if the transfer is completed, expired, or already confirmed by this party
+ */
 export async function confirmTransferAdmin(transferId: string, otp: string, userId: string) {
   const now = new Date();
 
@@ -399,7 +482,14 @@ export async function confirmTransferAdmin(transferId: string, otp: string, user
   return { status: 'pending', message: `Confirmation recorded. Waiting for the ${isFrom ? 'new' : 'current'} admin to confirm.` };
 }
 
-// ─── listJoinRequests ────────────────────────────────────────────────────────
+/**
+ * Lists the group's pending join requests (admin only) for the approval queue.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group whose pending requests to list
+ * @returns A promise resolving to the pending memberships with requester name, mobile, and requested share count
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ */
 export async function listJoinRequests(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') {
@@ -420,7 +510,19 @@ export async function listJoinRequests(userId: string, group_id: string) {
     .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Pending')));
 }
 
-// ─── approveJoinRequest ──────────────────────────────────────────────────────
+/**
+ * Approves a pending join request (admin only), activating the membership at the agreed share count within the capacity cap and notifying the member.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the request belongs to
+ * @param membership_id - Pending membership to approve
+ * @param data - Approval options
+ * @param data.share_count - Override share count; defaults to the member's requested amount
+ * @returns A promise resolving to the activated membership id, user id, final share count, and status
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the request does not exist
+ * @throws {AppError} 409 INVALID_REQUEST if not Pending, or SHARES_EXCEEDED beyond capacity
+ */
 export async function approveJoinRequest(
   userId:        string,
   group_id:      string,
@@ -493,7 +595,19 @@ export async function approveJoinRequest(
   return { membership_id, user_id: target.user_id, share_count: finalShares, status: 'Active' };
 }
 
-// ─── rejectJoinRequest ───────────────────────────────────────────────────────
+/**
+ * Rejects a pending join request (admin only), marking the membership inactive and notifying the requester with an optional reason.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the request belongs to
+ * @param membership_id - Pending membership to reject
+ * @param data - Rejection options
+ * @param data.reason - Optional reason included in the notification and stored as a note
+ * @returns A promise resolving to the membership id and its new `'Inactive'` status
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the request does not exist
+ * @throws {AppError} 409 INVALID_REQUEST if the membership is not Pending
+ */
 export async function rejectJoinRequest(
   userId:        string,
   group_id:      string,
@@ -539,7 +653,15 @@ export async function rejectJoinRequest(
   return { membership_id, status: 'Inactive' };
 }
 
-// ─── getMemberWins ───────────────────────────────────────────────────────────
+/**
+ * Returns a member's win history (the cycles they won, with bid breakdown); members may view their own, admins may view anyone's.
+ *
+ * @param callerId - The requesting user
+ * @param groupId - Group whose wins to read
+ * @param targetUserId - The member whose win history is requested
+ * @returns A promise resolving to the member's winning cycles ordered by month number
+ * @throws {AppError} 403 FORBIDDEN if a non-admin requests another member's wins
+ */
 export async function getMemberWins(callerId: string, groupId: string, targetUserId: string) {
   const caller = await assertActiveMember(groupId, callerId);
 
@@ -569,10 +691,20 @@ export async function getMemberWins(callerId: string, groupId: string, targetUse
   return rows;
 }
 
-// ─── updateMemberProfile ─────────────────────────────────────────────────────
-// Updates name and/or mobile_number on the users table for a member of the group.
-// Only the group admin may call this. Changes are global (not per-group) — the
-// user's display name and phone are updated everywhere they appear.
+/**
+ * Edits a member's name and/or mobile number on the shared `users` row (admin only); changes are global, not per-group, so they apply everywhere the user appears.
+ *
+ * @param callerId - The requesting admin
+ * @param group_id - Group used to authorise the edit and confirm active membership
+ * @param target_user_id - The user whose profile is being edited
+ * @param data - Fields to change
+ * @param data.name - New display name
+ * @param data.phone - New mobile number; must be unique across users
+ * @returns A promise resolving to the updated user id, name, and mobile number
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 MEMBER_NOT_FOUND if the target is not an active member
+ * @throws {AppError} 409 PHONE_TAKEN if the new number belongs to another user
+ */
 export async function updateMemberProfile(
   callerId: string,
   group_id: string,
@@ -633,7 +765,20 @@ export async function updateMemberProfile(
   };
 }
 
-// ─── remindMember ────────────────────────────────────────────────────────────
+/**
+ * Sends a payment reminder notification to a single active member (admin only).
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the membership belongs to
+ * @param membership_id - Membership to remind; must be active
+ * @param data - Reminder content
+ * @param data.channels - Delivery channels recorded on the notification (defaults to `['push']`)
+ * @param data.message - Custom reminder body; falls back to a default message
+ * @returns A promise resolving to `{ reminder_sent: true }`
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the membership is not in this group
+ * @throws {AppError} 409 INVALID_REQUEST if the member is not active
+ */
 export async function remindMember(
   userId:        string,
   group_id:      string,

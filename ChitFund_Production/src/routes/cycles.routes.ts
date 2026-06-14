@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Monthly cycle route definitions for the ChitFund API. It declares
+ * the endpoints for listing and viewing cycles, checking Double Chiti
+ * eligibility, and the admin-only cycle operations — recording winners (with
+ * multi-winner Double Chiti support), declaring skip months, editing the first
+ * winner within the correction window, closing, correcting, and reopening
+ * cycles. It exists to centralise the auction/cycle lifecycle routes while
+ * enforcing membership, admin authorisation, and Zod validation per endpoint.
+ * @module routes/cycles
+ * @author Suraj KM
+ */
+
 // Routes for monthly cycle management (require JWT + group membership):
 //   GET   /groups/:group_id/chiti-eligibility                     — Double Chiti eligibility (admin + member)
 //   GET   /groups/:group_id/cycles                                — list all cycles
@@ -15,6 +27,7 @@ import { validate } from '../middleware/validate';
 import { recordWinnerSchema, declareSkipMonthSchema, updateCycleSchema, correctCycleSchema } from '../validators/cycles.validators';
 import * as cycles from '../controllers/cycles.controller';
 
+/** Router for monthly cycle endpoints, mounted under `/groups`. */
 export const cyclesRouter = Router();
 
 cyclesRouter.use('/:group_id', authenticate, requireMember);

@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Current-user (`/me`) route definitions for the ChitFund API. It
+ * declares the endpoints a signed-in user uses to manage their own account —
+ * profile read/update, password change, active session listing and revocation,
+ * in-app notifications, notification preferences, and Web Push subscriptions.
+ * All routes require JWT auth and operate strictly on the authenticated caller,
+ * so it exists to keep self-service account and session management isolated from
+ * the group-scoped routers.
+ * @module routes/users
+ * @author Suraj KM
+ */
+
 // Routes for the current user's profile and session management (all require JWT):
 //   GET    /me
 //   PATCH  /me
@@ -16,6 +28,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
 import * as users from '../controllers/users.controller';
 
+/** Router for current-user profile and session endpoints, mounted at `/me`. */
 export const usersRouter = Router();
 
 usersRouter.use(authenticate);

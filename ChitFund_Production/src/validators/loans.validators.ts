@@ -1,6 +1,14 @@
-// Zod schemas for validating loan request bodies.
-// Covers: disburse loan (principal as positive paise integer, interest_rate within group bounds,
-// expected_close_date as future date), record repayment (principal_repaid + interest_paid as paise).
+/**
+ * @fileoverview Zod request-body schemas for the basket loan and adjustment
+ * endpoints of the ChitFund API — disburse loan, record repayment, basket
+ * adjustment, bulk member repayment, and loan update. It validates amounts as
+ * positive integer paise, dates as `YYYY-MM-DD`, and idempotency keys as UUIDs,
+ * and enforces cross-field rules (at least one of principal/interest on a
+ * repayment, at least one mutable field on a loan update). The loan's interest
+ * rate is inherited from the group and is deliberately not accepted in any body.
+ * @module validators/loans
+ * @author Suraj KM
+ */
 
 import { z } from 'zod';
 
@@ -8,6 +16,7 @@ const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a date in YY
 
 // ─── POST /groups/:group_id/loans ────────────────────────────────────────────
 // interest_rate is inherited from the group — not accepted in the request body.
+/** Validates the disburse-loan body (borrower id, principal in paise, optional close date/notes). */
 export const disburseLoanSchema = z.object({
   borrower_user_id:    z.string().uuid(),
   principal:           z.number().int().positive(),
@@ -20,6 +29,7 @@ export const disburseLoanSchema = z.object({
 // txn_date is required — the admin records the date the cash was received.
 // idempotency_key is optional — a client-generated UUID. If provided and the same
 // request was already processed successfully, the cached response is returned.
+/** Validates the repay-loan body (optional principal/interest in paise — at least one > 0 — txn date, optional cycle/notes/idempotency key). */
 export const repayLoanSchema = z.object({
   principal_repaid: z.number().int().min(0).optional(),
   interest_paid:    z.number().int().min(0).optional(),
@@ -33,6 +43,7 @@ export const repayLoanSchema = z.object({
 );
 
 // ─── POST /groups/:group_id/basket/adjustments ───────────────────────────────
+/** Validates the basket-adjustment body (direction C/D, positive amount in paise, required notes). */
 export const basketAdjustmentSchema = z.object({
   direction: z.enum(['C', 'D']),
   amount:    z.number().int().positive(),
@@ -40,6 +51,7 @@ export const basketAdjustmentSchema = z.object({
 });
 
 // ─── POST /groups/:group_id/loans/bulk-repay ─────────────────────────────────
+/** Validates the bulk-repay body (member id, repayment mode, optional idempotency key). */
 export const bulkRepaySchema = z.object({
   member_user_id:  z.string().uuid(),
   mode:            z.enum(['interest_only', 'principal_only', 'full_settlement']),
@@ -53,6 +65,7 @@ export const bulkRepaySchema = z.object({
 //   - expected_close_date             → extend / set the due date
 //   - notes                           → update notes (can be standalone)
 // At least one field must be present.
+/** Validates the update-loan body (optional write-off/principal/close-date/notes — at least one required). */
 export const updateLoanSchema = z.object({
   status:              z.literal('WrittenOff').optional(),
   principal:           z.number().int().positive().optional(),

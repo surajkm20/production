@@ -1,7 +1,14 @@
-// Business logic for payment tracking.
-// Responsibilities: mark payment paid/unpaid (with audit log), bulk-update,
-// validate paid_amount does not exceed expected_amount, enforce cycle-not-closed
-// guard before edits. All money arithmetic done in integer paise — never floats.
+/**
+ * @fileoverview Payment-tracking business logic for the ChitFund API. It lists a
+ * cycle's payments with computed totals, updates a single payment's status with
+ * the Paid/Unpaid/Waived consistency rules, performs transactional bulk marking,
+ * sends de-duplicated defaulter reminders, and returns a member's payment
+ * history. All amounts are handled as integer paise (never floats), every edit
+ * is guarded against closed cycles, and `paid_amount` is validated never to
+ * exceed `expected_amount`.
+ * @module services/payments
+ * @author Suraj KM
+ */
 
 import { eq, and, desc, inArray, gte } from 'drizzle-orm';
 import { db } from '../config/db';
@@ -13,7 +20,18 @@ import { notify } from './notifications.service';
 import { insertActivity } from './activity.service';
 
 
-// ─── listPayments ────────────────────────────────────────────────────────────
+/**
+ * Lists all payments for a cycle with per-member detail and aggregate totals, including the basket offset on the final cycle.
+ *
+ * @param userId - The requesting user, validated as an active member
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Cycle whose payments to list
+ * @param filters - Optional filters
+ * @param filters.status - Restrict to `'paid'`, `'unpaid'`, or `'waived'`; omitted/`'all'` returns every payment
+ * @returns A promise resolving to the filtered payment rows plus a summary block (totals, counts, final-cycle flag)
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle does not exist in this group
+ */
 export async function listPayments(
   userId:   string,
   group_id: string,
@@ -82,7 +100,23 @@ export async function listPayments(
   };
 }
 
-// ─── updatePayment ───────────────────────────────────────────────────────────
+/**
+ * Updates a single payment's status and/or amount (admin only), applying the Paid/Unpaid/Waived field rules and emitting activity + notifications when marked Paid.
+ *
+ * @param userId - The requesting admin, recorded as `marked_by` when marking Paid
+ * @param group_id - Group the payment belongs to
+ * @param payment_id - Payment to update
+ * @param data - Fields to change
+ * @param data.status - New status: `'Paid'`, `'Unpaid'`, or `'Waived'`
+ * @param data.paid_amount - Amount paid in paise; must not exceed the expected amount
+ * @param data.paid_at - ISO timestamp of payment; defaults to now when marking Paid
+ * @param data.notes - Free-text note to attach
+ * @returns A promise resolving to the updated payment's id, status, paid amount, and paid-at
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 PAYMENT_NOT_FOUND if the payment is not in this group
+ * @throws {AppError} 409 CYCLE_CLOSED if the cycle is closed
+ * @throws {AppError} 400 INVALID_STATUS or AMOUNT_EXCEEDS_EXPECTED on invalid input
+ */
 export async function updatePayment(
   userId:     string,
   group_id:   string,
@@ -170,7 +204,21 @@ export async function updatePayment(
   return { payment_id: updated.id, status: updated.status, paid_amount: updated.paid_amount, paid_at: updated.paid_at };
 }
 
-// ─── bulkMarkPayments ────────────────────────────────────────────────────────
+/**
+ * Marks many payments to a target status in one transaction (admin only), skipping any already in that status or outside the cycle.
+ *
+ * @param userId - The requesting admin, recorded as `marked_by` when marking Paid
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Cycle whose payments are being marked
+ * @param data - Bulk operation parameters
+ * @param data.payment_ids - Explicit payment ids, or the literal `'all_unpaid'` to target every unpaid payment in the cycle
+ * @param data.status - Target status: `'Paid'`, `'Unpaid'`, or `'Waived'`
+ * @param data.paid_at - ISO timestamp applied when marking Paid; defaults to now
+ * @returns A promise resolving to the updated count and the list of skipped ids
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 400 INVALID_STATUS for an unknown target status
+ * @throws {AppError} 404 CYCLE_NOT_FOUND or 409 CYCLE_CLOSED on cycle issues
+ */
 export async function bulkMarkPayments(
   userId:   string,
   group_id: string,
@@ -253,7 +301,18 @@ export async function bulkMarkPayments(
   return { data: { updated_count: toUpdate.length, skipped } };
 }
 
-// ─── remindDefaulters ────────────────────────────────────────────────────────
+/**
+ * Sends a payment reminder to every unpaid member of a cycle (admin only), de-duplicating anyone already reminded for this cycle today.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group the cycle belongs to; must not be closed
+ * @param cycle_id - Cycle whose defaulters to remind
+ * @param data - Reminder options
+ * @param data.channels - Delivery channels to record on the notification (defaults to `['push']`)
+ * @returns A promise resolving to the count of reminders sent and any failures
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 404 GROUP_NOT_FOUND / CYCLE_NOT_FOUND or 409 GROUP_CLOSED on invalid state
+ */
 export async function remindDefaulters(
   userId:   string,
   group_id: string,
@@ -318,7 +377,16 @@ export async function remindDefaulters(
   return { data: { reminders_sent: toRemind.length, failed: [] } };
 }
 
-// ─── memberPaymentHistory ────────────────────────────────────────────────────
+/**
+ * Returns a member's full payment history across the group's cycles (newest first); members may view their own, admins may view anyone's.
+ *
+ * @param userId - The requesting user
+ * @param group_id - Group whose cycles to report on
+ * @param target_user_id - The member whose history is requested
+ * @returns A promise resolving to the member's per-cycle payment rows with normalised amounts
+ * @throws {AppError} 403 FORBIDDEN if a non-admin requests another member's history
+ * @throws {AppError} 404 MEMBERSHIP_NOT_FOUND if the target has no membership in this group
+ */
 export async function memberPaymentHistory(
   userId:          string,
   group_id:        string,

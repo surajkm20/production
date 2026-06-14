@@ -1,9 +1,14 @@
-// Data-gathering service for all report endpoints.
-// Returns structured JSON for each report type.
-// To stream actual PDF/Excel files:
-//   npm install pdfkit exceljs
-//   npm install -D @types/pdfkit
-// Then replace sendSuccess(res, data) in the controller with file streaming.
+/**
+ * @fileoverview Report data-gathering service for the ChitFund API. Each function
+ * assembles the fully-structured JSON for one report type — group ledger, cycle
+ * summary, member history, closure split, and loan register — running the
+ * necessary joins/aggregations and normalising BIGINT paise columns to numbers.
+ * It exists to keep all reporting queries in one place and decoupled from output
+ * format: controllers currently return this JSON directly, and PDF/Excel
+ * streaming can be layered on later without touching these queries.
+ * @module services/reports
+ * @author Suraj KM
+ */
 
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
@@ -14,8 +19,15 @@ import {
 import { AppError } from '../utils/AppError';
 import { assertActiveMember } from './memberships.service';
 
-// ─── getGroupLedger ──────────────────────────────────────────────────────────
-// Full payment + basket ledger for admin. All cycles, all members, all payments.
+/**
+ * Builds the full admin ledger for a group: every cycle with its winners and per-member payments, plus basket totals.
+ *
+ * @param userId - The requesting user, who must be the group admin
+ * @param group_id - Group to build the ledger for
+ * @returns A promise resolving to the group, basket totals, and an array of cycles each containing their winners and payments
+ * @throws {AppError} 403 NOT_A_MEMBER / FORBIDDEN if the caller is not an active admin
+ * @throws {AppError} 404 GROUP_NOT_FOUND if the group does not exist
+ */
 export async function getGroupLedger(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
@@ -73,7 +85,16 @@ export async function getGroupLedger(userId: string, group_id: string) {
   };
 }
 
-// ─── getCycleSummary ─────────────────────────────────────────────────────────
+/**
+ * Builds a single cycle's summary: its winners, per-member payments, and aggregate paid/expected/defaulter totals.
+ *
+ * @param userId - The requesting user, who must be the group admin
+ * @param group_id - Group the cycle belongs to
+ * @param cycle_id - Cycle to summarise
+ * @returns A promise resolving to the cycle (with winners), its payments, and a computed summary block
+ * @throws {AppError} 403 NOT_A_MEMBER / FORBIDDEN if the caller is not an active admin
+ * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle does not exist in this group
+ */
 export async function getCycleSummary(userId: string, group_id: string, cycle_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
@@ -111,7 +132,16 @@ export async function getCycleSummary(userId: string, group_id: string, cycle_id
   };
 }
 
-// ─── getMemberHistory ────────────────────────────────────────────────────────
+/**
+ * Builds a member's payment history across all cycles in a group; members may view their own, admins may view anyone's.
+ *
+ * @param userId - The requesting user
+ * @param group_id - Group whose cycles to report on
+ * @param target_user_id - The member whose history is requested
+ * @returns A promise resolving to the member name, group name, and per-cycle payment rows
+ * @throws {AppError} 403 NOT_A_MEMBER / FORBIDDEN if a non-admin requests another member's history
+ * @throws {AppError} 404 NOT_FOUND if the target user does not exist
+ */
 export async function getMemberHistory(userId: string, group_id: string, target_user_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin' && userId !== target_user_id) throw new AppError(403, 'FORBIDDEN', 'You can only access your own history.');
@@ -135,7 +165,16 @@ export async function getMemberHistory(userId: string, group_id: string, target_
   };
 }
 
-// ─── getClosureReport ────────────────────────────────────────────────────────
+/**
+ * Builds the closure report for a closed group: the final basket balance split across members by share count.
+ *
+ * @param userId - The requesting user, who must be the group admin
+ * @param group_id - Group to report on; must already be closed
+ * @returns A promise resolving to the basket totals, the per-member closure split, the total distributed, and loan summaries
+ * @throws {AppError} 403 NOT_A_MEMBER / FORBIDDEN if the caller is not an active admin
+ * @throws {AppError} 404 GROUP_NOT_FOUND if the group does not exist
+ * @throws {AppError} 409 REPORT_NOT_AVAILABLE if the group has not been closed yet
+ */
 export async function getClosureReport(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');
@@ -184,7 +223,15 @@ export async function getClosureReport(userId: string, group_id: string) {
   };
 }
 
-// ─── getLoanRegister ─────────────────────────────────────────────────────────
+/**
+ * Builds the loan register for a group: every loan (newest first) with its full transaction history attached.
+ *
+ * @param userId - The requesting user, who must be the group admin
+ * @param group_id - Group whose basket loans to list
+ * @returns A promise resolving to all loans, each with normalised amounts and its transactions array
+ * @throws {AppError} 403 NOT_A_MEMBER / FORBIDDEN if the caller is not an active admin
+ * @throws {AppError} 404 BASKET_NOT_FOUND if the group has no basket
+ */
 export async function getLoanRegister(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Admin only.');

@@ -91,6 +91,22 @@ npx tsc --noEmit     # type-check without building
 - Response shape standardised via `src/utils/response.ts` helpers.
 - Validators live in `src/validators/` and are applied via `validate` middleware before controllers.
 
+## Documentation Style (JSDoc)
+- Use JSDoc for ALL exported functions, hooks, and React components
+- Do NOT include types in @param tags — TypeScript handles types
+- Format: `@param name - description` (dash separator)
+- Always include @returns
+- Add @example for hooks, utilities, and non-obvious functions
+- Add inline /** */ JSDoc on every field in Props interfaces
+- Keep summaries to ONE sentence — explain "why/when to use", not "what the code does"
+- Add @throws only when the function can explicitly throw
+- Never modify runtime logic when adding docs
+
+### What NOT to document
+- Private/internal helpers not exported
+- Self-explanatory one-liner utilities
+- Obvious getters/setters
+
 ## Known risks & gaps (gap analysis 2026-05-29)
 
 ### Fixed

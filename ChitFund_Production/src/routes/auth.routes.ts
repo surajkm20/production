@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Authentication route definitions for the ChitFund API. It wires
+ * up the public, JWT-free auth flow — signup with OTP verification, login,
+ * token refresh, logout, and password reset — attaching the appropriate rate
+ * limiters and Zod validators to each endpoint before delegating to the auth
+ * controller. It exists to declare the full set of credential and session
+ * endpoints in one place and to enforce abuse protection (OTP/login throttling)
+ * and input validation at the route boundary.
+ * @module routes/auth
+ * @author Suraj KM
+ */
+
 // Routes for authentication endpoints (all public — no JWT required):
 //   POST /auth/signup
 //   POST /auth/verify-otp
@@ -17,6 +29,7 @@ import {
 } from '../validators/auth.validators';
 import * as auth from '../controllers/auth.controller';
 
+/** Router for public authentication endpoints, mounted at `/auth`. */
 export const authRouter = Router();
 
 authRouter.post('/signup',          otpLimiter, validate(signupSchema),          auth.signup);

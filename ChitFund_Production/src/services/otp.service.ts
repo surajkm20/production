@@ -1,7 +1,13 @@
-// Handles OTP lifecycle: generate a 6-digit OTP, hash it, persist to otp_verifications,
-// verify a submitted OTP against the hash, enforce expiry and max-attempt limits.
-// Also calls the SMS provider (MSG91) to deliver the OTP. Separated from auth.service
-// because OTP logic is reused across signup, login, password reset, and admin transfer.
+/**
+ * @fileoverview OTP lifecycle service for the ChitFund API. It generates a
+ * cryptographically random 6-digit code, stores only its bcrypt hash in
+ * `otp_verifications`, delivers it via the MSG91 SMS provider, and verifies
+ * submitted codes while enforcing expiry and a max-attempt limit. It is kept
+ * separate from `auth.service` because the same OTP flow is reused across signup,
+ * password reset, and admin-transfer confirmation.
+ * @module services/otp
+ * @author Suraj KM
+ */
 
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -11,6 +17,7 @@ import { otp_verifications, sms_logs } from '../db/schema';
 import { env } from '../config/env';
 import { AppError } from '../utils/AppError';
 
+/** The flow an OTP is issued for, which scopes verification lookups. */
 export type OtpPurpose = 'signup' | 'password_reset' | 'admin_transfer';
 
 // crypto.randomInt gives a cryptographically secure, unbiased integer
@@ -18,6 +25,14 @@ function generateOtp(): string {
   return crypto.randomInt(100_000, 1_000_000).toString();
 }
 
+/**
+ * Issues a fresh OTP for a mobile number, persisting its hash and delivering the code by SMS.
+ *
+ * @param mobileNumber - Recipient mobile number in `+<country><number>` form
+ * @param purpose - The flow this OTP authorises
+ * @param pendingData - Serialised signup payload to carry until verification; on a signup resend with this omitted, it is recovered from the most recent signup OTP
+ * @returns A promise resolving to the OTP's expiry timestamp
+ */
 export async function sendOtp(
   mobileNumber: string,
   purpose: OtpPurpose,
@@ -58,6 +73,17 @@ export async function sendOtp(
   return { otp_expires_at: expires_at };
 }
 
+/**
+ * Verifies a submitted OTP against the latest unused, unexpired code for a mobile number and purpose, marking it verified on success.
+ *
+ * @param mobileNumber - Mobile number the OTP was sent to
+ * @param submittedOtp - The code the user entered
+ * @param purpose - The flow being verified; must match the issued OTP's purpose
+ * @returns A promise that resolves when verification succeeds
+ * @throws {AppError} 401 OTP_EXPIRED if no valid unverified OTP exists
+ * @throws {AppError} 429 OTP_MAX_ATTEMPTS if the attempt limit was already reached
+ * @throws {AppError} 401 OTP_INVALID if the submitted code does not match
+ */
 export async function verifyOtp(
   mobileNumber: string,
   submittedOtp: string,

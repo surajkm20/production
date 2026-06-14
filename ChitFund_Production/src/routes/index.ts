@@ -1,3 +1,14 @@
+/**
+ * @fileoverview Root API router for the ChitFund backend. It imports every domain
+ * router and mounts them under the `/v1` prefix, giving `app.ts` a single entry
+ * point to wire up the entire API surface. It exists to centralise route
+ * composition so that adding a new domain requires only one import and one
+ * `v1Router.use(...)` line here, keeping the server bootstrap clean and the
+ * URL namespace consistent.
+ * @module routes/index
+ * @author Suraj KM
+ */
+
 // Root router. Imports every domain router and mounts them under /v1.
 // app.ts imports this single file — adding a new domain only requires one line here.
 
@@ -12,6 +23,7 @@ import { basketRouter } from './basket.routes';
 import { analyticsRouter } from './analytics.routes';
 import { reportsRouter } from './reports.routes';
 
+/** Aggregate `/v1` router mounting every domain sub-router; import this in `app.ts`. */
 export const v1Router = Router();
 
 v1Router.use('/auth', authRouter);

@@ -1,8 +1,16 @@
-// Business logic for chit group lifecycle.
-// Responsibilities: create group (validate pool invariant, generate invitation code,
-// pre-create all monthly_cycles, create the basket row), start cycle 1, update group fields
-// (with lock checks for financial fields post-start), close group (validate all cycles closed
-// and no outstanding loans, compute and record CLOSURE_SPLIT basket transactions).
+/**
+ * @fileoverview Chit group lifecycle business logic for the ChitFund API. It
+ * creates groups (deriving the pool invariant, generating an invitation code,
+ * pre-creating every monthly cycle and the basket), lists a user's groups with
+ * cursor pagination and current-cycle enrichment, handles invitation-code joins
+ * as pending requests, returns full group detail, updates mutable fields with
+ * post-start lock checks, starts cycle 1, closes a group with the basket
+ * closure-split computation, rotates invitation codes, and force-deletes a group
+ * and all its data. It exists to keep every group-level state transition and its
+ * invariants in one place.
+ * @module services/groups
+ * @author Suraj KM
+ */
 
 import { randomBytes } from 'crypto';
 import { eq, and, lt, gt, desc, ilike, sum, count, inArray } from 'drizzle-orm';
@@ -154,7 +162,22 @@ async function fetchGroupDetail(userId: string, group_id: string) {
   };
 }
 
-// ─── createGroup ─────────────────────────────────────────────────────────────
+/**
+ * Creates a chit group with the caller as admin, pre-creating all monthly cycles and the basket in one transaction.
+ *
+ * @param userId - The creating user, enrolled as the group admin
+ * @param data - Group configuration
+ * @param data.name - Group display name
+ * @param data.monthly_contribution - Per-share monthly contribution in paise; with `total_shares` this fixes `pool_amount`
+ * @param data.total_shares - Total shares, which also equals the number of months/cycles
+ * @param data.start_month - First cycle month as an ISO date string
+ * @param data.payment_due_day - Day of month payments are due
+ * @param data.admin_commission_rate - Optional admin commission rate (percent)
+ * @param data.monthly_interest_rate - Optional basket loan interest rate (percent)
+ * @param data.admin_share_count - Shares allocated to the admin (defaults to 1)
+ * @returns A promise resolving to the created group's summary, including its invitation code
+ * @throws {AppError} 400 INVALID_SHARE_COUNT if `admin_share_count` exceeds `total_shares`
+ */
 export async function createGroup(
   userId: string,
   data: {
@@ -226,7 +249,18 @@ export async function createGroup(
   };
 }
 
-// ─── listGroups ──────────────────────────────────────────────────────────────
+/**
+ * Lists the groups a user actively belongs to, cursor-paginated and enriched with each group's current cycle, the user's payment status, and defaulter counts.
+ *
+ * @param userId - The user whose memberships to list
+ * @param filters - Filtering and pagination options
+ * @param filters.role - Restrict to `'admin'` or `'member'` memberships
+ * @param filters.status - `'active'` (default) or `'closed'` groups
+ * @param filters.q - Case-insensitive group-name search
+ * @param filters.cursor - Opaque pagination cursor from a previous page
+ * @param filters.limit - Page size (defaults to 20, capped at 100)
+ * @returns A promise resolving to the enriched group items, the next cursor, and a `has_more` flag
+ */
 export async function listGroups(
   userId:  string,
   filters: { role?: string; status?: string; q?: string; cursor?: string; limit?: number },
@@ -345,9 +379,17 @@ export async function listGroups(
   return { items: enriched, next_cursor, has_more };
 }
 
-// ─── joinGroup ───────────────────────────────────────────────────────────────
-// Creates a Pending membership (join request). Admin must approve before the
-// member becomes Active. Blocked once cycle 1 has started.
+/**
+ * Submits a join request against an invitation code, creating a Pending membership and notifying the admin; the member becomes Active only on approval.
+ *
+ * @param userId - The user requesting to join
+ * @param invitation_code - The group's current invitation code
+ * @param requested_share_count - Shares the user is requesting, bounded by remaining capacity
+ * @returns A promise resolving to the new pending membership summary and a confirmation message
+ * @throws {AppError} 409 INVITATION_INVALID / INVITATION_EXPIRED / GROUP_CLOSED / GROUP_LOCKED on code or state issues
+ * @throws {AppError} 409 ALREADY_MEMBER / REQUEST_ALREADY_SENT if the user already has a membership row
+ * @throws {AppError} 409 GROUP_FULL / SHARES_EXCEEDED if requested shares exceed remaining capacity
+ */
 export async function joinGroup(userId: string, invitation_code: string, requested_share_count: number) {
   const [group] = await db
     .select()
@@ -453,12 +495,35 @@ export async function joinGroup(userId: string, invitation_code: string, request
   };
 }
 
-// ─── getGroup ────────────────────────────────────────────────────────────────
+/**
+ * Returns full group detail for a member: config, basket totals, the current open cycle with its winners, aggregate share/people counts, and the caller's own membership.
+ *
+ * @param userId - The requesting user, who must be an active member
+ * @param group_id - Group to fetch
+ * @returns A promise resolving to the assembled group-detail object
+ * @throws {AppError} 404 GROUP_NOT_FOUND if the group does not exist
+ * @throws {AppError} 403 NOT_A_MEMBER if the caller is not an active member
+ */
 export async function getGroup(userId: string, group_id: string) {
   return fetchGroupDetail(userId, group_id);
 }
 
-// ─── updateGroup ─────────────────────────────────────────────────────────────
+/**
+ * Updates a group's mutable fields (admin only), re-deriving the pool and adding/removing pre-created cycles when `total_shares` changes; financial fields lock once the group has started.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group to update
+ * @param data - Fields to change
+ * @param data.name - New display name
+ * @param data.monthly_contribution - New per-share contribution (locked after start)
+ * @param data.total_shares - New share/month count; grows or trims the pre-created cycles (locked after start)
+ * @param data.start_month - New first-cycle month (locked after start)
+ * @param data.admin_commission_rate - New admin commission rate (locked after start)
+ * @param data.monthly_interest_rate - New basket loan interest rate
+ * @returns A promise resolving to the refreshed group detail
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 409 FIELD_LOCKED if locked financial fields are changed after the group has started
+ */
 export async function updateGroup(
   userId:   string,
   group_id: string,
@@ -549,7 +614,15 @@ export async function updateGroup(
   return fetchGroupDetail(userId, group_id);
 }
 
-// ─── startGroup ──────────────────────────────────────────────────────────────
+/**
+ * Starts the group (admin only): requires all shares filled, generates cycle 1's payment rows, and auto-rejects any outstanding join requests.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group to start
+ * @returns A promise resolving to the now-open first cycle's summary
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 409 GROUP_CLOSED, ALREADY_STARTED, or SHARES_NOT_FILLED on invalid state
+ */
 export async function startGroup(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Only the group admin can start the group.');
@@ -611,7 +684,15 @@ export async function startGroup(userId: string, group_id: string) {
   return { current_cycle: { cycle_id: cycle1.id, month_number: 1, status: 'Open', due_date: cycle1.due_date } };
 }
 
-// ─── closeGroup ──────────────────────────────────────────────────────────────
+/**
+ * Closes the group (admin only) once all cycles are closed and no loans are outstanding, computing each member's share-weighted closure split of the basket balance.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group to close
+ * @returns A promise resolving to the closed status, timestamp, per-member closure split, and total distributed
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ * @throws {AppError} 409 GROUP_CLOSED, CYCLES_PENDING, or LOANS_OUTSTANDING if preconditions are unmet
+ */
 export async function closeGroup(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Only the group admin can close the group.');
@@ -669,7 +750,14 @@ export async function closeGroup(userId: string, group_id: string) {
   };
 }
 
-// ─── rotateInvitationCode ────────────────────────────────────────────────────
+/**
+ * Generates a fresh invitation code with a new 24-hour expiry (admin only), invalidating the previous code.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group whose invitation code to rotate
+ * @returns A promise resolving to the new code and its ISO expiry timestamp
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ */
 export async function rotateInvitationCode(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') {
@@ -685,7 +773,14 @@ export async function rotateInvitationCode(userId: string, group_id: string) {
   return { invitation_code: newCode, invitation_code_expires_at: expiresAt.toISOString() };
 }
 
-// ─── forceDeleteGroup ─────────────────────────────────────────────────────────
+/**
+ * Permanently deletes a group and all of its data — cycles, payments, winners, loans, transactions, memberships, notifications, and activity — in one transaction (admin only); irreversible.
+ *
+ * @param userId - The requesting admin
+ * @param group_id - Group to delete along with every dependent record
+ * @returns A promise resolving to `{ deleted: true, group_id }`
+ * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
+ */
 export async function forceDeleteGroup(userId: string, group_id: string) {
   const caller = await assertActiveMember(group_id, userId);
   if (caller.role !== 'Admin') throw new AppError(403, 'FORBIDDEN', 'Only the group admin can delete the group.');

@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Basket and loan route definitions for the ChitFund API. It maps
+ * the endpoints for viewing a group's basket and ledger, recording manual basket
+ * adjustments, and the full loan lifecycle — disburse, list, detail, repay,
+ * write-off/extend, delete, and bulk repayment — with admin-only mutations
+ * guarded by `requireAdmin` and bodies validated via Zod. It exists to expose
+ * the group's pooled-funds and lending operations under one router while
+ * enforcing membership, admin authorisation, and input validation consistently.
+ * @module routes/basket
+ * @author Suraj KM
+ */
+
 // Routes for basket and loan management (require JWT + group membership):
 //   GET    /groups/:group_id/basket                          — basket overview (members see limited view)
 //   GET    /groups/:group_id/basket/transactions             — ledger entries
@@ -16,6 +28,7 @@ import { validate } from '../middleware/validate';
 import { disburseLoanSchema, repayLoanSchema, updateLoanSchema, basketAdjustmentSchema, bulkRepaySchema } from '../validators/loans.validators';
 import * as basket from '../controllers/basket.controller';
 
+/** Router for basket and loan endpoints, mounted under `/groups`. */
 export const basketRouter = Router();
 
 basketRouter.use('/:group_id', authenticate, requireMember);

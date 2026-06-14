@@ -1,29 +1,42 @@
-// Notification delivery dispatcher.
-// Inserts notification rows and attempts Web Push delivery to registered devices.
-// Respects per-user, per-group mute preferences.
-//
-// Web Push requires VAPID signing (RFC 8030) + AES-GCM payload encryption (RFC 8291).
-// This service has the full pipeline wired; the actual HTTP send is stubbed pending:
-//   npm install web-push && npm install -D @types/web-push
-// Then replace tryPushSend() below with:
-//   webpush.setVapidDetails(`mailto:${env.VAPID_CONTACT_EMAIL}`, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
-//   await webpush.sendNotification({ endpoint, keys: { p256dh: p256dh_key, auth: auth_key } }, payload);
+/**
+ * @fileoverview Notification delivery service for the ChitFund API. It persists an
+ * in-app notification row and then attempts Web Push delivery to all of the
+ * user's registered devices, honouring per-user and per-group mute preferences.
+ * It exists to centralise the "store + push" pipeline so callers fire a single
+ * `notify(...)` and get reliable in-app delivery plus best-effort push. The
+ * VAPID/AES-GCM push pipeline is fully wired but the final HTTP send is stubbed
+ * until the `web-push` dependency is installed (see `tryPushSend`).
+ * @module services/notifications
+ * @author Suraj KM
+ */
 
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../config/db';
 import { notifications, notification_preferences, push_subscriptions } from '../db/schema';
 import { env } from '../config/env';
 
+/** Payload describing a single notification to store and push. */
 export type NotificationInput = {
+  /** Recipient user id. */
   user_id:   string;
+  /** Originating group id, or omitted for account-level notifications. */
   group_id?: string;
+  /** Notification type key used for client-side grouping/icons. */
   type:      string;
+  /** Short headline shown in the in-app list and push banner. */
   title:     string;
+  /** Longer body text shown beneath the title. */
   body:      string;
+  /** Optional structured payload (e.g. deep-link ids) attached to the row. */
   data?:     Record<string, unknown>;
 };
 
-// Main entry point. Inserts the DB row then fires push dispatch (non-blocking).
+/**
+ * Stores an in-app notification and triggers best-effort push delivery to the user's devices.
+ *
+ * @param input - The notification to create and dispatch
+ * @returns A promise resolving to the new notification's id; push delivery runs in the background and does not affect this result
+ */
 export async function notify(input: NotificationInput): Promise<string> {
   const [row] = await db
     .insert(notifications)

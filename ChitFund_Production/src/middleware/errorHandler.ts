@@ -1,12 +1,28 @@
-// Global Express error handler. Must be registered last in app.ts (after all routes).
-// Catches AppError instances and maps them to { error: { code, message, details, request_id } }.
-// Catches unexpected errors (unknown throws) and returns INTERNAL_ERROR (500)
-// without leaking stack traces to the client.
+/**
+ * @fileoverview Global Express error-handling middleware for the ChitFund API.
+ * It is the single terminal handler (registered last in `app.ts`) that catches
+ * everything bubbling out of routes — Zod validation failures, application-level
+ * `AppError`s, and unexpected throws — and maps each to the project's standard
+ * JSON error envelope `{ error: { code, message, details } }`. It exists so that
+ * clients always receive a predictable error shape and so that unexpected
+ * failures return a generic INTERNAL_ERROR (500) without leaking stack traces.
+ * @module middleware/errorHandler
+ * @author TODO
+ */
 
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { AppError } from '../utils/AppError';
 
+/**
+ * Terminal Express error handler that converts thrown errors into the standard JSON error envelope — register it last in `app.ts`, after all routes.
+ *
+ * @param err - The thrown value; `ZodError` and `AppError` get structured responses, anything else becomes a 500 INTERNAL_ERROR with no stack leak
+ * @param req - Unused request object
+ * @param res - Response used to send the mapped error status and body
+ * @param _next - Unused; present so Express recognises this as an error-handling middleware
+ * @returns Nothing; writes the response directly
+ */
 export function errorHandler(
   err: unknown,
   req: Request,

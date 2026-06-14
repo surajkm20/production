@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Chit group lifecycle route definitions for the ChitFund API. It
+ * covers creating and listing groups, joining via invitation code, viewing and
+ * updating group details, starting the first cycle, closing the group (which
+ * triggers the closure split), rotating the invitation code, force-deleting a
+ * group, and reading its activity feed. It exists to express the full group
+ * lifecycle in one router while layering JWT auth, membership, and admin guards
+ * exactly where each operation requires them.
+ * @module routes/groups
+ * @author Suraj KM
+ */
+
 // Routes for chit group lifecycle (require JWT; admin-only routes noted inline):
 //   POST  /groups                              — create group [admin created]
 //   GET   /groups                              — list groups the caller belongs to
@@ -17,6 +29,7 @@ import { validate } from '../middleware/validate';
 import { createGroupSchema, updateGroupSchema, joinGroupSchema } from '../validators/groups.validators';
 import * as groups from '../controllers/groups.controller';
 
+/** Router for chit group lifecycle endpoints, mounted at `/groups`. */
 export const groupsRouter = Router();
 
 groupsRouter.use(authenticate);

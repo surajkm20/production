@@ -1,7 +1,14 @@
-// Business logic for authentication flows.
-// Responsibilities: create user on signup, hash and verify passwords (bcrypt),
-// issue and verify JWTs, store and rotate refresh tokens, and orchestrate
-// the forgot-password reset flow. No req/res — receives plain data, returns results or throws AppError.
+/**
+ * @fileoverview Authentication business logic for the ChitFund API. It owns the
+ * full credential lifecycle: OTP-gated signup (including claiming admin-created
+ * stub accounts), login, JWT access-token issuance, refresh-token storage and
+ * rotation, logout, and the forgot/reset-password flow. It is transport-agnostic
+ * — functions take plain data and return results or throw `AppError`, never
+ * touching req/res — so controllers stay thin and the same logic is testable in
+ * isolation.
+ * @module services/auth
+ * @author Suraj KM
+ */
 
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -60,6 +67,18 @@ async function issueTokenPair(
 
 // ─── exported service functions ─────────────────────────────────────────────
 
+/**
+ * Begins signup by validating uniqueness and sending a verification OTP; the user row is only created once the OTP is confirmed.
+ *
+ * @param data - Signup details
+ * @param data.name - User's display name
+ * @param data.mobile_number - Mobile number in `+<country><number>` form; must not already belong to a verified account
+ * @param data.password - Plaintext password, hashed with bcrypt before storage
+ * @param data.username - Optional unique username
+ * @returns A promise resolving to the OTP-sent flag and expiry; `user_id` is included only when claiming an existing stub/orphan account
+ * @throws {AppError} 409 MOBILE_TAKEN if the mobile already belongs to a verified user
+ * @throws {AppError} 409 USERNAME_TAKEN if the username is already in use
+ */
 export async function signup(data: {
   name: string;
   mobile_number: string;
@@ -135,6 +154,16 @@ export async function signup(data: {
   return { otp_sent: true, otp_expires_at };
 }
 
+/**
+ * Confirms the signup OTP, creating (or marking verified) the user account and returning a logged-in token pair.
+ *
+ * @param mobileNumber - Mobile number being verified
+ * @param otp - The code the user entered
+ * @param deviceInfo - Optional device descriptor recorded against the new session
+ * @returns A promise resolving to the user id plus a fresh access/refresh token pair
+ * @throws {AppError} 401 OTP_EXPIRED / OTP_INVALID / 429 OTP_MAX_ATTEMPTS via OTP verification
+ * @throws {AppError} 404 NOT_FOUND if a stub/orphan account expected to exist is missing
+ */
 export async function verifySignupOtp(
   mobileNumber: string,
   otp: string,
@@ -198,6 +227,17 @@ export async function verifySignupOtp(
   return { user_id: userId, ...tokens };
 }
 
+/**
+ * Authenticates a user by mobile-or-username plus password and issues a new token pair.
+ *
+ * @param identifier - Either the user's mobile number or username
+ * @param password - Plaintext password, compared against the stored bcrypt hash
+ * @param deviceInfo - Optional device descriptor recorded against the new session
+ * @returns A promise resolving to the user id plus a fresh access/refresh token pair
+ * @throws {AppError} 404 USER_NOT_FOUND if no matching account exists
+ * @throws {AppError} 401 MOBILE_NOT_VERIFIED if the account has not completed OTP verification
+ * @throws {AppError} 401 INVALID_CREDENTIALS if the password does not match
+ */
 export async function login(
   identifier: string,
   password: string,
@@ -231,6 +271,14 @@ export async function login(
   return { user_id: user.id, ...tokens };
 }
 
+/**
+ * Exchanges a valid refresh token for a new access token, rotating the session's `jti`.
+ *
+ * @param rawToken - The raw (unhashed) refresh token presented by the client
+ * @returns A promise resolving to a new access token and its lifetime in seconds
+ * @throws {AppError} 401 REFRESH_TOKEN_INVALID if the token is unknown or expired
+ * @throws {AppError} 401 REFRESH_TOKEN_REVOKED if the token has been revoked
+ */
 export async function refreshAccessToken(
   rawToken: string,
 ): Promise<{ access_token: string; expires_in: number }> {
@@ -267,6 +315,12 @@ export async function refreshAccessToken(
   return { access_token, expires_in: parseExpiresInSeconds(env.JWT_ACCESS_EXPIRES_IN) };
 }
 
+/**
+ * Revokes the refresh token for the current session, ending it; safe to call even if the token is already revoked or unknown.
+ *
+ * @param rawToken - The raw (unhashed) refresh token to revoke
+ * @returns A promise that resolves once the revocation update completes
+ */
 export async function logout(rawToken: string): Promise<void> {
   const tokenHash = hashToken(rawToken);
 
@@ -276,6 +330,12 @@ export async function logout(rawToken: string): Promise<void> {
     .where(and(eq(refresh_tokens.token_hash, tokenHash), isNull(refresh_tokens.revoked_at)));
 }
 
+/**
+ * Starts the password-reset flow by sending a reset OTP, returning an identical response whether or not the mobile exists to avoid account enumeration.
+ *
+ * @param mobileNumber - Mobile number requesting a password reset
+ * @returns A promise resolving to the OTP-sent flag and expiry (a decoy expiry is returned for unknown numbers)
+ */
 export async function forgotPassword(
   mobileNumber: string,
 ): Promise<{ otp_sent: boolean; otp_expires_at: Date }> {
@@ -295,6 +355,16 @@ export async function forgotPassword(
   return { otp_sent: true, otp_expires_at };
 }
 
+/**
+ * Completes a password reset: validates the reset OTP, sets the new password, and revokes all active sessions so every device must re-login.
+ *
+ * @param mobileNumber - Mobile number whose password is being reset
+ * @param submittedOtp - The reset code the user entered (accepted whether or not verify-otp was called first)
+ * @param newPassword - The new plaintext password, hashed with bcrypt before storage
+ * @returns A promise resolving to `{ success: true }` on completion
+ * @throws {AppError} 401 OTP_EXPIRED / OTP_INVALID or 429 OTP_MAX_ATTEMPTS on OTP failure
+ * @throws {AppError} 404 NOT_FOUND if the user no longer exists
+ */
 export async function resetPassword(
   mobileNumber: string,
   submittedOtp: string,
