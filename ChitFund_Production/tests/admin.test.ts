@@ -21,13 +21,15 @@ describe('SuperAdmin admin-console gating', () => {
     expect(res.body.error.code).toBe('FORBIDDEN_SUPERADMIN_ONLY');
   });
 
-  it('allows a SuperAdmin caller through to the endpoint', async () => {
+  it('allows a SuperAdmin caller through to the endpoint and returns Money tab shape', async () => {
     const superAdmin = await createUser({ role: 'SuperAdmin' });
     const res = await request(app)
       .get('/v1/admin/analytics/money')
       .set('Authorization', `Bearer ${superAdmin.token}`);
     expect(res.status).toBe(200);
-    expect(res.body.data.tab).toBe('money');
+    expect(typeof res.body.data.gmv_lifetime).toBe('number');
+    expect(typeof res.body.data.gmv_in_range).toBe('number');
+    expect(Array.isArray(res.body.data.top_groups_by_gmv)).toBe(true);
   });
 });
 

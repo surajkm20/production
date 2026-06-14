@@ -10,15 +10,15 @@
  */
 
 // Routes for the SuperAdmin Admin Console (all require JWT + users.role = 'SuperAdmin'):
-//   GET /admin/analytics/money          (Money tab — placeholder until Step 1 lands the aggregations)
+//   GET /admin/analytics/money          (Money tab — live aggregations via admin.service)
 //   GET /admin/analytics/growth         (Growth tab — TODO)
 //   GET /admin/analytics/engagement     (Engagement tab — TODO)
 //   GET /admin/analytics/reliability    (Reliability tab — TODO)
 
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
 import { requireSuperAdmin } from '../middleware/requireSuperAdmin';
-import { sendSuccess } from '../utils/response';
+import { moneyAnalytics } from '../controllers/admin.controller';
 
 /** Router for SuperAdmin Admin-Console endpoints, mounted at `/admin`. */
 export const adminRouter = Router();
@@ -26,8 +26,4 @@ export const adminRouter = Router();
 // Every /admin route is gated: must be authenticated AND a platform SuperAdmin.
 adminRouter.use(authenticate, requireSuperAdmin);
 
-// Placeholder so the SuperAdmin security boundary is wired and testable now.
-// Replaced by the real Money-tab aggregation controller in the next step.
-adminRouter.get('/analytics/money', (_req: Request, res: Response) => {
-  sendSuccess(res, { tab: 'money', status: 'not_implemented' });
-});
+adminRouter.get('/analytics/money', moneyAnalytics);
