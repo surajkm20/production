@@ -677,3 +677,183 @@ export async function getEngagementAnalytics(range: string) {
     bottom_groups_by_compliance,
   };
 }
+
+/**
+ * Aggregates platform-wide Reliability tab metrics: cycle on-time closure rate,
+ * overdue open cycles, loan repayment reliability, group completion rate,
+ * and a leaderboard of groups with the most overdue cycles.
+ *
+ * Cycle metrics are range-scoped by `due_date`. Loan and group metrics are
+ * all-time (their lifecycles span months and are not meaningful when windowed).
+ * Overdue counts are always a live snapshot.
+ *
+ * @param range - Time window; one of `24h | 7d | 30d | 90d | all` (default `30d`)
+ * @throws {AppError} 400 INVALID_RANGE if range is not in the allowed set
+ */
+export async function getReliabilityAnalytics(range: string) {
+  if (!VALID_RANGES.has(range)) {
+    throw new AppError(400, 'INVALID_RANGE', `range must be one of: ${[...VALID_RANGES].join(', ')}`);
+  }
+
+  const rangeStart = getRangeStart(range);
+  const gran       = getGranularity(range);
+  const since      = rangeStart ?? new Date(0);
+  const sinceDate  = since.toISOString().slice(0, 10);
+
+  const adminM = alias(memberships, 'admin_m');
+
+  // Closed non-skip cycles whose due_date is within the range.
+  const closedCycleCond = and(
+    eq(monthly_cycles.status, 'Closed'),
+    eq(monthly_cycles.is_skip_month, false),
+    isNotNull(monthly_cycles.closed_at),
+    gte(monthly_cycles.due_date, sinceDate),
+  );
+
+  const [
+    cycleClosureRows,
+    overdueOpenRows,
+    loanStatusRows,
+    groupStatusRows,
+    closureSeriesRows,
+    overdueGroupRows,
+  ] = await Promise.all([
+
+    // 1. On-time vs late cycle closures in range.
+    //    "On time" = admin closed the cycle on or before the due_date.
+    //    avg_delay_days = mean days late for cycles that were closed late.
+    db.select({
+      on_time:        sql<number>`COUNT(*) FILTER (WHERE ${monthly_cycles.closed_at}::date <= ${monthly_cycles.due_date}::date)`,
+      late:           sql<number>`COUNT(*) FILTER (WHERE ${monthly_cycles.closed_at}::date >  ${monthly_cycles.due_date}::date)`,
+      avg_delay_days: sql<number>`COALESCE(ROUND(AVG(${monthly_cycles.closed_at}::date - ${monthly_cycles.due_date}::date) FILTER (WHERE ${monthly_cycles.closed_at}::date > ${monthly_cycles.due_date}::date), 1), 0)`,
+    })
+    .from(monthly_cycles)
+    .where(closedCycleCond),
+
+    // 2. Overdue open cycles — due_date has passed but cycle is still Open (live snapshot).
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(monthly_cycles)
+      .where(and(
+        eq(monthly_cycles.status, 'Open'),
+        eq(monthly_cycles.is_skip_month, false),
+        sql`${monthly_cycles.due_date}::date < CURRENT_DATE`,
+      )),
+
+    // 3. Loan status breakdown — all-time (loan lifecycles are multi-month, not windowed).
+    db.select({
+      status: loans.status,
+      count:  sql<number>`COUNT(*)`,
+    })
+    .from(loans)
+    .groupBy(loans.status),
+
+    // 4. Group status breakdown — all-time.
+    db.select({
+      status: chit_groups.status,
+      count:  sql<number>`COUNT(*)`,
+    })
+    .from(chit_groups)
+    .groupBy(chit_groups.status),
+
+    // 5. Cycle closure series — on-time vs late per date bucket (by due_date).
+    db.select({
+      date:    sql<string>`DATE_TRUNC(${gran}, ${monthly_cycles.due_date}::timestamp)`,
+      on_time: sql<number>`COUNT(*) FILTER (WHERE ${monthly_cycles.closed_at}::date <= ${monthly_cycles.due_date}::date)`,
+      late:    sql<number>`COUNT(*) FILTER (WHERE ${monthly_cycles.closed_at}::date >  ${monthly_cycles.due_date}::date)`,
+    })
+    .from(monthly_cycles)
+    .where(closedCycleCond)
+    .groupBy(sql`1`)
+    .orderBy(sql`1`),
+
+    // 6. Groups with overdue open cycles — ranked by oldest overdue cycle (live snapshot).
+    //    Shows platform operators which groups need immediate admin attention.
+    db.select({
+      group_id:            chit_groups.id,
+      name:                chit_groups.name,
+      admin_name:          users.name,
+      overdue_count:       sql<number>`COUNT(${monthly_cycles.id})`,
+      oldest_overdue_days: sql<number>`MAX(CURRENT_DATE - ${monthly_cycles.due_date}::date)`,
+    })
+    .from(monthly_cycles)
+    .innerJoin(chit_groups, eq(chit_groups.id, monthly_cycles.group_id))
+    .innerJoin(adminM, and(
+      eq(adminM.group_id, chit_groups.id),
+      eq(adminM.role, 'Admin'),
+      eq(adminM.status, 'Active'),
+    ))
+    .innerJoin(users, eq(users.id, adminM.user_id))
+    .where(and(
+      eq(monthly_cycles.status, 'Open'),
+      eq(monthly_cycles.is_skip_month, false),
+      sql`${monthly_cycles.due_date}::date < CURRENT_DATE`,
+    ))
+    .groupBy(chit_groups.id, chit_groups.name, users.name)
+    .orderBy(sql`MAX(CURRENT_DATE - ${monthly_cycles.due_date}::date) DESC`)
+    .limit(5),
+  ]);
+
+  // ── Cycle closure scalars ──────────────────────────────────────────────────
+  const cr = cycleClosureRows[0];
+  const cycles_closed_on_time  = Number(cr?.on_time        ?? 0);
+  const cycles_closed_late     = Number(cr?.late           ?? 0);
+  const avg_closure_delay_days = Number(cr?.avg_delay_days ?? 0);
+  const total_closed           = cycles_closed_on_time + cycles_closed_late;
+  const on_time_closure_rate_pct = total_closed > 0
+    ? Number(((cycles_closed_on_time / total_closed) * 100).toFixed(1))
+    : 0;
+
+  const overdue_open_cycles = Number(overdueOpenRows[0]?.count ?? 0);
+
+  // ── Loan reliability ───────────────────────────────────────────────────────
+  const repaidRow     = loanStatusRows.find(r => r.status === 'Repaid');
+  const writtenOffRow = loanStatusRows.find(r => r.status === 'WrittenOff');
+  const loans_repaid      = Number(repaidRow?.count     ?? 0);
+  const loans_written_off = Number(writtenOffRow?.count ?? 0);
+  const closed_loans      = loans_repaid + loans_written_off;
+  const loan_repayment_rate_pct = closed_loans > 0
+    ? Number(((loans_repaid / closed_loans) * 100).toFixed(1))
+    : 0;
+
+  // ── Group reliability ──────────────────────────────────────────────────────
+  const activeGroupRow = groupStatusRows.find(r => r.status === 'Active');
+  const closedGroupRow = groupStatusRows.find(r => r.status === 'Closed');
+  const groups_active    = Number(activeGroupRow?.count ?? 0);
+  const groups_completed = Number(closedGroupRow?.count ?? 0);
+  const total_groups     = groups_active + groups_completed;
+  const group_completion_rate_pct = total_groups > 0
+    ? Number(((groups_completed / total_groups) * 100).toFixed(1))
+    : 0;
+
+  // ── Cycle closure series ──────────────────────────────────────────────────
+  const cycle_closure_series = closureSeriesRows.map(r => ({
+    date:    String(r.date),
+    on_time: Number(r.on_time),
+    late:    Number(r.late),
+  }));
+
+  // ── Overdue groups ─────────────────────────────────────────────────────────
+  const groups_with_overdue_cycles = overdueGroupRows.map(r => ({
+    group_id:            r.group_id,
+    name:                r.name,
+    admin_name:          r.admin_name,
+    overdue_count:       Number(r.overdue_count),
+    oldest_overdue_days: Number(r.oldest_overdue_days),
+  }));
+
+  return {
+    cycles_closed_on_time,
+    cycles_closed_late,
+    on_time_closure_rate_pct,
+    avg_closure_delay_days,
+    overdue_open_cycles,
+    loans_repaid,
+    loans_written_off,
+    loan_repayment_rate_pct,
+    groups_active,
+    groups_completed,
+    group_completion_rate_pct,
+    cycle_closure_series,
+    groups_with_overdue_cycles,
+  };
+}

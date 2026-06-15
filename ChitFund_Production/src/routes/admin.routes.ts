@@ -18,7 +18,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
 import { requireSuperAdmin } from '../middleware/requireSuperAdmin';
-import { moneyAnalytics, growthAnalytics, engagementAnalytics } from '../controllers/admin.controller';
+import { moneyAnalytics, growthAnalytics, engagementAnalytics, reliabilityAnalytics } from '../controllers/admin.controller';
 
 /** Router for SuperAdmin Admin-Console endpoints, mounted at `/admin`. */
 export const adminRouter = Router();
@@ -29,3 +29,4 @@ adminRouter.use(authenticate, requireSuperAdmin);
 adminRouter.get('/analytics/growth',      growthAnalytics);
 adminRouter.get('/analytics/money',       moneyAnalytics);
 adminRouter.get('/analytics/engagement',  engagementAnalytics);
+adminRouter.get('/analytics/reliability', reliabilityAnalytics);
