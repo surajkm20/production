@@ -27,6 +27,28 @@ export interface GrowthAnalytics {
   signup_source_breakdown: { source: string; count: number; pct: number }[]
 }
 
+export interface ReliabilityAnalytics {
+  cycles_closed_on_time: number
+  cycles_closed_late: number
+  on_time_closure_rate_pct: number
+  avg_closure_delay_days: number
+  overdue_open_cycles: number
+  loans_repaid: number
+  loans_written_off: number
+  loan_repayment_rate_pct: number
+  groups_active: number
+  groups_completed: number
+  group_completion_rate_pct: number
+  cycle_closure_series: { date: string; on_time: number; late: number }[]
+  groups_with_overdue_cycles: {
+    group_id: string
+    name: string
+    admin_name: string
+    overdue_count: number
+    oldest_overdue_days: number
+  }[]
+}
+
 export interface EngagementAnalytics {
   total_payments_due: number
   total_payments_collected: number

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
-import type { GrowthAnalytics, MoneyAnalytics, EngagementAnalytics, EngagementGroupRow } from '../types/api'
+import type { GrowthAnalytics, MoneyAnalytics, EngagementAnalytics, EngagementGroupRow, ReliabilityAnalytics } from '../types/api'
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -13,12 +13,12 @@ const RANGE_SUBLABEL: Record<Range, string> = {
   '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '90d': 'last 90 days', all: 'all time',
 }
 
-type Tab = 'growth' | 'money' | 'engagement'
-const TABS: { id: Tab | 'reliability'; label: string; soon?: boolean }[] = [
+type Tab = 'growth' | 'money' | 'engagement' | 'reliability'
+const TABS: { id: Tab; label: string }[] = [
   { id: 'growth',      label: 'Growth' },
   { id: 'money',       label: 'Money' },
   { id: 'engagement',  label: 'Engage' },
-  { id: 'reliability', label: 'Reliab.', soon: true },
+  { id: 'reliability', label: 'Reliab.' },
 ]
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -605,6 +605,207 @@ function EngagementTab({ range }: { range: Range }) {
   )
 }
 
+// ─── Reliability tab ──────────────────────────────────────────────────────────
+
+function ReliabilityTab({ range }: { range: Range }) {
+  const navigate = useNavigate()
+  const [data, setData] = useState<ReliabilityAnalytics | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => { load() }, [range])
+
+  async function load() {
+    setLoading(true)
+    setError(false)
+    try {
+      setData(await api.get<ReliabilityAnalytics>(`/admin/analytics/reliability?range=${range}`))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) navigate('/dashboard', { replace: true })
+      else setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) return <Spinner />
+  if (error)   return <ErrorState onRetry={load} />
+  if (!data)   return null
+
+  const heroColor = data.on_time_closure_rate_pct >= 90
+    ? 'bg-teal-600'
+    : data.on_time_closure_rate_pct >= 70
+      ? 'bg-amber-500'
+      : data.cycles_closed_on_time + data.cycles_closed_late === 0
+        ? 'bg-gray-400'
+        : 'bg-red-500'
+
+  const totalClosed = data.cycles_closed_on_time + data.cycles_closed_late
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Hero: on-time closure rate ── */}
+      <div className={`${heroColor} rounded-2xl px-5 py-5`}>
+        <p className="text-[10px] font-bold tracking-widest uppercase text-white/70 mb-1">On-Time Cycle Closure</p>
+        {totalClosed > 0 ? (
+          <>
+            <p className="text-4xl font-black text-white mb-1">{data.on_time_closure_rate_pct}%</p>
+            <p className="text-sm text-white/80">
+              {data.cycles_closed_on_time.toLocaleString('en-IN')} on time · {data.cycles_closed_late} late
+              <span className="text-white/50"> · {RANGE_SUBLABEL[range]}</span>
+            </p>
+            {data.cycles_closed_late > 0 && (
+              <p className="text-xs text-white/60 mt-1">avg {data.avg_closure_delay_days}d delay on late closures</p>
+            )}
+          </>
+        ) : (
+          <p className="text-xl font-bold text-white/70 mt-1">No closed cycles in this period</p>
+        )}
+      </div>
+
+      {/* ── Overdue alert ── */}
+      {data.overdue_open_cycles > 0 && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3.5 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+            <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-bold text-red-700">
+              {data.overdue_open_cycles} overdue cycle{data.overdue_open_cycles !== 1 ? 's' : ''}
+            </p>
+            <p className="text-xs text-red-400 mt-0.5">Past their due date but still open — admin action needed</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Cycle closure chart ── */}
+      {data.cycle_closure_series.length > 0 && (
+        <div>
+          <SectionLabel>Cycle closure trend</SectionLabel>
+          <div className="bg-white rounded-2xl border border-gray-100 px-4 pt-4 pb-3">
+            <div className="flex items-center gap-3 mb-3">
+              <p className="text-xs font-semibold text-gray-700 flex-1">On-time vs late closures</p>
+              <span className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span className="w-2 h-2 rounded-sm bg-teal-400 inline-block" />On time
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span className="w-2 h-2 rounded-sm bg-red-300 inline-block" />Late
+              </span>
+            </div>
+            <MiniBarChart
+              series={data.cycle_closure_series}
+              bars={[
+                { key: 'on_time', color: 'bg-teal-400' },
+                { key: 'late',    color: 'bg-red-300' },
+              ]}
+              height={64}
+            />
+            {data.cycle_closure_series.length > 1 && (
+              <div className="flex justify-between mt-1.5">
+                <p className="text-[9px] text-gray-300 truncate max-w-[40%]">
+                  {new Date(data.cycle_closure_series[0].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </p>
+                <p className="text-[9px] text-gray-300 truncate max-w-[40%] text-right">
+                  {new Date(data.cycle_closure_series[data.cycle_closure_series.length - 1].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Loan reliability ── */}
+      <div>
+        <SectionLabel>Loan reliability</SectionLabel>
+        <div className="bg-white rounded-2xl border border-gray-100 px-4 py-4">
+          <div className="flex items-end justify-between mb-3">
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5">Repayment rate</p>
+              <p className={`text-2xl font-bold ${
+                data.loan_repayment_rate_pct >= 90 ? 'text-teal-600'
+                : data.loan_repayment_rate_pct >= 70 ? 'text-amber-500'
+                : data.loans_repaid + data.loans_written_off === 0 ? 'text-gray-400'
+                : 'text-red-600'
+              }`}>
+                {data.loans_repaid + data.loans_written_off === 0 ? '—' : `${data.loan_repayment_rate_pct}%`}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-500">{data.loans_repaid} repaid</p>
+              {data.loans_written_off > 0 && (
+                <p className="text-xs text-red-500 mt-0.5">{data.loans_written_off} written off</p>
+              )}
+            </div>
+          </div>
+          {data.loans_repaid + data.loans_written_off > 0 && (
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${data.loan_repayment_rate_pct >= 90 ? 'bg-teal-400' : data.loan_repayment_rate_pct >= 70 ? 'bg-amber-400' : 'bg-red-400'}`}
+                style={{ width: `${data.loan_repayment_rate_pct}%` }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Group completion ── */}
+      <div>
+        <SectionLabel>Group lifecycle</SectionLabel>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Active</p>
+            <p className="text-2xl font-bold text-gray-900">{data.groups_active}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Completed</p>
+            <p className="text-2xl font-bold text-teal-600">{data.groups_completed}</p>
+            {data.groups_completed + data.groups_active > 0 && (
+              <p className="text-[10px] text-gray-400 mt-0.5">{data.group_completion_rate_pct}% of all groups</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Overdue groups list ── */}
+      {data.groups_with_overdue_cycles.length > 0 && (
+        <div>
+          <SectionLabel>Groups needing attention</SectionLabel>
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            {data.groups_with_overdue_cycles.map((g, i) => (
+              <div
+                key={g.group_id}
+                className={`flex items-center gap-3 px-4 py-3.5 ${i < data.groups_with_overdue_cycles.length - 1 ? 'border-b border-gray-50' : ''}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{g.name}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5 truncate">{g.admin_name}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-xs font-bold text-red-600">
+                    {g.overdue_count} overdue
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">oldest {g.oldest_overdue_days}d ago</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {totalClosed === 0 && data.overdue_open_cycles === 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 px-4 py-12 text-center">
+          <p className="text-sm text-gray-400">No cycle data for this period.</p>
+          <p className="text-xs text-gray-300 mt-1">Try selecting a wider range.</p>
+        </div>
+      )}
+
+    </div>
+  )
+}
+
 // ─── Page shell ───────────────────────────────────────────────────────────────
 
 export default function SuperAdminConsolePage() {
@@ -635,21 +836,12 @@ export default function SuperAdminConsolePage() {
             {TABS.map(t => (
               <button
                 key={t.id}
-                disabled={!!t.soon}
-                onClick={() => !t.soon && setTab(t.id as Tab)}
-
-                className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition relative ${
-                  tab === t.id
-                    ? 'bg-gray-900 text-white'
-                    : t.soon
-                      ? 'text-gray-300 cursor-not-allowed'
-                      : 'text-gray-500 hover:bg-gray-100'
+                onClick={() => setTab(t.id)}
+                className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                  tab === t.id ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'
                 }`}
               >
                 {t.label}
-                {t.soon && (
-                  <span className="absolute -top-1.5 -right-1 text-[8px] font-bold text-gray-300">soon</span>
-                )}
               </button>
             ))}
           </div>
@@ -673,9 +865,10 @@ export default function SuperAdminConsolePage() {
 
       {/* Tab content */}
       <div className="max-w-md mx-auto px-4 py-5">
-        {tab === 'growth'      && <GrowthTab      range={range} />}
-        {tab === 'money'       && <MoneyTab       range={range} />}
-        {tab === 'engagement'  && <EngagementTab  range={range} />}
+        {tab === 'growth'       && <GrowthTab       range={range} />}
+        {tab === 'money'        && <MoneyTab        range={range} />}
+        {tab === 'engagement'   && <EngagementTab   range={range} />}
+        {tab === 'reliability'  && <ReliabilityTab  range={range} />}
       </div>
 
     </div>
