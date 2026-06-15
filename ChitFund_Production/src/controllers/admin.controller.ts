@@ -8,7 +8,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { getMoneyAnalytics } from '../services/admin.service';
+import { getMoneyAnalytics, getGrowthAnalytics } from '../services/admin.service';
 import { sendSuccess } from '../utils/response';
 
 /**
@@ -22,6 +22,16 @@ export async function moneyAnalytics(req: Request, res: Response, next: NextFunc
   try {
     const range = (req.query.range as string) || '30d';
     const data  = await getMoneyAnalytics(range);
+    sendSuccess(res, data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function growthAnalytics(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const range = (req.query.range as string) || '30d';
+    const data  = await getGrowthAnalytics(range);
     sendSuccess(res, data);
   } catch (err) {
     next(err);

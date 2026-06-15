@@ -7,12 +7,12 @@
  * @author Suraj KM
  */
 
-import { sql, eq, and, gte } from 'drizzle-orm';
+import { sql, eq, and, gte, isNull, isNotNull } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../config/db';
 import {
   chit_groups, memberships, baskets, basket_transactions,
-  loans, payments, monthly_cycles, cycle_winners, users,
+  loans, payments, monthly_cycles, cycle_winners, users, refresh_tokens,
 } from '../db/schema';
 import { AppError } from '../utils/AppError';
 
@@ -290,5 +290,203 @@ export async function getMoneyAnalytics(range: string) {
     top_groups_by_gmv,
     loan_portfolio,
     basket_aggregate_series,
+  };
+}
+
+/**
+ * Aggregates platform-wide Growth tab metrics: user signups, MAU/WAU/DAU,
+ * group lifecycle, and time-series charts for the Admin Console Growth tab.
+ *
+ * MAU/WAU/DAU are always computed from NOW (fixed windows), not from the
+ * selected range — per wireframe §12 Tab 1.
+ *
+ * @param range - Time window; one of `24h | 7d | 30d | 90d | all` (default `30d`)
+ * @throws {AppError} 400 INVALID_RANGE if range is not in the allowed set
+ */
+export async function getGrowthAnalytics(range: string) {
+  if (!VALID_RANGES.has(range)) {
+    throw new AppError(400, 'INVALID_RANGE', `range must be one of: ${[...VALID_RANGES].join(', ')}`);
+  }
+
+  const rangeStart = getRangeStart(range);
+  const gran       = getGranularity(range);
+  const now        = new Date();
+
+  // MAU/WAU/DAU fixed windows — independent of the selected range.
+  const mauStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const wauStart = new Date(now.getTime() -  7 * 24 * 60 * 60 * 1000);
+  const dauStart = new Date(now.getTime() -       24 * 60 * 60 * 1000);
+
+  // For range='all', use epoch so WHERE clauses still work without special-casing.
+  const since = rangeStart ?? new Date(0);
+
+  // Active token condition shared by MAU/WAU/DAU — not revoked, last_used_at present.
+  const activeToken = and(isNotNull(refresh_tokens.last_used_at), isNull(refresh_tokens.revoked_at));
+
+  const [
+    totalUserRows,
+    newSignupRows,
+    mauRows,
+    wauRows,
+    dauRows,
+    totalGroupRows,
+    newGroupRows,
+    closedGroupRows,
+    groupStatusRows,
+    signupSeriesRows,
+    groupCreatedSeriesRows,
+    groupClosedSeriesRows,
+  ] = await Promise.all([
+
+    // 1. Total platform users
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(users)
+      .where(isNull(users.deleted_at)),
+
+    // 2. New signups within the selected range
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(users)
+      .where(and(isNull(users.deleted_at), gte(users.created_at, since))),
+
+    // 3. MAU — distinct users whose refresh token was used in the last 30 days
+    db.select({ count: sql<number>`COUNT(DISTINCT ${refresh_tokens.user_id})` })
+      .from(refresh_tokens)
+      .where(and(activeToken, gte(refresh_tokens.last_used_at!, mauStart))),
+
+    // 4. WAU — same, last 7 days
+    db.select({ count: sql<number>`COUNT(DISTINCT ${refresh_tokens.user_id})` })
+      .from(refresh_tokens)
+      .where(and(activeToken, gte(refresh_tokens.last_used_at!, wauStart))),
+
+    // 5. DAU — same, last 24 hours
+    db.select({ count: sql<number>`COUNT(DISTINCT ${refresh_tokens.user_id})` })
+      .from(refresh_tokens)
+      .where(and(activeToken, gte(refresh_tokens.last_used_at!, dauStart))),
+
+    // 6. Total groups (all time)
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(chit_groups),
+
+    // 7. Groups created within the selected range
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(chit_groups)
+      .where(gte(chit_groups.created_at, since)),
+
+    // 8. Groups closed within the selected range
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(chit_groups)
+      .where(and(
+        eq(chit_groups.status, 'Closed'),
+        isNotNull(chit_groups.closed_at),
+        gte(chit_groups.closed_at!, since),
+      )),
+
+    // 9. Group status breakdown: active (started) / closed / pending (future start_month)
+    db.select({
+      label: sql<string>`CASE
+        WHEN ${chit_groups.status} = 'Closed' THEN 'closed'
+        WHEN ${chit_groups.start_month} > CURRENT_DATE THEN 'pending'
+        ELSE 'active'
+      END`,
+      count: sql<number>`COUNT(*)`,
+    })
+    .from(chit_groups)
+    .groupBy(sql`1`),
+
+    // 10. Signup velocity series — new users per date bucket
+    db.select({
+      date:  sql<string>`DATE_TRUNC(${gran}, ${users.created_at})`,
+      count: sql<number>`COUNT(*)`,
+    })
+    .from(users)
+    .where(and(isNull(users.deleted_at), gte(users.created_at, since)))
+    .groupBy(sql`1`)
+    .orderBy(sql`1`),
+
+    // 11. Groups created series
+    db.select({
+      date:    sql<string>`DATE_TRUNC(${gran}, ${chit_groups.created_at})`,
+      created: sql<number>`COUNT(*)`,
+    })
+    .from(chit_groups)
+    .where(gte(chit_groups.created_at, since))
+    .groupBy(sql`1`)
+    .orderBy(sql`1`),
+
+    // 12. Groups closed series
+    db.select({
+      date:   sql<string>`DATE_TRUNC(${gran}, ${chit_groups.closed_at!})`,
+      closed: sql<number>`COUNT(*)`,
+    })
+    .from(chit_groups)
+    .where(and(
+      eq(chit_groups.status, 'Closed'),
+      isNotNull(chit_groups.closed_at),
+      gte(chit_groups.closed_at!, since),
+    ))
+    .groupBy(sql`1`)
+    .orderBy(sql`1`),
+  ]);
+
+  // ── Scalars ────────────────────────────────────────────────────────────────
+  const total_users          = Number(totalUserRows[0]?.count ?? 0);
+  const new_signups_in_range = Number(newSignupRows[0]?.count  ?? 0);
+  const pre_range_users      = total_users - new_signups_in_range;
+  const delta_pct            = pre_range_users > 0
+    ? Number(((new_signups_in_range / pre_range_users) * 100).toFixed(1))
+    : (new_signups_in_range > 0 ? 100 : 0);
+
+  const mau            = Number(mauRows[0]?.count ?? 0);
+  const wau            = Number(wauRows[0]?.count ?? 0);
+  const dau            = Number(dauRows[0]?.count ?? 0);
+  const stickiness_pct = mau > 0 ? Number(((dau / mau) * 100).toFixed(1)) : 0;
+
+  const total_groups          = Number(totalGroupRows[0]?.count  ?? 0);
+  const new_groups_in_range   = Number(newGroupRows[0]?.count    ?? 0);
+  const closed_groups_in_range = Number(closedGroupRows[0]?.count ?? 0);
+  const net_growth            = new_groups_in_range - closed_groups_in_range;
+
+  // ── Group status breakdown ─────────────────────────────────────────────────
+  const group_status_breakdown = { active: 0, closed: 0, pending: 0 };
+  for (const row of groupStatusRows) {
+    if (row.label === 'active')  group_status_breakdown.active  = Number(row.count);
+    if (row.label === 'closed')  group_status_breakdown.closed  = Number(row.count);
+    if (row.label === 'pending') group_status_breakdown.pending = Number(row.count);
+  }
+
+  // ── Signup velocity series ─────────────────────────────────────────────────
+  const signup_velocity_series = signupSeriesRows.map(r => ({
+    date:  String(r.date),
+    count: Number(r.count),
+  }));
+
+  // ── Group lifecycle series (merge created + closed by date bucket) ─────────
+  const createdMap = new Map(groupCreatedSeriesRows.map(r => [String(r.date), Number(r.created)]));
+  const closedMap  = new Map(groupClosedSeriesRows.map(r  => [String(r.date), Number(r.closed)]));
+  const allDates   = [...new Set([...createdMap.keys(), ...closedMap.keys()])].sort();
+  const group_lifecycle_series = allDates.map(date => ({
+    date,
+    created: createdMap.get(date) ?? 0,
+    closed:  closedMap.get(date)  ?? 0,
+  }));
+
+  return {
+    total_users,
+    new_signups_in_range,
+    delta_pct,
+    mau,
+    wau,
+    dau,
+    stickiness_pct,
+    total_groups,
+    new_groups_in_range,
+    closed_groups_in_range,
+    net_growth,
+    signup_velocity_series,
+    group_lifecycle_series,
+    group_status_breakdown,
+    // These fields require schema additions not yet present:
+    dau_wau_mau_series:      [],  // needs historical session snapshots
+    signup_source_breakdown: [],  // needs users.signup_source column
   };
 }

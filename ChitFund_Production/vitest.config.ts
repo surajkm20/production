@@ -5,8 +5,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./tests/setup.ts'],
+    fileParallelism: false,
+    pool: 'forks',
     poolOptions: {
-      forks: { singleFork: true },
+      forks: { singleFork: true, maxForks: 1 },
     },
     testTimeout: 15000,
     typecheck: {

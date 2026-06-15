@@ -18,7 +18,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
 import { requireSuperAdmin } from '../middleware/requireSuperAdmin';
-import { moneyAnalytics } from '../controllers/admin.controller';
+import { moneyAnalytics, growthAnalytics } from '../controllers/admin.controller';
 
 /** Router for SuperAdmin Admin-Console endpoints, mounted at `/admin`. */
 export const adminRouter = Router();
@@ -26,4 +26,5 @@ export const adminRouter = Router();
 // Every /admin route is gated: must be authenticated AND a platform SuperAdmin.
 adminRouter.use(authenticate, requireSuperAdmin);
 
-adminRouter.get('/analytics/money', moneyAnalytics);
+adminRouter.get('/analytics/growth', growthAnalytics);
+adminRouter.get('/analytics/money',  moneyAnalytics);
