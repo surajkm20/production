@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
-import type { GrowthAnalytics, MoneyAnalytics } from '../types/api'
+import type { GrowthAnalytics, MoneyAnalytics, EngagementAnalytics, EngagementGroupRow } from '../types/api'
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -13,11 +13,11 @@ const RANGE_SUBLABEL: Record<Range, string> = {
   '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '90d': 'last 90 days', all: 'all time',
 }
 
-type Tab = 'growth' | 'money'
-const TABS: { id: Tab | 'engagement' | 'reliability'; label: string; soon?: boolean }[] = [
+type Tab = 'growth' | 'money' | 'engagement'
+const TABS: { id: Tab | 'reliability'; label: string; soon?: boolean }[] = [
   { id: 'growth',      label: 'Growth' },
   { id: 'money',       label: 'Money' },
-  { id: 'engagement',  label: 'Engage',  soon: true },
+  { id: 'engagement',  label: 'Engage' },
   { id: 'reliability', label: 'Reliab.', soon: true },
 ]
 
@@ -424,6 +424,187 @@ function MoneyTab({ range }: { range: Range }) {
   )
 }
 
+// ─── Engagement tab ───────────────────────────────────────────────────────────
+
+function CompliancePill({ pct }: { pct: number }) {
+  const color = pct >= 90 ? 'bg-teal-100 text-teal-700' : pct >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'
+  return (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${color}`}>{pct}%</span>
+  )
+}
+
+function GroupComplianceList({ rows, label }: { rows: EngagementGroupRow[]; label: string }) {
+  if (rows.length === 0) return null
+  return (
+    <div>
+      <SectionLabel>{label}</SectionLabel>
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        {rows.map((g, i) => (
+          <div key={g.group_id} className={`flex items-center gap-3 px-4 py-3.5 ${i < rows.length - 1 ? 'border-b border-gray-50' : ''}`}>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 truncate">{g.name}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+                {g.admin_name} · {g.member_count} member{g.member_count !== 1 ? 's' : ''}
+              </p>
+            </div>
+            <div className="text-right shrink-0 space-y-1">
+              <CompliancePill pct={g.compliance_pct} />
+              <p className="text-[10px] text-gray-400">{g.collected}/{g.due} paid</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function EngagementTab({ range }: { range: Range }) {
+  const navigate = useNavigate()
+  const [data, setData] = useState<EngagementAnalytics | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => { load() }, [range])
+
+  async function load() {
+    setLoading(true)
+    setError(false)
+    try {
+      setData(await api.get<EngagementAnalytics>(`/admin/analytics/engagement?range=${range}`))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) navigate('/dashboard', { replace: true })
+      else setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) return <Spinner />
+  if (error)   return <ErrorState onRetry={load} />
+  if (!data)   return null
+
+  const amountPct = data.total_amount_expected > 0
+    ? Math.round((data.total_amount_collected / data.total_amount_expected) * 100)
+    : 0
+
+  const heroColor = data.compliance_rate_pct >= 90
+    ? 'bg-teal-600'
+    : data.compliance_rate_pct >= 70
+      ? 'bg-amber-500'
+      : 'bg-red-500'
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Hero compliance card ── */}
+      <div className={`${heroColor} rounded-2xl px-5 py-5`}>
+        <p className="text-[10px] font-bold tracking-widest uppercase text-white/70 mb-1">Payment Compliance</p>
+        <p className="text-4xl font-black text-white mb-1">{data.compliance_rate_pct}%</p>
+        <p className="text-sm text-white/80">
+          {data.total_payments_collected.toLocaleString('en-IN')} of {data.total_payments_due.toLocaleString('en-IN')} payments collected
+          <span className="text-white/50"> · {RANGE_SUBLABEL[range]}</span>
+        </p>
+      </div>
+
+      {/* ── Quick stats ── */}
+      <div>
+        <SectionLabel>Platform snapshot</SectionLabel>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: 'Defaulters', value: data.active_defaulters, danger: data.active_defaulters > 0, sub: 'open cycles' },
+            { label: 'Open cycles', value: data.cycles_open_now, danger: false, sub: 'right now' },
+            { label: 'Closed', value: data.cycles_closed_in_range, danger: false, sub: RANGE_SUBLABEL[range] },
+          ].map(({ label, value, danger, sub }) => (
+            <div key={label} className="bg-white rounded-2xl border border-gray-100 px-3 py-3.5 text-center">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{label}</p>
+              <p className={`text-lg font-bold ${danger ? 'text-red-600' : 'text-gray-900'}`}>{value.toLocaleString('en-IN')}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">{sub}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Amount compliance bar ── */}
+      {data.total_amount_expected > 0 && (
+        <div>
+          <SectionLabel>Amount collected</SectionLabel>
+          <div className="bg-white rounded-2xl border border-gray-100 px-4 py-4">
+            <div className="flex items-end justify-between mb-2">
+              <div>
+                <p className="text-[10px] text-gray-400">Collected</p>
+                <p className="text-base font-bold text-gray-900">{formatPaise(data.total_amount_collected)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-gray-400">Expected</p>
+                <p className="text-base font-bold text-gray-500">{formatPaise(data.total_amount_expected)}</p>
+              </div>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${amountPct >= 90 ? 'bg-teal-400' : amountPct >= 70 ? 'bg-amber-400' : 'bg-red-400'}`}
+                style={{ width: `${amountPct}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5 text-right">{amountPct}% of expected amount</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Compliance trend chart ── */}
+      {data.compliance_series.length > 0 && (
+        <div>
+          <SectionLabel>Compliance trend</SectionLabel>
+          <div className="bg-white rounded-2xl border border-gray-100 px-4 pt-4 pb-3">
+            <div className="flex items-center gap-3 mb-3">
+              <p className="text-xs font-semibold text-gray-700 flex-1">Due vs collected per period</p>
+              <span className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span className="w-2 h-2 rounded-sm bg-teal-400 inline-block" />Collected
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span className="w-2 h-2 rounded-sm bg-gray-200 inline-block" />Due
+              </span>
+            </div>
+            <MiniBarChart
+              series={data.compliance_series}
+              bars={[
+                { key: 'due',       color: 'bg-gray-200' },
+                { key: 'collected', color: 'bg-teal-400' },
+              ]}
+              height={64}
+            />
+            {data.compliance_series.length > 1 && (
+              <div className="flex justify-between mt-1.5">
+                <p className="text-[9px] text-gray-300 truncate max-w-[40%]">
+                  {new Date(data.compliance_series[0].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </p>
+                <p className="text-[9px] text-gray-300 truncate max-w-[40%] text-right">
+                  {new Date(data.compliance_series[data.compliance_series.length - 1].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Group leaderboards ── */}
+      {data.top_groups_by_compliance.length > 0 && (
+        <GroupComplianceList rows={data.top_groups_by_compliance} label="Top groups by compliance" />
+      )}
+      {data.bottom_groups_by_compliance.length > 0 && data.bottom_groups_by_compliance.some(g => g.compliance_pct < 100) && (
+        <GroupComplianceList rows={data.bottom_groups_by_compliance} label="Needs attention" />
+      )}
+
+      {data.total_payments_due === 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 px-4 py-12 text-center">
+          <p className="text-sm text-gray-400">No payment data for this period.</p>
+          <p className="text-xs text-gray-300 mt-1">Try selecting a wider range.</p>
+        </div>
+      )}
+
+    </div>
+  )
+}
+
 // ─── Page shell ───────────────────────────────────────────────────────────────
 
 export default function SuperAdminConsolePage() {
@@ -456,6 +637,7 @@ export default function SuperAdminConsolePage() {
                 key={t.id}
                 disabled={!!t.soon}
                 onClick={() => !t.soon && setTab(t.id as Tab)}
+
                 className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition relative ${
                   tab === t.id
                     ? 'bg-gray-900 text-white'
@@ -491,8 +673,9 @@ export default function SuperAdminConsolePage() {
 
       {/* Tab content */}
       <div className="max-w-md mx-auto px-4 py-5">
-        {tab === 'growth' && <GrowthTab range={range} />}
-        {tab === 'money'  && <MoneyTab  range={range} />}
+        {tab === 'growth'      && <GrowthTab      range={range} />}
+        {tab === 'money'       && <MoneyTab       range={range} />}
+        {tab === 'engagement'  && <EngagementTab  range={range} />}
       </div>
 
     </div>

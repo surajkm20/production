@@ -27,6 +27,30 @@ export interface GrowthAnalytics {
   signup_source_breakdown: { source: string; count: number; pct: number }[]
 }
 
+export interface EngagementAnalytics {
+  total_payments_due: number
+  total_payments_collected: number
+  compliance_rate_pct: number
+  total_amount_expected: number
+  total_amount_collected: number
+  active_defaulters: number
+  cycles_closed_in_range: number
+  cycles_open_now: number
+  compliance_series: { date: string; due: number; collected: number; rate_pct: number }[]
+  top_groups_by_compliance: EngagementGroupRow[]
+  bottom_groups_by_compliance: EngagementGroupRow[]
+}
+
+export interface EngagementGroupRow {
+  group_id: string
+  name: string
+  admin_name: string
+  member_count: number
+  due: number
+  collected: number
+  compliance_pct: number
+}
+
 export interface MoneyAnalytics {
   gmv_lifetime: number
   gmv_in_range: number
