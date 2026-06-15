@@ -490,3 +490,190 @@ export async function getGrowthAnalytics(range: string) {
     signup_source_breakdown: [],  // needs users.signup_source column
   };
 }
+
+/**
+ * Aggregates platform-wide Engagement tab metrics: payment compliance rates,
+ * active defaulters, cycle throughput, and per-group compliance leaderboard.
+ *
+ * Compliance is measured over payments whose cycle `due_date` falls within the
+ * selected range (skip-month cycles excluded). Active defaulters are always a
+ * live snapshot regardless of range.
+ *
+ * @param range - Time window; one of `24h | 7d | 30d | 90d | all` (default `30d`)
+ * @throws {AppError} 400 INVALID_RANGE if range is not in the allowed set
+ */
+export async function getEngagementAnalytics(range: string) {
+  if (!VALID_RANGES.has(range)) {
+    throw new AppError(400, 'INVALID_RANGE', `range must be one of: ${[...VALID_RANGES].join(', ')}`);
+  }
+
+  const rangeStart = getRangeStart(range);
+  const gran       = getGranularity(range);
+  const since      = rangeStart ?? new Date(0);
+  const sinceDate  = since.toISOString().slice(0, 10); // 'YYYY-MM-DD' for date column comparison
+
+  // Subquery: active member count per group (for leaderboard member_count column).
+  const memberAgg = db
+    .select({
+      group_id: memberships.group_id,
+      cnt:      sql<number>`COUNT(*)`.as('cnt'),
+    })
+    .from(memberships)
+    .where(eq(memberships.status, 'Active'))
+    .groupBy(memberships.group_id)
+    .as('member_agg');
+
+  const adminM = alias(memberships, 'admin_m');
+
+  // Core join condition for non-skip cycles whose due_date is within the range.
+  // Applied on the monthly_cycles side of every payments→monthly_cycles join.
+  const cycleCond = and(
+    eq(monthly_cycles.is_skip_month, false),
+    gte(monthly_cycles.due_date, sinceDate),
+  );
+
+  const [
+    complianceRows,
+    activeDefaulterRows,
+    closedCyclesRows,
+    openCyclesRows,
+    complianceSeriesRows,
+    groupComplianceRows,
+  ] = await Promise.all([
+
+    // 1. Platform-wide compliance: payment counts + amounts for cycles in range.
+    //    FILTER (WHERE ...) excludes Waived payments from both due and collected.
+    db.select({
+      due_count:        sql<number>`COUNT(*) FILTER (WHERE ${payments.status} IN ('Paid', 'Unpaid'))`,
+      collected_count:  sql<number>`COUNT(*) FILTER (WHERE ${payments.status} = 'Paid')`,
+      amount_expected:  sql<number>`COALESCE(SUM(${payments.expected_amount}) FILTER (WHERE ${payments.status} IN ('Paid', 'Unpaid')), 0)`,
+      amount_collected: sql<number>`COALESCE(SUM(${payments.paid_amount}) FILTER (WHERE ${payments.status} = 'Paid'), 0)`,
+    })
+    .from(payments)
+    .innerJoin(monthly_cycles, and(eq(monthly_cycles.id, payments.cycle_id), cycleCond)),
+
+    // 2. Active defaulters — distinct members with Unpaid in currently Open non-skip cycles.
+    //    This is always a live snapshot, not range-scoped.
+    db.select({ count: sql<number>`COUNT(DISTINCT ${payments.member_user_id})` })
+      .from(payments)
+      .innerJoin(monthly_cycles, and(
+        eq(monthly_cycles.id, payments.cycle_id),
+        eq(monthly_cycles.is_skip_month, false),
+        eq(monthly_cycles.status, 'Open'),
+      ))
+      .where(eq(payments.status, 'Unpaid')),
+
+    // 3. Cycles closed in the selected range (skip months excluded)
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(monthly_cycles)
+      .where(and(
+        eq(monthly_cycles.status, 'Closed'),
+        eq(monthly_cycles.is_skip_month, false),
+        isNotNull(monthly_cycles.closed_at),
+        gte(monthly_cycles.closed_at!, since),
+      )),
+
+    // 4. Cycles currently open (live snapshot, skip months excluded)
+    db.select({ count: sql<number>`COUNT(*)` })
+      .from(monthly_cycles)
+      .where(and(
+        eq(monthly_cycles.status, 'Open'),
+        eq(monthly_cycles.is_skip_month, false),
+      )),
+
+    // 5. Compliance trend — due vs collected per date bucket (bucketed by cycle due_date)
+    //    GROUP/ORDER BY 1 avoids the gran bind-param duplication issue (see Money tab).
+    db.select({
+      date:      sql<string>`DATE_TRUNC(${gran}, ${monthly_cycles.due_date}::timestamp)`,
+      due:       sql<number>`COUNT(*) FILTER (WHERE ${payments.status} IN ('Paid', 'Unpaid'))`,
+      collected: sql<number>`COUNT(*) FILTER (WHERE ${payments.status} = 'Paid')`,
+    })
+    .from(payments)
+    .innerJoin(monthly_cycles, and(eq(monthly_cycles.id, payments.cycle_id), cycleCond))
+    .groupBy(sql`1`)
+    .orderBy(sql`1`),
+
+    // 6. Per-group compliance in range — used for top/bottom leaderboard.
+    //    MAX(memberAgg.cnt) avoids adding the subquery column to GROUP BY.
+    db.select({
+      group_id:     chit_groups.id,
+      name:         chit_groups.name,
+      admin_name:   users.name,
+      member_count: sql<number>`COALESCE(MAX(${memberAgg.cnt}), 0)`,
+      due:          sql<number>`COUNT(*) FILTER (WHERE ${payments.status} IN ('Paid', 'Unpaid'))`,
+      collected:    sql<number>`COUNT(*) FILTER (WHERE ${payments.status} = 'Paid')`,
+    })
+    .from(payments)
+    .innerJoin(monthly_cycles, and(eq(monthly_cycles.id, payments.cycle_id), cycleCond))
+    .innerJoin(chit_groups, eq(chit_groups.id, monthly_cycles.group_id))
+    .innerJoin(adminM, and(
+      eq(adminM.group_id, chit_groups.id),
+      eq(adminM.role, 'Admin'),
+      eq(adminM.status, 'Active'),
+    ))
+    .innerJoin(users, eq(users.id, adminM.user_id))
+    .leftJoin(memberAgg, eq(memberAgg.group_id, chit_groups.id))
+    .groupBy(chit_groups.id, chit_groups.name, users.name),
+  ]);
+
+  // ── Compliance scalars ─────────────────────────────────────────────────────
+  const cr = complianceRows[0];
+  const total_payments_due       = Number(cr?.due_count        ?? 0);
+  const total_payments_collected = Number(cr?.collected_count  ?? 0);
+  const total_amount_expected    = Number(cr?.amount_expected  ?? 0);
+  const total_amount_collected   = Number(cr?.amount_collected ?? 0);
+  const compliance_rate_pct      = total_payments_due > 0
+    ? Number(((total_payments_collected / total_payments_due) * 100).toFixed(1))
+    : 0;
+
+  const active_defaulters      = Number(activeDefaulterRows[0]?.count ?? 0);
+  const cycles_closed_in_range = Number(closedCyclesRows[0]?.count   ?? 0);
+  const cycles_open_now        = Number(openCyclesRows[0]?.count     ?? 0);
+
+  // ── Compliance series ──────────────────────────────────────────────────────
+  const compliance_series = complianceSeriesRows.map(r => {
+    const d = Number(r.due);
+    const c = Number(r.collected);
+    return {
+      date:      String(r.date),
+      due:       d,
+      collected: c,
+      rate_pct:  d > 0 ? Number(((c / d) * 100).toFixed(1)) : 0,
+    };
+  });
+
+  // ── Per-group compliance leaderboard ──────────────────────────────────────
+  const groupCompliance = groupComplianceRows
+    .filter(r => Number(r.due) > 0)
+    .map(r => {
+      const due  = Number(r.due);
+      const coll = Number(r.collected);
+      return {
+        group_id:       r.group_id,
+        name:           r.name,
+        admin_name:     r.admin_name,
+        member_count:   Number(r.member_count),
+        due,
+        collected:      coll,
+        compliance_pct: due > 0 ? Number(((coll / due) * 100).toFixed(1)) : 0,
+      };
+    });
+
+  const sorted = [...groupCompliance].sort((a, b) => b.compliance_pct - a.compliance_pct);
+  const top_groups_by_compliance    = sorted.slice(0, 5);
+  const bottom_groups_by_compliance = [...sorted].reverse().slice(0, 5);
+
+  return {
+    total_payments_due,
+    total_payments_collected,
+    compliance_rate_pct,
+    total_amount_expected,
+    total_amount_collected,
+    active_defaulters,
+    cycles_closed_in_range,
+    cycles_open_now,
+    compliance_series,
+    top_groups_by_compliance,
+    bottom_groups_by_compliance,
+  };
+}
