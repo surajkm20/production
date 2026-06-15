@@ -8,6 +8,25 @@ export interface User {
   created_at: string
 }
 
+export interface GrowthAnalytics {
+  total_users: number
+  new_signups_in_range: number
+  delta_pct: number
+  mau: number
+  wau: number
+  dau: number
+  stickiness_pct: number
+  total_groups: number
+  new_groups_in_range: number
+  closed_groups_in_range: number
+  net_growth: number
+  signup_velocity_series: { date: string; count: number }[]
+  group_lifecycle_series: { date: string; created: number; closed: number }[]
+  group_status_breakdown: { active: number; closed: number; pending: number }
+  dau_wau_mau_series: { date: string; dau: number; wau: number; mau: number }[]
+  signup_source_breakdown: { source: string; count: number; pct: number }[]
+}
+
 export interface MoneyAnalytics {
   gmv_lifetime: number
   gmv_in_range: number
