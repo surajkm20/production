@@ -43,8 +43,7 @@ export default function MarkPaymentsPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
-  const [shareSelectPayment, setShareSelectPayment] = useState<Payment | null>(null)
-  const [selectedShares, setSelectedShares] = useState(0)
+  const [shareMap, setShareMap] = useState<Record<string, number>>({})
   // useRef stores the setTimeout ID so we can cancel it if a new toast fires before the old one expires
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -184,7 +183,7 @@ export default function MarkPaymentsPage() {
     )
     setPayments(updated)
     setSummary(recalcSummary(updated))
-    setShareSelectPayment(null)
+    setShareMap(m => { const n = { ...m }; delete n[payment.payment_id]; return n })
 
     try {
       await api.patch(`/groups/${groupId}/payments/${payment.payment_id}`, {
@@ -424,10 +423,14 @@ export default function MarkPaymentsPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {filtered.map(p => {
-                const isPaid = p.status === 'Paid'
-                const isPartial = isPaid && p.paid_amount < p.expected_amount
-                const perShare = Math.round(p.expected_amount / p.share_count)
-                const sharesPaid = isPartial && perShare > 0 ? Math.round(p.paid_amount / perShare) : p.share_count
+                const isPaid          = p.status === 'Paid'
+                const isPartial       = isPaid && p.paid_amount < p.expected_amount
+                const perShare        = Math.round(p.expected_amount / p.share_count)
+                const sharesPaid      = isPartial && perShare > 0 ? Math.round(p.paid_amount / perShare) : p.share_count
+                const alreadyPaid     = isPartial ? sharesPaid : 0
+                const showStepper     = p.share_count > 1 && (p.status === 'Unpaid' || isPartial)
+                const maxSel          = p.share_count - alreadyPaid
+                const sel             = Math.min(maxSel, Math.max(1, shareMap[p.payment_id] ?? maxSel))
                 return (
                   <div
                     key={p.payment_id}
@@ -456,30 +459,36 @@ export default function MarkPaymentsPage() {
                       </p>
                     </div>
 
-                    {/* Amount + toggle switch — Toggle hidden for waived payments and closed cycles */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {isPartial ? (
-                        <div className="text-right">
-                          <p className="text-xs font-medium text-amber-600">{formatPaise(p.paid_amount)}</p>
-                          <p className="text-[10px] text-gray-400">of {formatPaise(p.expected_amount)}</p>
-                        </div>
-                      ) : (
-                        <span className={`text-xs font-medium ${isPaid ? 'text-green-600' : 'text-gray-400'}`}>
-                          {formatPaise(p.expected_amount)}
-                        </span>
+                    {/* Stepper (multi-share) · amount · toggle */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {showStepper && (
+                        <>
+                          <button
+                            onClick={() => setShareMap(m => ({ ...m, [p.payment_id]: Math.max(1, sel - 1) }))}
+                            disabled={sel <= 1}
+                            className="w-6 h-6 rounded-full border border-gray-200 flex items-center justify-center text-sm font-semibold text-gray-500 disabled:opacity-30 active:bg-gray-100 transition"
+                          >−</button>
+                          <span className="w-4 text-center text-xs font-bold text-gray-800">{sel}</span>
+                          <button
+                            onClick={() => setShareMap(m => ({ ...m, [p.payment_id]: Math.min(maxSel, sel + 1) }))}
+                            disabled={sel >= maxSel}
+                            className="w-6 h-6 rounded-full border border-gray-200 flex items-center justify-center text-sm font-semibold text-gray-500 disabled:opacity-30 active:bg-gray-100 transition"
+                          >+</button>
+                        </>
                       )}
+                      <span className={`text-xs font-medium tabular-nums ${isPaid && !isPartial ? 'text-green-600' : isPartial ? 'text-amber-600' : 'text-gray-400'}`}>
+                        {showStepper
+                          ? formatPaise(sel * perShare)
+                          : formatPaise(isPaid ? p.paid_amount : p.expected_amount)}
+                      </span>
                       {p.status !== 'Waived' && isCycleOpen && (
                         <Toggle
-                          checked={isPaid}
+                          checked={isPaid && !isPartial}
                           onChange={() => {
-                            if (isPartial && p.share_count > 1) {
-                              // Open selector pre-set to remaining shares
-                              const ps = perShare > 0 ? Math.round(p.paid_amount / perShare) : 0
-                              setShareSelectPayment(p)
-                              setSelectedShares(p.share_count - ps)
-                            } else if (!isPaid && p.share_count > 1) {
-                              setShareSelectPayment(p)
-                              setSelectedShares(p.share_count)
+                            if (p.status === 'Unpaid') {
+                              void markPartialPayment(p, sel)
+                            } else if (isPartial) {
+                              void markPartialPayment(p, alreadyPaid + sel)
                             } else {
                               void togglePayment(p)
                             }
@@ -522,130 +531,6 @@ export default function MarkPaymentsPage() {
           {toastMsg}
         </div>
       )}
-
-      {/* Share selector sheet — shown when marking a multi-share member paid (fresh or additional) */}
-      {shareSelectPayment && (() => {
-        const sheetPerShare    = Math.round(shareSelectPayment.expected_amount / shareSelectPayment.share_count)
-        const alreadyPaid      = sheetPerShare > 0 ? Math.round(shareSelectPayment.paid_amount / sheetPerShare) : 0
-        const remaining        = shareSelectPayment.share_count - alreadyPaid
-        const isAdditional     = alreadyPaid > 0
-        const selectorCount    = isAdditional ? remaining : shareSelectPayment.share_count
-        const payingNow        = selectedShares * sheetPerShare
-        const totalAfter       = isAdditional ? shareSelectPayment.paid_amount + payingNow : payingNow
-        const totalShares      = isAdditional ? alreadyPaid + selectedShares : selectedShares
-
-        return (
-          <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
-            <div className="bg-white rounded-t-2xl w-full max-w-md p-6">
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="text-base font-bold text-gray-900">Mark Payment</h2>
-                <button
-                  onClick={() => setShareSelectPayment(null)}
-                  className="p-1 text-gray-400 hover:text-gray-600 transition"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <p className="text-sm font-medium text-gray-800 mb-0.5">{shareSelectPayment.member_name}</p>
-              <p className="text-xs text-gray-400 mb-4">
-                {shareSelectPayment.share_count} shares · {formatPaise(shareSelectPayment.expected_amount)} total
-              </p>
-
-              {/* Already-paid banner — only shown when continuing a partial payment */}
-              {isAdditional && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
-                  <p className="text-[11px] text-amber-600 font-semibold tracking-widest mb-1.5">ALREADY PAID</p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-amber-800">
-                      {alreadyPaid} of {shareSelectPayment.share_count} shares
-                    </span>
-                    <span className="text-sm font-bold text-amber-800">{formatPaise(shareSelectPayment.paid_amount)}</span>
-                  </div>
-                  <p className="text-xs text-amber-600 mt-1">
-                    {remaining} share{remaining !== 1 ? 's' : ''} remaining · {formatPaise(shareSelectPayment.expected_amount - shareSelectPayment.paid_amount)} outstanding
-                  </p>
-                </div>
-              )}
-
-              <p className="text-[11px] text-gray-500 font-semibold tracking-widest mb-2">
-                {isAdditional ? 'ADDITIONAL SHARES TO PAY NOW' : 'SHARES PAID'}
-              </p>
-              <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 mb-4">
-                <button
-                  onClick={() => setSelectedShares(s => Math.max(1, s - 1))}
-                  disabled={selectedShares <= 1}
-                  className="w-9 h-9 rounded-full border border-gray-200 flex items-center justify-center text-lg font-bold text-gray-600 disabled:opacity-30 transition active:bg-gray-100"
-                >
-                  −
-                </button>
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-gray-900">{selectedShares}</p>
-                  <p className="text-[11px] text-gray-400">of {selectorCount} share{selectorCount !== 1 ? 's' : ''}</p>
-                </div>
-                <button
-                  onClick={() => setSelectedShares(s => Math.min(selectorCount, s + 1))}
-                  disabled={selectedShares >= selectorCount}
-                  className="w-9 h-9 rounded-full border border-gray-200 flex items-center justify-center text-lg font-bold text-gray-600 disabled:opacity-30 transition active:bg-gray-100"
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="bg-gray-50 rounded-xl px-4 py-3 mb-5">
-                {isAdditional ? (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">Paying now</span>
-                      <span className="text-sm font-bold text-gray-900">{formatPaise(payingNow)}</span>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-gray-200 pt-1.5">
-                      <span className="text-xs text-gray-500">Total paid after</span>
-                      <span className={`text-sm font-bold ${totalAfter === shareSelectPayment.expected_amount ? 'text-green-600' : 'text-gray-900'}`}>
-                        {formatPaise(totalAfter)}{totalAfter === shareSelectPayment.expected_amount ? ' ✓' : ''}
-                      </span>
-                    </div>
-                    {totalAfter < shareSelectPayment.expected_amount && (
-                      <p className="text-[11px] text-amber-600">
-                        {formatPaise(shareSelectPayment.expected_amount - totalAfter)} still outstanding after this
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">Payment amount</span>
-                      <span className="text-sm font-bold text-gray-900">{formatPaise(payingNow)}</span>
-                    </div>
-                    {selectedShares < shareSelectPayment.share_count && (
-                      <p className="text-[11px] text-amber-600 mt-1.5">
-                        Partial — {selectedShares} of {shareSelectPayment.share_count} shares
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShareSelectPayment(null)}
-                  className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => void markPartialPayment(shareSelectPayment, totalShares)}
-                  className="flex-1 py-3 rounded-xl bg-maroon-600 hover:bg-maroon-700 text-sm font-semibold text-white transition"
-                >
-                  Mark Paid
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
 
       {/* Bulk confirm dialog — shown before marking all unpaid as paid */}
       {showBulkConfirm && (
