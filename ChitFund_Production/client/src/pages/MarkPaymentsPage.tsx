@@ -573,20 +573,25 @@ export default function MarkPaymentsPage() {
               <p className="text-[11px] text-gray-500 font-semibold tracking-widest mb-2">
                 {isAdditional ? 'ADDITIONAL SHARES TO PAY NOW' : 'SHARES PAID'}
               </p>
-              <div className="flex gap-2 mb-4">
-                {Array.from({ length: selectorCount }, (_, i) => i + 1).map(n => (
-                  <button
-                    key={n}
-                    onClick={() => setSelectedShares(n)}
-                    className={`flex-1 py-3 rounded-xl border text-sm font-bold transition ${
-                      selectedShares === n
-                        ? 'border-maroon-600 bg-maroon-50 text-maroon-700'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 mb-4">
+                <button
+                  onClick={() => setSelectedShares(s => Math.max(1, s - 1))}
+                  disabled={selectedShares <= 1}
+                  className="w-9 h-9 rounded-full border border-gray-200 flex items-center justify-center text-lg font-bold text-gray-600 disabled:opacity-30 transition active:bg-gray-100"
+                >
+                  −
+                </button>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-gray-900">{selectedShares}</p>
+                  <p className="text-[11px] text-gray-400">of {selectorCount} share{selectorCount !== 1 ? 's' : ''}</p>
+                </div>
+                <button
+                  onClick={() => setSelectedShares(s => Math.min(selectorCount, s + 1))}
+                  disabled={selectedShares >= selectorCount}
+                  className="w-9 h-9 rounded-full border border-gray-200 flex items-center justify-center text-lg font-bold text-gray-600 disabled:opacity-30 transition active:bg-gray-100"
+                >
+                  +
+                </button>
               </div>
 
               <div className="bg-gray-50 rounded-xl px-4 py-3 mb-5">
