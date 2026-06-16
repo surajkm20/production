@@ -43,6 +43,8 @@ export default function MarkPaymentsPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
+  const [shareSelectPayment, setShareSelectPayment] = useState<Payment | null>(null)
+  const [selectedShares, setSelectedShares] = useState(0)
   // useRef stores the setTimeout ID so we can cancel it if a new toast fires before the old one expires
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -159,12 +161,45 @@ export default function MarkPaymentsPage() {
   function recalcSummary(ps: Payment[]): CycleSummary {
     return {
       total_expected:      ps.reduce((s, p) => s + p.expected_amount, 0),
-      total_paid:          ps.filter(p => p.status === 'Paid').reduce((s, p) => s + p.expected_amount, 0),
+      total_paid:          ps.filter(p => p.status === 'Paid').reduce((s, p) => s + p.paid_amount, 0),
       paid_count:          ps.filter(p => p.status === 'Paid').length,
       unpaid_count:        ps.filter(p => p.status === 'Unpaid').length,
       waived_count:        ps.filter(p => p.status === 'Waived').length,
       basket_contribution: summary?.basket_contribution ?? 0,
       is_final_cycle:      summary?.is_final_cycle ?? false,
+    }
+  }
+
+  // Marks a multi-share payment as Paid for a specific number of shares.
+  // Sends paid_amount = shares × per_share_amount to the API (API already accepts this).
+  async function markPartialPayment(payment: Payment, shares: number) {
+    const perShare = Math.round(payment.expected_amount / payment.share_count)
+    const paidAmount = perShare * shares
+
+    const prev = [...payments]
+    const updated = payments.map(p =>
+      p.payment_id === payment.payment_id
+        ? { ...p, status: 'Paid' as const, paid_at: new Date().toISOString(), paid_amount: paidAmount }
+        : p
+    )
+    setPayments(updated)
+    setSummary(recalcSummary(updated))
+    setShareSelectPayment(null)
+
+    try {
+      await api.patch(`/groups/${groupId}/payments/${payment.payment_id}`, {
+        status: 'Paid',
+        paid_amount: paidAmount,
+      })
+      showToast(
+        shares === payment.share_count
+          ? `${payment.member_name} marked paid`
+          : `${payment.member_name} — ${shares} of ${payment.share_count} shares paid`
+      )
+    } catch {
+      setPayments(prev)
+      setSummary(recalcSummary(prev))
+      showToast('Failed to update — please retry.')
     }
   }
 
@@ -390,13 +425,20 @@ export default function MarkPaymentsPage() {
             <div className="divide-y divide-gray-50">
               {filtered.map(p => {
                 const isPaid = p.status === 'Paid'
+                const isPartial = isPaid && p.paid_amount < p.expected_amount
+                const perShare = Math.round(p.expected_amount / p.share_count)
+                const sharesPaid = isPartial && perShare > 0 ? Math.round(p.paid_amount / perShare) : p.share_count
                 return (
                   <div
                     key={p.payment_id}
-                    className={`flex items-center gap-3 px-4 py-3 ${!isPaid && p.status === 'Unpaid' ? 'bg-red-50/40' : ''}`}
+                    className={`flex items-center gap-3 px-4 py-3 ${
+                      isPartial ? 'bg-amber-50/40' : !isPaid && p.status === 'Unpaid' ? 'bg-red-50/40' : ''
+                    }`}
                   >
-                    {/* Avatar color: green = paid, red = unpaid */}
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isPaid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                    {/* Avatar color: green = fully paid, amber = partial, red = unpaid */}
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                      isPartial ? 'bg-amber-100 text-amber-700' : isPaid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                    }`}>
                       {initials(p.member_name)}
                     </div>
 
@@ -404,7 +446,9 @@ export default function MarkPaymentsPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-800 truncate">{p.member_name}</p>
                       <p className="text-[11px] text-gray-400 truncate">
-                        {isPaid && p.paid_at
+                        {isPartial
+                          ? `${sharesPaid} of ${p.share_count} shares · ${formatShortTime(p.paid_at)}`
+                          : isPaid && p.paid_at
                           ? formatShortTime(p.paid_at)
                           : p.status === 'Waived'
                           ? 'Waived'
@@ -414,13 +458,27 @@ export default function MarkPaymentsPage() {
 
                     {/* Amount + toggle switch — Toggle hidden for waived payments and closed cycles */}
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className={`text-xs font-medium ${isPaid ? 'text-green-600' : 'text-gray-400'}`}>
-                        {formatPaise(p.expected_amount)}
-                      </span>
+                      {isPartial ? (
+                        <div className="text-right">
+                          <p className="text-xs font-medium text-amber-600">{formatPaise(p.paid_amount)}</p>
+                          <p className="text-[10px] text-gray-400">of {formatPaise(p.expected_amount)}</p>
+                        </div>
+                      ) : (
+                        <span className={`text-xs font-medium ${isPaid ? 'text-green-600' : 'text-gray-400'}`}>
+                          {formatPaise(p.expected_amount)}
+                        </span>
+                      )}
                       {p.status !== 'Waived' && isCycleOpen && (
                         <Toggle
                           checked={isPaid}
-                          onChange={() => togglePayment(p)}
+                          onChange={() => {
+                            if (!isPaid && p.share_count > 1) {
+                              setShareSelectPayment(p)
+                              setSelectedShares(p.share_count)
+                            } else {
+                              void togglePayment(p)
+                            }
+                          }}
                         />
                       )}
                       {p.status === 'Waived' && (
@@ -457,6 +515,76 @@ export default function MarkPaymentsPage() {
       {toastMsg && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 whitespace-nowrap">
           {toastMsg}
+        </div>
+      )}
+
+      {/* Share selector sheet — shown when marking a multi-share member paid */}
+      {shareSelectPayment && (
+        <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
+          <div className="bg-white rounded-t-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-base font-bold text-gray-900">Mark Payment</h2>
+              <button
+                onClick={() => setShareSelectPayment(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 transition"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm font-medium text-gray-800 mb-0.5">{shareSelectPayment.member_name}</p>
+            <p className="text-xs text-gray-400 mb-5">
+              {shareSelectPayment.share_count} shares · {formatPaise(shareSelectPayment.expected_amount)} total
+            </p>
+
+            <p className="text-[11px] text-gray-500 font-semibold tracking-widest mb-2">SHARES PAID</p>
+            <div className="flex gap-2 mb-5">
+              {Array.from({ length: shareSelectPayment.share_count }, (_, i) => i + 1).map(n => (
+                <button
+                  key={n}
+                  onClick={() => setSelectedShares(n)}
+                  className={`flex-1 py-3 rounded-xl border text-sm font-bold transition ${
+                    selectedShares === n
+                      ? 'border-maroon-600 bg-maroon-50 text-maroon-700'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+
+            <div className="bg-gray-50 rounded-xl px-4 py-3 mb-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Payment amount</span>
+                <span className="text-sm font-bold text-gray-900">
+                  {formatPaise(Math.round(shareSelectPayment.expected_amount / shareSelectPayment.share_count) * selectedShares)}
+                </span>
+              </div>
+              {selectedShares < shareSelectPayment.share_count && (
+                <p className="text-[11px] text-amber-600 mt-1.5">
+                  Partial — {selectedShares} of {shareSelectPayment.share_count} shares
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShareSelectPayment(null)}
+                className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void markPartialPayment(shareSelectPayment, selectedShares)}
+                className="flex-1 py-3 rounded-xl bg-maroon-600 hover:bg-maroon-700 text-sm font-semibold text-white transition"
+              >
+                Mark Paid
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
