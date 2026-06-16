@@ -14,7 +14,7 @@
  * @author Suraj KM
  */
 
-import { eq, and, desc, sum, count, sql, inArray, gt, ne } from 'drizzle-orm';
+import { eq, and, desc, sum, count, sql, inArray, gt, ne, or } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   chit_groups, memberships, monthly_cycles, cycle_winners,
@@ -1108,10 +1108,16 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       .where(and(eq(monthly_cycles.id, cycle_id), eq(monthly_cycles.group_id, group_id)))
       .limit(1),
 
-    db.select({ name: users.name, expected_amount: payments.expected_amount })
+    db.select({ name: users.name, expected_amount: payments.expected_amount, paid_amount: payments.paid_amount, status: payments.status })
       .from(payments)
       .innerJoin(users, eq(users.id, payments.member_user_id))
-      .where(and(eq(payments.cycle_id, cycle_id), eq(payments.status, 'Unpaid'))),
+      .where(and(
+        eq(payments.cycle_id, cycle_id),
+        or(
+          eq(payments.status, 'Unpaid'),
+          and(eq(payments.status, 'Paid'), sql`${payments.paid_amount} < ${payments.expected_amount}`),
+        ),
+      )),
 
     db.select({
       monthly_contribution: chit_groups.monthly_contribution,
@@ -1131,9 +1137,16 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
   if (cycle.status === 'Closed') throw new AppError(409, 'CYCLE_ALREADY_CLOSED', 'Cycle is already closed.');
   if (unpaidProbe.length > 0) {
     const list = unpaidProbe
-      .map(p => `${p.name} (₹${(Number(p.expected_amount) / 100).toLocaleString('en-IN')})`)
+      .map(p => {
+        const expected = Number(p.expected_amount);
+        const paid     = Number(p.paid_amount);
+        if (p.status === 'Paid' && paid < expected) {
+          return `${p.name} (partial: ₹${(paid / 100).toLocaleString('en-IN')} of ₹${(expected / 100).toLocaleString('en-IN')} due)`;
+        }
+        return `${p.name} (₹${(expected / 100).toLocaleString('en-IN')} due)`;
+      })
       .join(', ');
-    throw new AppError(409, 'PAYMENTS_OUTSTANDING', `Unpaid: ${list}`);
+    throw new AppError(409, 'PAYMENTS_OUTSTANDING', `Outstanding dues: ${list}`);
   }
   if (!cycle.is_skip_month && winnerProbe.length === 0) {
     throw new AppError(409, 'WINNER_NOT_RECORDED', 'Record the bid winner before closing this cycle.');
