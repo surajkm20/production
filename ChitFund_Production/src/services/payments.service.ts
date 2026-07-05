@@ -137,12 +137,15 @@ export async function updatePayment(
     .select({
       id: payments.id, cycle_id: payments.cycle_id,
       member_user_id: payments.member_user_id,
+      member_name: users.name,
       expected_amount: payments.expected_amount, paid_amount: payments.paid_amount,
       status: payments.status, cycle_status: monthly_cycles.status,
       month_label: monthly_cycles.month_label,
+      month_number: monthly_cycles.month_number,
     })
     .from(payments)
     .innerJoin(monthly_cycles, and(eq(monthly_cycles.id, payments.cycle_id), eq(monthly_cycles.group_id, group_id)))
+    .innerJoin(users, eq(users.id, payments.member_user_id))
     .where(eq(payments.id, payment_id))
     .limit(1);
 
@@ -180,10 +183,13 @@ export async function updatePayment(
     await insertActivity({
       group_id,
       event_type: 'PAYMENT_MARKED',
-      actor_id:   paymentRow.member_user_id,
+      actor_id:   userId,
       data: {
-        amount:      effectivePaidAmount,
-        month_label: paymentRow.month_label,
+        amount:          effectivePaidAmount,
+        month_label:     paymentRow.month_label,
+        month_number:    paymentRow.month_number,
+        member_user_id:  paymentRow.member_user_id,
+        member_name:     paymentRow.member_name,
       },
     });
 

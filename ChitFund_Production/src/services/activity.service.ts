@@ -50,6 +50,12 @@ function paiseToDisplay(paise: unknown): string {
   return `₹${(n / 100).toLocaleString('en-IN')}`;
 }
 
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
 function buildSummary(
   event_type: string,
   actor_name: string | null,
@@ -66,6 +72,9 @@ function buildSummary(
     case 'MEMBER_REMOVED':
       return `${name} was removed from the group`;
     case 'PAYMENT_MARKED':
+      if (data.member_name) {
+        return `${name}(Admin) marked payment for ${data.member_name} of ${paiseToDisplay(data.amount)} for ${ordinal(Number(data.month_number))} Cycle`;
+      }
       return `${name} paid ${paiseToDisplay(data.amount)} · ${data.month_label}`;
     case 'WINNER_RECORDED':
       return `${name} won ${data.month_label} · bid ${paiseToDisplay(data.bid_amount)}`;
@@ -100,7 +109,7 @@ export async function getGroupActivity(
 ) {
   await assertActiveMember(group_id, userId);
 
-  const safeLimit = Math.min(limit, 50);
+  const safeLimit = Math.min(limit, 200);
 
   const rows = await db
     .select({
