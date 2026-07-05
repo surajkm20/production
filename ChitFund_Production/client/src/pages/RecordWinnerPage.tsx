@@ -258,7 +258,7 @@ export default function RecordWinnerPage() {
                       <p className="text-xs font-semibold text-gray-800">Use special share (admin withdrawal)</p>
                       {withdrawalAlreadyUsed
                         ? <p className="text-xs text-gray-400 mt-0.5">Already used — special share claimed</p>
-                        : <p className="text-xs text-gray-500 mt-0.5">Admin takes 100% of the pool. No commission, nothing to basket. One-time use.</p>
+                        : <p className="text-xs text-gray-500 mt-0.5">Admin takes 100% of the pool. No maintenance fee, nothing to basket. One-time use.</p>
                       }
                     </div>
                   </label>
@@ -266,7 +266,7 @@ export default function RecordWinnerPage() {
                     <div className="mt-3 rounded-lg bg-white border border-maroon-100 px-3 py-2 text-xs text-maroon-700 space-y-0.5">
                       <p>Admin withdrawal — full pool</p>
                       <p>Takes home: <span className="font-semibold">{formatPaise(poolAmount)}</span></p>
-                      <p className="text-gray-400">Commission ₹0 · Basket ₹0 · Basket unchanged</p>
+                      <p className="text-gray-400">Maintenance fee ₹0 · Basket ₹0 · Basket unchanged</p>
                     </div>
                   )}
                 </div>

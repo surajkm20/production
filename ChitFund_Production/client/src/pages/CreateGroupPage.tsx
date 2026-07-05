@@ -100,7 +100,7 @@ export default function CreateGroupPage() {
     const parsedCommission = parseFloat(commissionRate)
     const parsedCommissionAmt = parseFloat(commissionAmount)
     if (isNaN(parsedCommission) && isNaN(parsedCommissionAmt)) {
-      setError('Enter admin commission as a percentage or a fixed rupee amount.')
+      setError('Enter admin maintenance fee as a percentage or a fixed rupee amount.')
       return
     }
     // Derive rate: prefer the % field; fall back to computing from the ₹ amount
@@ -300,10 +300,10 @@ export default function CreateGroupPage() {
             </p>
           </div>
 
-          {/* Admin commission — required; enter as % or flat ₹, the other auto-fills */}
+          {/* Admin Maintenance Fee — required; enter as % or flat ₹, the other auto-fills */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Admin commission <span className="text-red-500 font-normal text-xs">required</span>
+              Admin Maintenance Fee <span className="text-red-500 font-normal text-xs">required</span>
             </label>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
@@ -333,7 +333,7 @@ export default function CreateGroupPage() {
               </div>
             </div>
             <p className="text-xs text-gray-400 mt-1.5">
-              Your cut from each winning bid. Enter amount or percentage — the other fills automatically. Visible to all members. Locked once cycle 1 starts.
+              Your maintenance fee from each winning bid. Enter amount or percentage — the other fills automatically. Visible to all members. Locked once cycle 1 starts.
             </p>
           </div>
 
@@ -394,7 +394,7 @@ export default function CreateGroupPage() {
                 </div>
                 {(parseFloat(commissionRate) > 0 || parseFloat(commissionAmount) > 0) && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-maroon-200">Admin commission</span>
+                    <span className="text-maroon-200">Maintenance fee</span>
                     <span className="font-bold">
                       {commissionRate !== '' ? `${commissionRate}%` : `₹${commissionAmount}`} per bid
                     </span>
@@ -410,7 +410,7 @@ export default function CreateGroupPage() {
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             <p className="text-xs text-amber-700 leading-relaxed">
-              After cycle 1 starts, contribution, total shares, and admin commission rate are locked. You can rename the group anytime.
+              After cycle 1 starts, contribution, total shares, and admin maintenance fee are locked. You can rename the group anytime.
             </p>
           </div>
 

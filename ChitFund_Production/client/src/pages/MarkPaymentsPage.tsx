@@ -334,14 +334,14 @@ export default function MarkPaymentsPage() {
             }`}>FINAL CYCLE</p>
             {summary.basket_contribution > 0 ? (
               <p className="text-xs leading-relaxed text-teal-800">
-                Basket contributed <span className="font-semibold">{formatPaise(summary.basket_contribution)}</span> toward this month's pool + commission.
+                Basket contributed <span className="font-semibold">{formatPaise(summary.basket_contribution)}</span> toward this month's pool + maintenance fee.
                 {summary.waived_count > 0 && summary.waived_count === (summary.paid_count + summary.unpaid_count + summary.waived_count)
                   ? ' All contributions are covered — no one needs to pay.'
                   : ' Members pay reduced contributions.'}
               </p>
             ) : (
               <p className="text-xs leading-relaxed text-amber-800">
-                Last cycle. No basket balance available — members pay the full amount including admin commission share.
+                Last cycle. No basket balance available — members pay the full amount including admin maintenance fee share.
               </p>
             )}
           </div>

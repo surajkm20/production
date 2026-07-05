@@ -143,7 +143,7 @@ function BidFlowCard({
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-              Admin commission {commPct}%
+              Maintenance fee {commPct}%
             </span>
           </div>
         </div>
@@ -264,13 +264,13 @@ function BidFlowCard({
           )}
         </div>
 
-        {/* Admin commission block */}
+        {/* Admin Maintenance Fee block */}
         <div className="py-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-400 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-gray-800">Admin commission</p>
+                <p className="text-sm font-semibold text-gray-800">Admin Maintenance Fee</p>
                 <p className="text-[11px] text-gray-400">Collected offline in cash</p>
               </div>
             </div>

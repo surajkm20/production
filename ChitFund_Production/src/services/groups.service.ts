@@ -172,7 +172,7 @@ async function fetchGroupDetail(userId: string, group_id: string) {
  * @param data.total_shares - Total shares, which also equals the number of months/cycles
  * @param data.start_month - First cycle month as an ISO date string
  * @param data.payment_due_day - Day of month payments are due
- * @param data.admin_commission_rate - Optional admin commission rate (percent)
+ * @param data.admin_commission_rate - Optional admin maintenance fee rate (percent)
  * @param data.monthly_interest_rate - Optional basket loan interest rate (percent)
  * @param data.admin_share_count - Shares allocated to the admin (defaults to 1)
  * @returns A promise resolving to the created group's summary, including its invitation code
@@ -518,7 +518,7 @@ export async function getGroup(userId: string, group_id: string) {
  * @param data.monthly_contribution - New per-share contribution (locked after start)
  * @param data.total_shares - New share/month count; grows or trims the pre-created cycles (locked after start)
  * @param data.start_month - New first-cycle month (locked after start)
- * @param data.admin_commission_rate - New admin commission rate (locked after start)
+ * @param data.admin_commission_rate - New admin maintenance fee rate (locked after start)
  * @param data.monthly_interest_rate - New basket loan interest rate
  * @returns A promise resolving to the refreshed group detail
  * @throws {AppError} 403 FORBIDDEN if the caller is not an admin

@@ -361,7 +361,7 @@ export default function CycleDetailPage() {
             <p className="text-[11px] font-semibold text-teal-600 tracking-widest mb-2">FINAL CYCLE — BASKET OFFSET</p>
             <p className="text-xs text-teal-800 leading-relaxed">
               The basket contributed <span className="font-semibold">{formatPaise(cycle.basket_contribution)}</span> toward
-              this cycle's pool + admin commission.
+              this cycle's pool + admin maintenance fee.
               {cycle.waived_count === cycle.payments.length && cycle.payments.length > 0
                 ? ' The full amount is covered — no member needs to pay.'
                 : ` Members pay reduced contributions.`}
@@ -372,7 +372,7 @@ export default function CycleDetailPage() {
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
             <p className="text-[11px] font-semibold text-amber-600 tracking-widest mb-2">FINAL CYCLE</p>
             <p className="text-xs text-amber-800 leading-relaxed">
-              This is the last cycle. The basket had no balance to offset contributions — members pay the full share including the admin commission portion.
+              This is the last cycle. The basket had no balance to offset contributions — members pay the full share including the admin maintenance fee portion.
             </p>
           </div>
         )}

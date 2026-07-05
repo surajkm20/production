@@ -457,7 +457,7 @@ export async function recordWinner(
     stored_bid       = bid_amount;
     admin_commission = Math.round(pool * commission_rate / 100);
     basket_credit    = bid_amount - admin_commission;
-    if (basket_credit < 0)      throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${admin_commission} paise).`);
+    if (basket_credit < 0)      throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin maintenance fee (${admin_commission} paise).`);
     winner_takeaway  = pool - bid_amount;
 
     // ── Double Chitti financial validation (slot 2 only) ────────────────────
@@ -776,7 +776,7 @@ export async function declareSkipMonth(
  * @param group_id - Group the cycle belongs to
  * @param cycle_id - Open, non-skip cycle whose first winner's bid is being edited
  * @param data - Edit details
- * @param data.bid_amount - Corrected bid in paise; must be > 0, ≤ pool, and at least the admin commission
+ * @param data.bid_amount - Corrected bid in paise; must be > 0, ≤ pool, and at least the admin maintenance fee
  * @param data.notes - Optional note stored on the winner row
  * @returns A promise resolving to the recomputed winner breakdown and resulting basket balance
  * @throws {AppError} 403 FORBIDDEN if the caller is not an admin
@@ -842,7 +842,7 @@ export async function updateCycle(
   const pool              = Number(group.pool_amount);
   const new_commission    = Math.round(pool * commission_rate / 100);
   const new_basket_credit = new_bid - new_commission;
-  if (new_basket_credit < 0)                    throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${new_commission} paise).`);
+  if (new_basket_credit < 0)                    throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin maintenance fee (${new_commission} paise).`);
   const old_basket_credit = Number(winnerW.basket_credit);
   const credit_delta      = new_basket_credit - old_basket_credit;
   const new_takeaway      = pool - new_bid;
@@ -956,7 +956,7 @@ export async function correctClosedCycle(
     const commission_rate   = parseFloat(String(group.admin_commission_rate));
     const new_commission    = Math.round(pool * commission_rate / 100);
     const new_basket_credit = new_bid - new_commission;
-    if (new_basket_credit < 0)            throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin commission (${new_commission} paise).`);
+    if (new_basket_credit < 0)            throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin maintenance fee (${new_commission} paise).`);
     const new_takeaway      = pool - new_bid;
     const old_basket_credit = Number(firstWinner.basket_credit);
     const credit_delta      = new_basket_credit - old_basket_credit;
