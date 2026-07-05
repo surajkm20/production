@@ -473,6 +473,9 @@ export default function AdminDashboardPage() {
           </div>
           <p className="text-xs text-gray-400 mb-3">
             {group.people_count} people · {group.total_shares} shares · {formatPaise(group.monthly_contribution)}/share · Pool {formatPaise(group.pool_amount)}
+            {parseFloat(group.admin_commission_rate) > 0 && (
+              <> · Admin Maintenance Fee {formatPaise(Math.round(group.pool_amount * parseFloat(group.admin_commission_rate) / 100))}</>
+            )}
           </p>
 
           {/* Progress bar — inline style drives width percentage */}
