@@ -49,7 +49,8 @@ export default function CreateGroupPage() {
   const [totalShares, setTotalShares] = useState(10)
   const [startMonth, setStartMonth] = useState('')
   const [paymentDueDay, setPaymentDueDay] = useState(10)
-  const [commissionRate, setCommissionRate] = useState('5')
+  const [commissionRate, setCommissionRate] = useState('')
+  const [commissionAmount, setCommissionAmount] = useState('')
   const [interestRate, setInterestRate] = useState('2')
   const [adminShareCount, setAdminShareCount] = useState(1)
   const [loading, setLoading] = useState(false)
@@ -72,16 +73,45 @@ export default function CreateGroupPage() {
     setTotalShares(s => Math.max(2, s + delta))
   }
 
+  function handleCommissionRateChange(val: string) {
+    setCommissionRate(val)
+    if (val === '') { setCommissionAmount(''); return }
+    const rate = parseFloat(val)
+    if (!isNaN(rate) && poolAmount > 0) {
+      const amt = (rate / 100) * (poolAmount / 100)
+      setCommissionAmount(Number.isInteger(amt) ? String(amt) : amt.toFixed(2))
+    }
+  }
+
+  function handleCommissionAmountChange(val: string) {
+    setCommissionAmount(val)
+    if (val === '') { setCommissionRate(''); return }
+    const amt = parseFloat(val)
+    if (!isNaN(amt) && poolAmount > 0) {
+      const rate = (amt / (poolAmount / 100)) * 100
+      setCommissionRate(Number.isInteger(rate) ? String(rate) : parseFloat(rate.toFixed(4)).toString())
+    }
+  }
+
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     if (contribution <= 0) { setError('Enter a valid contribution amount.'); return }
     if (paymentDueDay < 1 || paymentDueDay > 28) { setError('Payment due day must be between 1 and 28.'); return }
+    const parsedCommission = parseFloat(commissionRate)
+    const parsedCommissionAmt = parseFloat(commissionAmount)
+    if (isNaN(parsedCommission) && isNaN(parsedCommissionAmt)) {
+      setError('Enter admin commission as a percentage or a fixed rupee amount.')
+      return
+    }
+    // Derive rate: prefer the % field; fall back to computing from the ₹ amount
+    const finalCommissionRate = !isNaN(parsedCommission)
+      ? parsedCommission
+      : (parsedCommissionAmt / (poolAmount / 100)) * 100
     setError(null)
     setLoading(true)
 
     try {
-      const parsedCommission = parseFloat(commissionRate)
-      const parsedInterest   = parseFloat(interestRate)
+      const parsedInterest = parseFloat(interestRate)
       // API call: POST /v1/groups  Body: group configuration
       const data = await api.post<CreateGroupResponse>('/groups', {
         name: name.trim(),
@@ -90,9 +120,8 @@ export default function CreateGroupPage() {
         start_month: startMonth + '-01',            // browser month picker gives "YYYY-MM"; backend wants "YYYY-MM-DD"
         payment_due_day: paymentDueDay,
         admin_share_count: adminShareCount,
-        // Spread operator with conditional: only include optional fields if the user entered a valid number
-        ...(!isNaN(parsedCommission) ? { admin_commission_rate: parsedCommission } : {}),
-        ...(!isNaN(parsedInterest)   ? { monthly_interest_rate: parsedInterest }   : {}),
+        admin_commission_rate: finalCommissionRate,
+        ...(!isNaN(parsedInterest) ? { monthly_interest_rate: parsedInterest } : {}),
       })
       // On success, navigate to the new group's admin dashboard
       navigate(`/groups/${data.group_id}`)
@@ -271,26 +300,40 @@ export default function CreateGroupPage() {
             </p>
           </div>
 
-          {/* Admin commission rate — optional field, blank = no commission */}
+          {/* Admin commission — required; enter as % or flat ₹, the other auto-fills */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Admin commission rate <span className="text-gray-400 font-normal">(optional)</span>
+              Admin commission <span className="text-red-500 font-normal text-xs">required</span>
             </label>
-            <div className="relative w-40">
-              <input
-                type="number"
-                value={commissionRate}
-                onChange={e => setCommissionRate(e.target.value)}
-                placeholder="5"
-                min="0"
-                max="100"
-                step="0.25"
-                className="w-full px-3.5 pr-8 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 font-medium">₹</span>
+                <input
+                  type="number"
+                  value={commissionAmount}
+                  onChange={e => handleCommissionAmountChange(e.target.value)}
+                  placeholder="800"
+                  min="0"
+                  className="w-full pl-7 pr-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
+                />
+              </div>
+              <span className="text-xs text-gray-400 font-medium shrink-0">or</span>
+              <div className="relative w-28">
+                <input
+                  type="number"
+                  value={commissionRate}
+                  onChange={e => handleCommissionRateChange(e.target.value)}
+                  placeholder="5"
+                  min="0"
+                  max="100"
+                  step="0.25"
+                  className="w-full px-3 pr-7 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-maroon-500 focus:border-transparent transition"
+                />
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+              </div>
             </div>
             <p className="text-xs text-gray-400 mt-1.5">
-              Your cut from each winning bid. e.g. 5% on a ₹16,000 bid = ₹800 to you. Visible to all members. Locked once cycle 1 starts.
+              Your cut from each winning bid. Enter amount or percentage — the other fills automatically. Visible to all members. Locked once cycle 1 starts.
             </p>
           </div>
 
@@ -349,10 +392,12 @@ export default function CreateGroupPage() {
                   <span className="text-maroon-200">Due day</span>
                   <span className="font-bold">{paymentDueDay}th of each month</span>
                 </div>
-                {parseFloat(commissionRate) > 0 && (
+                {(parseFloat(commissionRate) > 0 || parseFloat(commissionAmount) > 0) && (
                   <div className="flex justify-between text-sm">
                     <span className="text-maroon-200">Admin commission</span>
-                    <span className="font-bold">{commissionRate}% of each winning bid</span>
+                    <span className="font-bold">
+                      {commissionRate !== '' ? `${commissionRate}%` : `₹${commissionAmount}`} per bid
+                    </span>
                   </div>
                 )}
               </div>
