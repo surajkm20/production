@@ -38,7 +38,8 @@ export async function listPayments(
   cycle_id: string,
   filters:  { status?: string },
 ) {
-  await assertActiveMember(group_id, userId);
+  const caller = await assertActiveMember(group_id, userId);
+  const isAdmin = caller.role === 'Admin';
 
   const [[cycleRow], [groupRow]] = await Promise.all([
     db.select({ id: monthly_cycles.id, status: monthly_cycles.status, month_number: monthly_cycles.month_number })
@@ -87,7 +88,9 @@ export async function listPayments(
 
   const { status = 'all' } = filters;
   const dbStatus = status === 'paid' ? 'Paid' : status === 'unpaid' ? 'Unpaid' : status === 'waived' ? 'Waived' : null;
-  const data = dbStatus ? allPayments.filter(p => p.status === dbStatus) : allPayments;
+  // Non-admin members only see their own payment row; admins see all.
+  const visible = isAdmin ? allPayments : allPayments.filter(p => p.member_user_id === userId);
+  const data = dbStatus ? visible.filter(p => p.status === dbStatus) : visible;
 
   return {
     data: data.map(p => ({

@@ -112,10 +112,10 @@ export interface GroupSummary {
 
 export interface CycleWinner {
   winner_number: number
-  user_id: string
+  user_id: string | null
   name: string | null
-  bid_amount: number
-  admin_commission: number
+  bid_amount: number | null
+  admin_commission: number | null
   basket_credit: number
   winner_takeaway: number
   is_admin_withdrawal: boolean
@@ -167,6 +167,7 @@ export interface GroupDetail {
     total_debited: number
     total_lent_out: number
   } | null
+  admin_name: string | null
   my_membership: {
     role: 'Admin' | 'Member'
     share_count: number

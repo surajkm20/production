@@ -153,7 +153,8 @@ export async function winnersLedger(req: Request, res: Response, next: NextFunct
     const group_id = req.params.group_id as string;
     const userId   = req.user!.userId;
 
-    await assertActiveMember(group_id, userId);
+    const caller = await assertActiveMember(group_id, userId);
+    const isAdmin = caller.role === 'Admin';
 
     // Each cycle may have multiple winners (Double Chiti). Return one row per cycle_winner,
     // annotated with the cycle's month_number/label and is_skip_month flag.
@@ -163,6 +164,7 @@ export async function winnersLedger(req: Request, res: Response, next: NextFunct
         month_label:      monthly_cycles.month_label,
         is_skip_month:    monthly_cycles.is_skip_month,
         winner_number:    cycle_winners.winner_number,
+        winner_user_id:   cycle_winners.winner_user_id,
         winner_name:      users.name,
         bid_amount:       cycle_winners.bid_amount,
         admin_commission: cycle_winners.admin_commission,
@@ -175,17 +177,48 @@ export async function winnersLedger(req: Request, res: Response, next: NextFunct
       .where(eq(cycle_winners.group_id, group_id))
       .orderBy(monthly_cycles.month_number, cycle_winners.winner_number);
 
-    sendSuccess(res, rows.map(r => ({
-      month_number:    r.month_number,
-      month_label:     r.month_label,
-      winner_number:   r.winner_number,
-      winner_name:     r.winner_name,
-      bid_amount:       r.is_skip_month ? null : r.bid_amount,
-      admin_commission: r.is_skip_month ? null : r.admin_commission,
-      basket_credit:    r.is_skip_month ? null : r.basket_credit,
-      winner_takeaway:  r.winner_takeaway,
-      is_skip_month:    r.is_skip_month,
-    })));
+    if (isAdmin) {
+      sendSuccess(res, rows.map(r => ({
+        month_number:    r.month_number,
+        month_label:     r.month_label,
+        winner_number:   r.winner_number,
+        winner_name:     r.winner_name,
+        bid_amount:       r.is_skip_month ? null : r.bid_amount,
+        admin_commission: r.is_skip_month ? null : r.admin_commission,
+        basket_credit:    r.is_skip_month ? null : r.basket_credit,
+        winner_takeaway:  r.winner_takeaway,
+        is_skip_month:    r.is_skip_month,
+      })));
+      return;
+    }
+
+    // Non-admin: anonymize other members. Assign a stable slot index to each member
+    // ordered by joined_at so "Member 1", "Member 2" labels are consistent app-wide.
+    const memberSlotRows = await db
+      .select({ user_id: memberships.user_id })
+      .from(memberships)
+      .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active')))
+      .orderBy(memberships.joined_at, memberships.id);
+
+    const slotMap = new Map<string, number>();
+    memberSlotRows.forEach((m, idx) => slotMap.set(m.user_id, idx + 1));
+
+    sendSuccess(res, rows.map(r => {
+      const isOwnWin = r.winner_user_id === userId;
+      return {
+        month_number:    r.month_number,
+        month_label:     r.month_label,
+        winner_number:   r.winner_number,
+        winner_name:     isOwnWin ? r.winner_name : null,
+        winner_slot:     slotMap.get(r.winner_user_id) ?? 0,
+        is_own_win:      isOwnWin,
+        bid_amount:       r.is_skip_month ? null : r.bid_amount,
+        admin_commission: r.is_skip_month ? null : r.admin_commission,
+        basket_credit:    r.is_skip_month ? null : r.basket_credit,
+        winner_takeaway:  r.winner_takeaway,
+        is_skip_month:    r.is_skip_month,
+      };
+    }));
   } catch (err) {
     next(err);
   }

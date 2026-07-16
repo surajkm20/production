@@ -383,14 +383,18 @@ export default function MembersPage() {
       // All four fetched in parallel — none depends on the others
       const [g, memberList, me, reqs] = await Promise.all([
         api.get<GroupDetail>(`/groups/${groupId}`),
-        api.get<Member[]>(`/groups/${groupId}/members`),
+        api.get<Member[]>(`/groups/${groupId}/members`).catch(() => [] as Member[]),
         api.get<{ user_id: string }>('/me'),
-        // .catch() makes this non-fatal: if join-requests fails, use empty array
         api.get<JoinRequest[]>(`/groups/${groupId}/join-requests`).catch((err) => {
           console.error('[join-requests] fetch failed:', err)
           return [] as JoinRequest[]
         }),
       ])
+      // Non-admin members have no access to this page.
+      if (g.my_membership.role !== 'Admin') {
+        navigate(`/groups/${groupId}/member`, { replace: true })
+        return
+      }
       setGroup(g)
       setMembers(memberList)
       setCurrentUserId(me.user_id)

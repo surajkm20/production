@@ -17,7 +17,7 @@ export default function GroupNavBar({ groupId, role }: Props) {
   ]
 
   const memberTabs = [
-    { label: 'Home',        path: `/groups/${groupId}` as string | undefined,           exact: true },
+    { label: 'Home',        path: `/groups/${groupId}/member` as string | undefined,    exact: true },
     { label: 'All winners', path: `/groups/${groupId}/winners` as string | undefined },
     { label: 'My loans',    path: `/groups/${groupId}/my-loans` as string | undefined },
     { label: 'Analytics',   path: `/groups/${groupId}/analytics` as string | undefined },

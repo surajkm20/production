@@ -25,11 +25,19 @@ interface WinnerRow {
   month_label: string
   winner_number: number
   winner_name: string | null
+  winner_slot?: number
+  is_own_win?: boolean
   bid_amount: number | null
   admin_commission: number | null
   basket_credit: number | null
   winner_takeaway: number | null
   is_skip_month: boolean
+}
+
+function displayWinnerName(w: WinnerRow, isAdmin: boolean): string {
+  if (isAdmin) return w.winner_name ?? '—'
+  if (w.is_own_win) return 'You'
+  return w.winner_slot ? `Member ${w.winner_slot}` : '—'
 }
 
 interface BalanceSheet {
@@ -358,6 +366,7 @@ export default function AnalyticsPage() {
   const maxBid = completedBids.length > 0 ? Math.max(...completedBids.map(b => b.bid_amount!)) : 0
 
   const hasAnyData = overview !== null || winners.length > 0 || completedBids.length > 0
+  const isAdmin = group.my_membership.role === 'Admin'
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto">
@@ -734,7 +743,7 @@ export default function AnalyticsPage() {
                               <div className="text-right shrink-0 space-y-1.5">
                                 {cycleWinners.map((w, i) => (
                                   <div key={i}>
-                                    <p className="text-xs font-medium text-gray-800 leading-tight">{w.winner_name ?? '—'}</p>
+                                    <p className="text-xs font-medium text-gray-800 leading-tight">{displayWinnerName(w, isAdmin)}</p>
                                     {w.winner_takeaway != null && (
                                       <p className="text-xs font-semibold text-gray-900 tabular-nums">{formatPaise(w.winner_takeaway)}</p>
                                     )}
@@ -780,7 +789,7 @@ export default function AnalyticsPage() {
                                 <div className="text-right shrink-0 space-y-1.5">
                                   {cycleWinners.map((w, i) => (
                                     <div key={i}>
-                                      <p className="text-xs font-medium text-gray-800 leading-tight">{w.winner_name ?? '—'}</p>
+                                      <p className="text-xs font-medium text-gray-800 leading-tight">{displayWinnerName(w, isAdmin)}</p>
                                       {w.winner_takeaway != null && (
                                         <p className="text-xs font-semibold text-gray-900 tabular-nums">{formatPaise(w.winner_takeaway)}</p>
                                       )}

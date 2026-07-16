@@ -8,9 +8,17 @@ interface WinnerRow {
   month_number: number
   month_label: string
   winner_name: string | null
+  winner_slot?: number
+  is_own_win?: boolean
   bid_amount: number | null
   winner_takeaway: number | null
   is_skip_month: boolean
+}
+
+function displayWinnerName(w: WinnerRow, isAdmin: boolean): string {
+  if (isAdmin) return w.winner_name ?? '—'
+  if (w.is_own_win) return 'You'
+  return w.winner_slot ? `Member ${w.winner_slot}` : '—'
 }
 
 export default function AllWinnersPage() {
@@ -95,7 +103,7 @@ export default function AllWinnersPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
-                      {w.is_skip_month ? 'Skip month' : (w.winner_name ?? '—')}
+                      {w.is_skip_month ? 'Skip month' : displayWinnerName(w, role === 'Admin')}
                     </p>
                     <p className="text-xs text-gray-400">{w.month_label}</p>
                   </div>

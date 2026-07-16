@@ -205,11 +205,10 @@ export default function CycleDetailPage() {
         <div className={`rounded-2xl p-4 border ${
           hasWinner ? 'bg-maroon-50 border-maroon-100' : 'bg-gray-50 border-gray-200'
         }`}>
-          {/* Regular month with winner — handles both single winner and Double Chiti (2 winners) */}
-          {hasWinner && !cycle.is_skip_month && (
+          {/* Admin: full winner detail (name, bid, takeaway) */}
+          {isAdmin && hasWinner && !cycle.is_skip_month && (
             <>
               {isDoubleChiti ? (
-                /* Double Chiti: two winners */
                 <>
                   <div className="flex items-center gap-2 mb-3">
                     <p className="text-[11px] font-semibold text-maroon-400 tracking-widest">WINNERS</p>
@@ -218,7 +217,7 @@ export default function CycleDetailPage() {
                     </span>
                   </div>
                   {cycle.winners.map((winner, idx) => (
-                    <div key={winner.user_id + '-' + idx}>
+                    <div key={(winner.user_id ?? idx) + '-' + idx}>
                       {idx > 0 && <div className="border-t border-maroon-100 my-3" />}
                       <div className="flex items-center gap-3 mb-2">
                         <Avatar name={winner.name ?? ''} size="lg" />
@@ -227,7 +226,7 @@ export default function CycleDetailPage() {
                       <div className="flex gap-2">
                         <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
                           <p className="text-[10px] text-gray-400 mb-0.5">Won bid</p>
-                          <p className="text-sm font-bold text-gray-900">{formatPaise(winner.bid_amount)}</p>
+                          <p className="text-sm font-bold text-gray-900">{formatPaise(winner.bid_amount ?? 0)}</p>
                         </div>
                         <div className="flex-1 bg-white rounded-xl p-2.5 border border-maroon-100">
                           <p className="text-[10px] text-gray-400 mb-0.5">Took home</p>
@@ -245,7 +244,7 @@ export default function CycleDetailPage() {
                     <div className="mt-3 flex flex-col gap-2">
                       {cycle.winners.map((w, i) => (
                         <button
-                          key={w.user_id + '-' + i}
+                          key={(w.user_id ?? i) + '-' + i}
                           onClick={() => openCorrectModal(i + 1)}
                           className="w-full py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-xl hover:bg-amber-100 transition"
                         >
@@ -256,7 +255,6 @@ export default function CycleDetailPage() {
                   )}
                 </>
               ) : (
-                /* Single winner */
                 <>
                   <p className="text-[11px] font-semibold text-maroon-400 tracking-widest mb-3">WINNER</p>
                   <div className="flex items-center gap-3 mb-3">
@@ -291,8 +289,8 @@ export default function CycleDetailPage() {
             </>
           )}
 
-          {/* Skip month — someone receives from basket instead of a bid */}
-          {hasWinner && cycle.is_skip_month && (
+          {/* Admin: skip month detail */}
+          {isAdmin && hasWinner && cycle.is_skip_month && (
             <>
               <p className="text-[11px] font-semibold text-blue-400 tracking-widest mb-3">SKIP MONTH</p>
               <div className="flex items-center gap-3 mb-1">
@@ -316,6 +314,21 @@ export default function CycleDetailPage() {
                 </button>
               )}
             </>
+          )}
+
+          {/* Member: anonymous winner view */}
+          {!isAdmin && hasWinner && (
+            <div>
+              <p className="text-[11px] font-semibold text-maroon-400 tracking-widest mb-2">
+                {cycle.is_skip_month ? 'SKIP MONTH' : 'WINNER'}
+              </p>
+              <p className="text-sm text-gray-700">A winner has been selected.</p>
+              {firstWinner && firstWinner.winner_takeaway > 0 && (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {formatPaise(firstWinner.winner_takeaway)} credited from the pool.
+                </p>
+              )}
+            </div>
           )}
 
           {/* No winner yet — admin sees a "Tap to record" shortcut if this is the current cycle */}
@@ -377,56 +390,101 @@ export default function CycleDetailPage() {
           </div>
         )}
 
-        {/* ── Payments list for this cycle ──────────────────────────────────── */}
+        {/* ── Payments ──────────────────────────────────────────────────────── */}
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50">
             <p className="text-[11px] font-semibold text-gray-400 tracking-widest">
               {cycle.is_final_cycle
-                ? `PAYMENTS (${paidCount}/${cycle.payments.filter(p => p.status !== 'Waived').length} paid, ${cycle.waived_count} waived)`
+                ? `PAYMENTS (${paidCount}/${totalCount - cycle.waived_count} paid, ${cycle.waived_count} waived)`
                 : `PAYMENTS (${paidCount}/${totalCount} paid)`}
             </p>
           </div>
 
-          {cycle.payments.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-6">No payment records yet.</p>
-          ) : (
-            <div className="divide-y divide-gray-50">
-              {cycle.payments.map(p => (
-                <div key={p.payment_id} className="flex items-center gap-3 px-4 py-3">
-                  <Avatar name={p.member_name} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-xs font-medium text-gray-900 truncate">{p.member_name}</p>
-                      {p.share_count > 1 && (
-                        <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-1">{p.share_count} shares</span>
+          {/* Admin: full per-member breakdown */}
+          {isAdmin && (
+            cycle.payments.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No payment records yet.</p>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {cycle.payments.map(p => (
+                  <div key={p.payment_id} className="flex items-center gap-3 px-4 py-3">
+                    <Avatar name={p.member_name} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-medium text-gray-900 truncate">{p.member_name}</p>
+                        {p.share_count > 1 && (
+                          <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-1">{p.share_count} shares</span>
+                        )}
+                      </div>
+                      {p.status === 'Paid' && p.paid_at && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">{formatDateTime(p.paid_at)}</p>
                       )}
                     </div>
-                    {p.status === 'Paid' && p.paid_at && (
-                      <p className="text-[10px] text-gray-400 mt-0.5">{formatDateTime(p.paid_at)}</p>
-                    )}
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      {p.status === 'Paid' ? (
+                        <>
+                          <p className="text-xs text-gray-700">{formatPaise(p.paid_amount)}</p>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Paid</span>
+                        </>
+                      ) : p.status === 'Waived' ? (
+                        <>
+                          <p className="text-xs text-gray-400">—</p>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Waived</span>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xs text-gray-500">{formatPaise(p.expected_amount)} expected</p>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Unpaid</span>
+                        </>
+                      )}
+                    </div>
                   </div>
+                ))}
+              </div>
+            )
+          )}
 
-                  <div className="shrink-0 flex items-center gap-1.5">
-                    {p.status === 'Paid' ? (
-                      <>
-                        <p className="text-xs text-gray-700">{formatPaise(p.paid_amount)}</p>
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Paid</span>
-                      </>
-                    ) : p.status === 'Waived' ? (
-                      <>
-                        <p className="text-xs text-gray-400">—</p>
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Waived</span>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-xs text-gray-500">{formatPaise(p.expected_amount)} expected</p>
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Unpaid</span>
-                      </>
-                    )}
+          {/* Member: own payment row only */}
+          {!isAdmin && (
+            cycle.payments.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No payment record yet.</p>
+            ) : (
+              <div>
+                {cycle.payments.map(p => (
+                  <div key={p.payment_id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-xs font-medium text-gray-800">Your payment</p>
+                      {p.status === 'Paid' && p.paid_at && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">{formatDateTime(p.paid_at)}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {p.status === 'Paid' ? (
+                        <>
+                          <p className="text-xs text-gray-700">{formatPaise(p.paid_amount)}</p>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Paid</span>
+                        </>
+                      ) : p.status === 'Waived' ? (
+                        <>
+                          <p className="text-xs text-gray-400">—</p>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Waived</span>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xs text-gray-500">{formatPaise(p.expected_amount)} expected</p>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Unpaid</span>
+                        </>
+                      )}
+                    </div>
                   </div>
+                ))}
+                <div className="px-4 py-2.5 border-t border-gray-50 bg-gray-50">
+                  <p className="text-[11px] text-gray-400">
+                    {paidCount} of {totalCount} members have paid this cycle.
+                  </p>
                 </div>
-              ))}
-            </div>
+              </div>
+            )
           )}
         </div>
 

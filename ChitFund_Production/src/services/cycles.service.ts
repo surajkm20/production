@@ -214,7 +214,8 @@ export async function listCycles(userId: string, group_id: string, filters: { st
  * @throws {AppError} 404 CYCLE_NOT_FOUND if the cycle does not exist in this group
  */
 export async function getCycle(userId: string, group_id: string, cycle_id: string) {
-  await assertActiveMember(group_id, userId);
+  const caller = await assertActiveMember(group_id, userId);
+  const isAdmin = caller.role === 'Admin';
 
   const [cycleRows, paymentRows, cycleTxnRows, basketRows, winnerRows, groupRows] = await Promise.all([
     db.select({
@@ -322,6 +323,37 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
   const total_count      = paymentRows.length;
   const waived_count     = paymentRows.filter(p => p.status === 'Waived').length;
 
+  // Non-admin members see no winner identity and only their own payment row.
+  const winners = winnerRows.map(w => isAdmin
+    ? {
+        winner_number:       w.winner_number,
+        user_id:             w.winner_user_id,
+        name:                w.winner_name,
+        bid_amount:          w.bid_amount,
+        admin_commission:    w.admin_commission,
+        basket_credit:       w.basket_credit,
+        winner_takeaway:     w.winner_takeaway,
+        is_admin_withdrawal: w.is_admin_withdrawal,
+        notes:               w.notes,
+        recorded_at:         w.created_at,
+      }
+    : {
+        winner_number:       w.winner_number,
+        user_id:             null,
+        name:                null,
+        bid_amount:          null,
+        admin_commission:    null,
+        basket_credit:       w.basket_credit,
+        winner_takeaway:     w.winner_takeaway,
+        is_admin_withdrawal: w.is_admin_withdrawal,
+        notes:               null,
+        recorded_at:         null,
+      });
+
+  const visiblePayments = isAdmin
+    ? paymentRows
+    : paymentRows.filter(p => p.member_user_id === userId);
+
   return {
     cycle_id:      cycleRow.id,
     month_number:  cycleRow.month_number,
@@ -330,18 +362,7 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
     status:        cycleRow.status,
     is_skip_month: cycleRow.is_skip_month,
     is_final_cycle,
-    winners: winnerRows.map(w => ({
-      winner_number:       w.winner_number,
-      user_id:             w.winner_user_id,
-      name:                w.winner_name,
-      bid_amount:          w.bid_amount,
-      admin_commission:    w.admin_commission,
-      basket_credit:       w.basket_credit,
-      winner_takeaway:     w.winner_takeaway,
-      is_admin_withdrawal: w.is_admin_withdrawal,
-      notes:               w.notes,
-      recorded_at:         w.created_at,
-    })),
+    winners,
     notes:      cycleRow.notes,
     opened_at:  cycleRow.opened_at,
     closed_at:  cycleRow.closed_at,
@@ -352,7 +373,7 @@ export async function getCycle(userId: string, group_id: string, cycle_id: strin
     paid_count,
     waived_count,
     total_count,
-    payments: paymentRows,
+    payments: visiblePayments,
   };
 }
 

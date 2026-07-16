@@ -68,7 +68,7 @@ async function fetchGroupDetail(userId: string, group_id: string) {
     throw new AppError(403, 'NOT_A_MEMBER', 'You are not a member of this group.');
   }
 
-  const [basketRows, cycleRows, aggRows] = await Promise.all([
+  const [basketRows, cycleRows, aggRows, adminRows] = await Promise.all([
     db.select({
       current_balance: baskets.current_balance,
       total_credited:  baskets.total_credited,
@@ -99,13 +99,25 @@ async function fetchGroupDetail(userId: string, group_id: string) {
     })
     .from(memberships)
     .where(and(eq(memberships.group_id, group_id), eq(memberships.status, 'Active'))),
+
+    db.select({ name: users.name })
+      .from(memberships)
+      .innerJoin(users, eq(users.id, memberships.user_id))
+      .where(and(
+        eq(memberships.group_id, group_id),
+        eq(memberships.role, 'Admin'),
+        eq(memberships.status, 'Active'),
+      ))
+      .limit(1),
   ]);
 
   const basket       = basketRows[0]  ?? null;
   const currentCycle = cycleRows[0]   ?? null;
   const { shares_filled, people_count } = aggRows[0];
+  const admin_name   = adminRows[0]?.name ?? null;
+  const isAdmin      = row.my_role === 'Admin';
 
-  const currentCycleWinners = currentCycle
+  const rawWinners = currentCycle
     ? await db.select({
         winner_number:    cycle_winners.winner_number,
         user_id:          cycle_winners.winner_user_id,
@@ -121,6 +133,11 @@ async function fetchGroupDetail(userId: string, group_id: string) {
       .where(eq(cycle_winners.cycle_id, currentCycle.id))
       .orderBy(cycle_winners.winner_number)
     : [];
+
+  // Non-admin members see no winner identity — only that someone won and the takeaway amount.
+  const currentCycleWinners = isAdmin
+    ? rawWinners
+    : rawWinners.map(w => ({ ...w, name: null, user_id: null }));
 
   return {
     group_id:                     row.id,
@@ -155,6 +172,7 @@ async function fetchGroupDetail(userId: string, group_id: string) {
       total_debited:   basket.total_debited,
       total_lent_out:  basket.total_lent_out,
     } : null,
+    admin_name,
     my_membership: {
       role:        row.my_role,
       share_count: row.my_share_count,

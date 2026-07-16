@@ -314,6 +314,10 @@ export default function AdminDashboardPage() {
       // Sequential then parallel:
       // Step 1 — fetch group first because we need g.current_cycle to know what payments to fetch
       const g = await api.get<GroupDetail>(`/groups/${groupId}`)
+      if (g.my_membership.role !== 'Admin') {
+        navigate(`/groups/${groupId}/member`, { replace: true })
+        return
+      }
       setGroup(g)
 
       // Step 2 — now fire payments + activity in parallel (Promise.all)

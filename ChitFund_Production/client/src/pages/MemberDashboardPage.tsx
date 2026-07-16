@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { formatPaise } from '../lib/format'
-import type { GroupDetail, Member, Payment, PaymentListResponse, MemberPaymentHistoryItem, User, MemberWin } from '../types/api'
+import type { GroupDetail, Payment, PaymentListResponse, MemberPaymentHistoryItem, User, MemberWin } from '../types/api'
 import GroupNavBar from '../components/GroupNavBar'
 
 function StatusPill({ status }: { status: 'Paid' | 'Unpaid' | 'Waived' }) {
@@ -27,7 +27,6 @@ export default function MemberDashboardPage() {
   const [group, setGroup] = useState<GroupDetail | null>(null)
   const [_myUser, setMyUser] = useState<User | null>(null)
   const [myPayment, setMyPayment] = useState<Payment | null>(null)
-  const [adminName, setAdminName] = useState<string>('')
 
   const [paymentHistory, setPaymentHistory] = useState<MemberPaymentHistoryItem[]>([])
   const [myWins, setMyWins] = useState<MemberWin[]>([])
@@ -40,7 +39,7 @@ export default function MemberDashboardPage() {
     setLoading(true)
     setError(null)
     try {
-      // Step 1: fetch me + group in parallel — both needed before we can build the second round
+      // Step 1: fetch me + group in parallel
       const [me, g] = await Promise.all([
         api.get<User>('/me'),
         api.get<GroupDetail>(`/groups/${groupId}`),
@@ -48,39 +47,27 @@ export default function MemberDashboardPage() {
       setMyUser(me)
       setGroup(g)
 
-      // Step 2: build a dynamic parallel fetch array.
-      // members + payment history are always fetched.
-      // The current-cycle payments list is only fetched if a cycle exists (conditional include).
+      // Step 2: payment history, wins, and (if a cycle exists) own payment row in parallel.
       const parallelFetches: Promise<unknown>[] = [
-        api.get<Member[]>(`/groups/${groupId}/members`),
         api.get<MemberPaymentHistoryItem[]>(`/groups/${groupId}/members/${me.user_id}/payments?limit=3`),
         api.getMemberWins(groupId!, me.user_id),
       ]
       if (g.current_cycle) {
-        // Only add this fetch if there's an active cycle to look up
         parallelFetches.push(
           api.get<PaymentListResponse>(`/groups/${groupId}/cycles/${g.current_cycle.cycle_id}/payments`)
         )
       }
 
-      // results is typed as unknown[] because the array was built dynamically.
-      // We access by index and cast manually.
       const results = await Promise.all(parallelFetches)
-      const members = results[0] as Member[]
-      const history = results[1] as MemberPaymentHistoryItem[]
-      const wins    = results[2] as MemberWin[]
+      const history = results[0] as MemberPaymentHistoryItem[]
+      const wins    = results[1] as MemberWin[]
       setPaymentHistory(history)
       setMyWins(wins)
 
-      // Find the admin by role — shown as "Admin: Suraj" in the group header
-      const admin = members.find(m => m.role === 'Admin')
-      if (admin) setAdminName(admin.name)
-
-      // Extract this member's own payment from the cycle payments list (results[3] if it was fetched)
-      if (g.current_cycle && results[3]) {
-        const paymentsRes = results[3] as PaymentListResponse
-        const mine = paymentsRes.data.find(p => p.member_user_id === me.user_id)
-        setMyPayment(mine ?? null)
+      // The payments endpoint returns only the caller's own row for non-admins.
+      if (g.current_cycle && results[2]) {
+        const paymentsRes = results[2] as PaymentListResponse
+        setMyPayment(paymentsRes.data[0] ?? null)
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -149,8 +136,8 @@ export default function MemberDashboardPage() {
           <p className="text-xs text-gray-400">
             {group.people_count} people · {group.total_shares} shares · {formatPaise(group.monthly_contribution)}/share
           </p>
-          {adminName && (
-            <p className="text-xs text-gray-400 mt-0.5">Admin: {adminName}</p>
+          {group.admin_name && (
+            <p className="text-xs text-gray-400 mt-0.5">Admin: {group.admin_name}</p>
           )}
 
           {/* Progress bar */}
@@ -170,19 +157,6 @@ export default function MemberDashboardPage() {
           )}
         </div>
 
-        {/* Members quick link */}
-        <div className="mx-3 mt-3">
-          <button
-            onClick={() => navigate(`/groups/${groupId}/members`)}
-            className="w-full flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-gray-100 text-gray-700 hover:bg-maroon-50 hover:border-maroon-200 transition"
-          >
-            <span className="text-lg">👥</span>
-            <span className="flex-1 text-[11px] font-medium text-left">Members</span>
-            <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
 
         {/* My Shares card */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100 mx-3 mt-3">
@@ -237,7 +211,7 @@ export default function MemberDashboardPage() {
                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                     </svg>
                     <p className="text-xs text-amber-700 leading-relaxed">
-                      Pay {adminName || 'your admin'} in cash by the{' '}
+                      Pay {group.admin_name || 'your admin'} in cash by the{' '}
                       <span className="font-semibold">{parseInt(cycle.due_date.slice(8))}th</span>.
                       They'll mark you as paid.
                     </p>
@@ -250,24 +224,18 @@ export default function MemberDashboardPage() {
           </div>
         )}
 
-        {/* This month's winner — read-only view for members */}
+        {/* This month's winner — anonymous view for members */}
         {cycle && (
           <div className="mx-3 mt-3 bg-purple-50 rounded-2xl p-4 border border-maroon-100">
-            <p className="text-sm font-semibold text-gray-700 mb-3">This month's winner</p>
+            <p className="text-sm font-semibold text-gray-700 mb-2">This month's winner</p>
             {(cycle.winners?.length ?? 0) > 0 ? (
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-purple-200 flex items-center justify-center text-sm font-bold text-maroon-700">
-                  {(cycle.winners[0].name ?? '?').slice(0, 1).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">{cycle.winners[0].name ?? 'Unknown'}</p>
-                  {cycle.winners[0].bid_amount > 0 && (
-                    <p className="text-xs text-gray-500">Won bid {formatPaise(cycle.winners[0].bid_amount)}</p>
-                  )}
-                  {cycle.winners[0].winner_takeaway > 0 && (
-                    <p className="text-xs text-gray-400">Took home {formatPaise(cycle.winners[0].winner_takeaway)}</p>
-                  )}
-                </div>
+              <div>
+                <p className="text-sm text-gray-700">A winner has been selected.</p>
+                {cycle.winners[0].winner_takeaway > 0 && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {formatPaise(cycle.winners[0].winner_takeaway)} credited from the pool.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-xs text-gray-400">Winner not yet recorded — admin will update soon.</p>

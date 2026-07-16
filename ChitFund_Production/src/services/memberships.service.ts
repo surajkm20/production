@@ -67,7 +67,10 @@ export async function listMembers(
   group_id: string,
   filters:  { status?: string; q?: string },
 ) {
-  await assertActiveMember(group_id, userId);
+  const caller = await assertActiveMember(group_id, userId);
+  if (caller.role !== 'Admin') {
+    throw new AppError(403, 'FORBIDDEN', 'Only the group admin can view the full member list.');
+  }
 
   const { status = 'active', q } = filters;
   const conditions: ReturnType<typeof eq>[] = [eq(memberships.group_id, group_id)];
