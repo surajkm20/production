@@ -403,45 +403,59 @@ export default function AnalyticsPage() {
 
               {/* ── SUB-SECTION 1: CYCLE PROGRESS ── */}
               {(() => {
-                const cyclesCompleted  = completedBids.length          // actual distinct cycles run
-                const cyclesPlanned    = group.total_months
-                const totalSlotsWon    = actualWinners.length          // total winner slots paid out
-                const extraFromDoubleChiti  = totalSlotsWon - cyclesCompleted  // bonus payouts via Double Chiti
-                const slotsRemaining   = group.total_shares - totalSlotsWon  // effective remaining
+                const cyclesCompleted = completedBids.length
+                const cyclesPlanned   = group.total_months
+                const winnersPerCycle = group.winners_per_cycle
+                const totalSlotsWon   = actualWinners.length
+                const slotsRemaining  = group.total_shares - totalSlotsWon
+
+                // extraPayouts  = raw extra winner slots beyond the structural quota
+                // cyclesSaved   = full cycles freed (needs winnersPerCycle extras each)
+                // bankingExtra  = extra payouts that are building toward the NEXT save
+                const extraPayouts  = totalSlotsWon - (cyclesCompleted * winnersPerCycle)
+                const cyclesSaved   = Math.floor(extraPayouts / winnersPerCycle)
+                const bankingExtra  = extraPayouts % winnersPerCycle
 
                 return (
                   <div className="border-b border-gray-100">
 
-                    {/* Double Chiti savings banner — primary metric when applicable */}
-                    {extraFromDoubleChiti > 0 && (
+                    {/* Double Chiti banner — two states:
+                        1. cyclesSaved > 0  → full cycle(s) freed
+                        2. bankingExtra > 0 → partial, accumulating toward next save       */}
+                    {extraPayouts > 0 && (
                       <div className="mx-4 mt-4 mb-3 rounded-xl bg-teal-50 border border-teal-200 p-3 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
-                          <span className="text-lg font-extrabold text-teal-700">{extraFromDoubleChiti}</span>
+                          <span className="text-lg font-extrabold text-teal-700">{cyclesSaved}</span>
                         </div>
                         <div>
                           <p className="text-sm font-bold text-teal-800">
-                            {extraFromDoubleChiti === 1 ? 'Cycle' : 'Cycles'} saved by Double Chiti
+                            {cyclesSaved === 1 ? 'Cycle' : 'Cycles'} saved by Double Chiti
                           </p>
                           <p className="text-[11px] text-teal-600 mt-0.5">
-                            {extraFromDoubleChiti} extra payout{extraFromDoubleChiti !== 1 ? 's' : ''} in fewer cycles · members finish sooner
+                            {extraPayouts} extra payout{extraPayouts !== 1 ? 's' : ''} recorded
+                            {bankingExtra > 0 && ` · ${bankingExtra}/${winnersPerCycle} toward next save`}
+                            {cyclesSaved > 0 && ' · members finish sooner'}
                           </p>
                         </div>
                       </div>
                     )}
 
                     <div className="px-4 pb-3 pt-1">
-                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-3">Cycle Progress</p>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Cycle Progress</p>
+                        <p className="text-[10px] text-gray-400">1 Cycle = {winnersPerCycle} Bid{winnersPerCycle !== 1 ? 's' : ''}</p>
+                      </div>
 
-                      {/* Stacked progress bar: actual cycles (maroon) + Double Chiti bonus (teal) */}
+                      {/* Stacked progress bar: actual cycles (maroon) + fully-saved cycles (teal) */}
                       <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden mb-2 flex gap-0.5">
                         <div
                           className="h-full bg-maroon-500 rounded-l-full transition-all"
                           style={{ width: `${cyclesPlanned > 0 ? Math.round((cyclesCompleted / cyclesPlanned) * 100) : 0}%` }}
                         />
-                        {extraFromDoubleChiti > 0 && (
+                        {cyclesSaved > 0 && (
                           <div
                             className="h-full bg-teal-400 rounded-r-full transition-all"
-                            style={{ width: `${cyclesPlanned > 0 ? Math.round((extraFromDoubleChiti / cyclesPlanned) * 100) : 0}%` }}
+                            style={{ width: `${cyclesPlanned > 0 ? Math.round((cyclesSaved / cyclesPlanned) * 100) : 0}%` }}
                           />
                         )}
                       </div>
@@ -452,10 +466,10 @@ export default function AnalyticsPage() {
                           <span className="w-2 h-2 rounded-full bg-maroon-500 inline-block" />
                           {cyclesCompleted} actual cycle{cyclesCompleted !== 1 ? 's' : ''}
                         </span>
-                        {extraFromDoubleChiti > 0 && (
+                        {cyclesSaved > 0 && (
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />
-                            +{extraFromDoubleChiti} via Double Chiti
+                            +{cyclesSaved} saved via Double Chiti
                           </span>
                         )}
                       </div>
@@ -468,15 +482,15 @@ export default function AnalyticsPage() {
                         </div>
                         <div className="text-center">
                           <p className="text-lg font-bold text-gray-900">{totalSlotsWon}</p>
-                          <p className="text-[10px] text-gray-400">slots paid</p>
+                          <p className="text-[10px] text-gray-400">bids completed</p>
                         </div>
                         <div className="text-center">
                           <p className="text-lg font-bold text-maroon-600">{slotsRemaining}</p>
-                          <p className="text-[10px] text-gray-400">remaining</p>
+                          <p className="text-[10px] text-gray-400">bids remaining</p>
                         </div>
                         <div className="text-center">
                           <p className="text-lg font-bold text-gray-900">{cyclesPlanned}</p>
-                          <p className="text-[10px] text-gray-400">planned</p>
+                          <p className="text-[10px] text-gray-400">cycles planned</p>
                         </div>
                       </div>
                     </div>
@@ -635,18 +649,21 @@ export default function AnalyticsPage() {
           <div className="mx-4">
             <SectionLabel>Cycle History</SectionLabel>
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              {/* Legend — shown only when there is at least one Double Chiti cycle */}
+              {/* Legend — shown only when at least one cycle has extra (Double Chiti) winners */}
               {(() => {
+                const winnersPerCycle = group.winners_per_cycle
                 const counts = new Map<number, number>()
                 actualWinners.forEach(w => counts.set(w.month_number, (counts.get(w.month_number) ?? 0) + 1))
-                return [...counts.values()].some(c => c > 1)
+                return [...counts.values()].some(c => c > winnersPerCycle)
               })() && (
                 <div className="flex items-center gap-3 text-[10px] text-gray-400 mb-3">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-maroon-500 inline-block" />Normal bid</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />Double Chiti 2nd bid</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />Extra bid (Double Chiti)</span>
                 </div>
               )}
               {(() => {
+                const winnersPerCycle = group.winners_per_cycle
+
                 // Build lookup maps
                 const winnersByMonth = new Map<number, WinnerRow[]>()
                 actualWinners.forEach(w => {
@@ -668,9 +685,10 @@ export default function AnalyticsPage() {
                 return (
                   <div className="space-y-4">
                     {rows.map(b => {
-                      const cycleWinners = winnersByMonth.get(b.month_number) ?? []
-                      const isDoubleChiti     = cycleWinners.length > 1
-                      const monthLabel   = monthLabelMap.get(b.month_number) ?? ''
+                      const cycleWinners  = winnersByMonth.get(b.month_number) ?? []
+                      const isDoubleChiti = cycleWinners.length > winnersPerCycle
+                      const monthLabel    = monthLabelMap.get(b.month_number) ?? ''
+                      const extraCount    = cycleWinners.length - winnersPerCycle
 
                       return (
                         <div key={b.month_number} className="flex items-start gap-3">
@@ -687,7 +705,7 @@ export default function AnalyticsPage() {
                               {monthLabel && <p className="text-xs text-gray-400 mt-0.5">{monthLabel}</p>}
                             </div>
                           ) : isDoubleChiti ? (
-                            /* Double Chiti multi-winner cycle */
+                            /* Double Chiti cycle — structural winners maroon, extra winners teal */
                             <>
                               {/* Center: stacked bars + month label + badge */}
                               <div className="flex-1 min-w-0 space-y-1.5">
@@ -695,7 +713,7 @@ export default function AnalyticsPage() {
                                   <div key={i} className="flex items-center gap-2">
                                     <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                                       <div
-                                        className={`h-full rounded-full transition-all ${i === 0 ? 'bg-maroon-500' : 'bg-teal-400'}`}
+                                        className={`h-full rounded-full transition-all ${i < winnersPerCycle ? 'bg-maroon-500' : 'bg-teal-400'}`}
                                         style={{ width: `${maxBid > 0 ? Math.round(((w.bid_amount ?? 0) / maxBid) * 100) : 0}%` }}
                                       />
                                     </div>
@@ -707,7 +725,7 @@ export default function AnalyticsPage() {
                                 <div className="flex items-center gap-2 mt-0.5">
                                   {monthLabel && <p className="text-xs text-gray-400">{monthLabel}</p>}
                                   <span className="inline-flex items-center text-[10px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
-                                    {cycleWinners.length} bids · Double Chiti
+                                    +{extraCount} extra · Double Chiti
                                   </span>
                                 </div>
                               </div>
@@ -716,40 +734,58 @@ export default function AnalyticsPage() {
                               <div className="text-right shrink-0 space-y-1.5">
                                 {cycleWinners.map((w, i) => (
                                   <div key={i}>
-                                    <p className="text-sm font-medium text-gray-800 leading-tight">{w.winner_name ?? '—'}</p>
+                                    <p className="text-xs font-medium text-gray-800 leading-tight">{w.winner_name ?? '—'}</p>
                                     {w.winner_takeaway != null && (
-                                      <p className="text-sm font-semibold text-gray-900 tabular-nums">{formatPaise(w.winner_takeaway)}</p>
+                                      <p className="text-xs font-semibold text-gray-900 tabular-nums">{formatPaise(w.winner_takeaway)}</p>
                                     )}
                                   </div>
                                 ))}
                               </div>
                             </>
                           ) : (
-                            /* Normal single-winner cycle */
+                            /* Normal cycle — all winners are structural (all maroon) */
                             <>
-                              {/* Center: bar row + month label below */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                                    <div
-                                      className="h-full bg-maroon-500 rounded-full transition-all"
-                                      style={{ width: `${maxBid > 0 ? Math.round((b.bid_amount! / maxBid) * 100) : 0}%` }}
-                                    />
+                              {/* Center: one bar per structural winner + month label */}
+                              <div className="flex-1 min-w-0 space-y-1.5">
+                                {cycleWinners.length > 0 ? cycleWinners.map((w, i) => (
+                                  <div key={i} className="flex items-center gap-2">
+                                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                      <div
+                                        className="h-full bg-maroon-500 rounded-full transition-all"
+                                        style={{ width: `${maxBid > 0 ? Math.round(((w.bid_amount ?? 0) / maxBid) * 100) : 0}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[11px] tabular-nums font-medium w-20 text-right shrink-0 text-gray-600">
+                                      {formatPaise(w.bid_amount ?? 0)}
+                                    </span>
                                   </div>
-                                  <span className="text-[11px] tabular-nums font-medium w-20 text-right shrink-0 text-gray-600">
-                                    {formatPaise(b.bid_amount!)}
-                                  </span>
-                                </div>
-                                {monthLabel && <p className="text-xs text-gray-400 mt-1">{monthLabel}</p>}
+                                )) : (
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                      <div
+                                        className="h-full bg-maroon-500 rounded-full transition-all"
+                                        style={{ width: `${maxBid > 0 ? Math.round((b.bid_amount! / maxBid) * 100) : 0}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[11px] tabular-nums font-medium w-20 text-right shrink-0 text-gray-600">
+                                      {formatPaise(b.bid_amount!)}
+                                    </span>
+                                  </div>
+                                )}
+                                {monthLabel && <p className="text-xs text-gray-400 mt-0.5">{monthLabel}</p>}
                               </div>
 
-                              {/* Right: winner name + takeaway */}
-                              {cycleWinners[0] && (
-                                <div className="text-right shrink-0">
-                                  <p className="text-sm font-medium text-gray-800 leading-tight">{cycleWinners[0].winner_name ?? '—'}</p>
-                                  {cycleWinners[0].winner_takeaway != null && (
-                                    <p className="text-sm font-semibold text-gray-900 tabular-nums">{formatPaise(cycleWinners[0].winner_takeaway)}</p>
-                                  )}
+                              {/* Right: all winner names + takeaways */}
+                              {cycleWinners.length > 0 && (
+                                <div className="text-right shrink-0 space-y-1.5">
+                                  {cycleWinners.map((w, i) => (
+                                    <div key={i}>
+                                      <p className="text-xs font-medium text-gray-800 leading-tight">{w.winner_name ?? '—'}</p>
+                                      {w.winner_takeaway != null && (
+                                        <p className="text-xs font-semibold text-gray-900 tabular-nums">{formatPaise(w.winner_takeaway)}</p>
+                                      )}
+                                    </div>
+                                  ))}
                                 </div>
                               )}
                             </>

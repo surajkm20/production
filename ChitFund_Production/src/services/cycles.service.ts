@@ -59,7 +59,7 @@ export async function getChitiEligibility(userId: string, group_id: string) {
     db.select({ current_balance: baskets.current_balance })
       .from(baskets).where(eq(baskets.group_id, group_id)).limit(1),
 
-    db.select({ pool_amount: chit_groups.pool_amount })
+    db.select({ pool_amount: chit_groups.pool_amount, total_shares: chit_groups.total_shares, total_months: chit_groups.total_months })
       .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
 
     db.select({
@@ -86,6 +86,7 @@ export async function getChitiEligibility(userId: string, group_id: string) {
 
   const realized   = Number(basket.current_balance);
   const pool       = Number(group.pool_amount);
+  const winners_per_cycle = Math.floor(Number(group.total_shares) / Number(group.total_months));
   const currentMonth = currentCycleRows[0]?.month_number ?? 1;
 
   const unrealized = activeLoans.reduce((acc, loan) => {
@@ -97,14 +98,15 @@ export async function getChitiEligibility(userId: string, group_id: string) {
   }, 0);
 
   const total_basket = realized + unrealized;
-  const double_chiti = Math.floor(total_basket / pool) + 1;
-  const eligible     = double_chiti >= 2;
+  const double_chiti = winners_per_cycle + Math.floor(total_basket / pool);
+  const eligible     = double_chiti > winners_per_cycle;
 
   return {
     realized,
     unrealized,
     total_basket,
     pool_amount: pool,
+    winners_per_cycle,
     double_chiti,
     label:    eligible ? chitiLabel(double_chiti) : '',
     eligible,
@@ -413,7 +415,7 @@ export async function recordWinner(
       .where(eq(cycle_winners.cycle_id, cycle_id))
       .orderBy(cycle_winners.winner_number),
 
-    db.select({ pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate, status: chit_groups.status })
+    db.select({ pool_amount: chit_groups.pool_amount, admin_commission_rate: chit_groups.admin_commission_rate, status: chit_groups.status, total_shares: chit_groups.total_shares, total_months: chit_groups.total_months })
       .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
   ]);
 
@@ -426,12 +428,23 @@ export async function recordWinner(
   if (!cycle)                     throw new AppError(404, 'CYCLE_NOT_FOUND', 'Cycle not found in this group.');
   if (cycle.status === 'Closed')  throw new AppError(409, 'CYCLE_CLOSED',    'Cycle is already closed.');
 
-  const realized = Number(basket.current_balance);
-  const pool     = Number(group.pool_amount);
-  const nextSlot = existingWinnersRows.length + 1;
+  const realized          = Number(basket.current_balance);
+  const pool              = Number(group.pool_amount);
+  const nextSlot          = existingWinnersRows.length + 1;
+  const winners_per_cycle = Math.floor(Number(group.total_shares) / Number(group.total_months));
+  // Include the incoming bid's provisional basket credit so the cap is evaluated
+  // AFTER this bid, not before. Structural winners always pass; extra winners pass
+  // only if basket + bid can fund the pool (financial validation confirms the exact amount).
+  const provisionalCredit = is_admin_withdrawal ? 0 : Math.max(0, bid_amount);
+  const maxWinners        = winners_per_cycle + Math.floor((Math.max(0, realized) + provisionalCredit) / pool);
 
-  // Double Chitti cap: maximum 2 winners per cycle.
-  if (nextSlot > 2) throw new AppError(409, 'CHITI_SLOTS_FULL', 'Double Chitti only supports 2 winners per cycle. Both slots are already filled.');
+  if (nextSlot > maxWinners) {
+    throw new AppError(409, 'CHITI_SLOTS_FULL',
+      nextSlot <= winners_per_cycle
+        ? `All ${winners_per_cycle} structural winner slot(s) for this cycle are already filled.`
+        : `Basket has insufficient funds for another Double Chiti winner.`,
+    );
+  }
 
   const winner = winnerMemberRows[0];
   if (!winner || Number(winner.wins_count) >= Number(winner.share_count)) {
@@ -460,17 +473,16 @@ export async function recordWinner(
     if (basket_credit < 0)      throw new AppError(400, 'BID_BELOW_COMMISSION', `bid_amount must be at least the admin maintenance fee (${admin_commission} paise).`);
     winner_takeaway  = pool - bid_amount;
 
-    // ── Double Chitti financial validation (slot 2 only) ────────────────────
-    // Validate at payout time: bid1_basket_credit + bid2_basket_credit + basket_balance >= pool_amount.
-    // If the condition is not met, the basket cannot fund the second payout.
-    if (nextSlot === 2) {
-      const winner1BasketCredit = Number(existingWinnersRows[0]?.basket_credit ?? 0);
-      const totalAvailable      = winner1BasketCredit + basket_credit + realized;
+    // ── Extra-winner financial validation (any slot beyond structural winners) ─
+    // Previous winners' basket credits are already reflected in `realized` (committed in prior API calls).
+    // So the basket available after this bid = realized + basket_credit. Must be >= pool to fund this payout.
+    if (nextSlot > winners_per_cycle) {
+      const totalAvailable = realized + basket_credit;
       if (totalAvailable < pool) {
         throw new AppError(
           400,
           'DOUBLE_CHITTI_INSUFFICIENT',
-          `Double Chitti not possible: Basket Balance + Bid Discounts (${paiseToRupeeDisplay(totalAvailable)}) is less than Pool Amount (${paiseToRupeeDisplay(pool)}).`,
+          `Double Chiti not possible: basket balance + this bid's discount (${paiseToRupeeDisplay(totalAvailable)}) is less than pool amount (${paiseToRupeeDisplay(pool)}).`,
         );
       }
     }
@@ -496,9 +508,12 @@ export async function recordWinner(
       created_by:          userId,
     });
 
+    const isExtraWinner = nextSlot > winners_per_cycle;
+
     if (!is_admin_withdrawal) {
-      // Use atomic SQL increments — safe under retries; no stale snapshot math.
-      const doubleChitiDebit = nextSlot > 1 ? pool : 0;
+      // Basket debit only for basket-funded EXTRA winners (beyond structural winners_per_cycle).
+      // Structural winners (slot 1…winners_per_cycle) add their bid credit but take nothing from basket.
+      const doubleChitiDebit = isExtraWinner ? pool : 0;
       await tx.update(baskets)
         .set({
           current_balance: sql`${baskets.current_balance} + ${basket_credit} - ${doubleChitiDebit}`,
@@ -507,7 +522,7 @@ export async function recordWinner(
         })
         .where(eq(baskets.id, basket.id));
 
-      if (nextSlot > 1) {
+      if (isExtraWinner) {
         await tx.insert(basket_transactions).values({
           basket_id:            basket.id,
           cycle_id,
@@ -542,37 +557,51 @@ export async function recordWinner(
       .where(and(eq(memberships.group_id, group_id), eq(memberships.user_id, winner_user_id)));
 
     // ── Double Chiti auto-skip ──────────────────────────────────────────────
-    // Each extra winner (slot 2+) consumes a future winner slot, so the chit ends
-    // one month early: the final remaining cycle becomes a payment-free skip month.
-    // No winner, no basket payout — the basket already funded this extra payout above.
-    if (nextSlot >= 2) {
-      const [targetCycle] = await tx
-        .select({ id: monthly_cycles.id, month_label: monthly_cycles.month_label })
-        .from(monthly_cycles)
+    // Each basket-funded extra winner consumes a future winner slot. For groups
+    // with winners_per_cycle > 1, a single extra winner only banks a spare slot —
+    // a payment-free month is freed only once every winners_per_cycle cumulative
+    // extra winners are accumulated across the group's full history.
+    if (isExtraWinner) {
+      const [extraCountRow] = await tx
+        .select({ cnt: count(cycle_winners.id) })
+        .from(cycle_winners)
+        .innerJoin(monthly_cycles, eq(monthly_cycles.id, cycle_winners.cycle_id))
         .where(and(
           eq(monthly_cycles.group_id, group_id),
-          eq(monthly_cycles.status, 'Open'),
-          eq(monthly_cycles.is_skip_month, false),
-          gt(monthly_cycles.month_number, cycle.month_number),
-          sql`NOT EXISTS (SELECT 1 FROM ${cycle_winners} cw WHERE cw.cycle_id = ${monthly_cycles.id})`,
-        ))
-        .orderBy(desc(monthly_cycles.month_number))
-        .limit(1);
+          gt(cycle_winners.winner_number, winners_per_cycle),
+        ));
 
-      if (targetCycle) {
-        autoSkip = { cycle_id: targetCycle.id, month_label: targetCycle.month_label };
+      const totalExtraWinners = Number(extraCountRow?.cnt ?? 0);
 
-        await tx.update(monthly_cycles)
-          .set({ is_skip_month: true, notes: `Payment-free month — saved by Double Chiti (${cycle.month_label})` })
-          .where(eq(monthly_cycles.id, targetCycle.id));
+      if (totalExtraWinners % winners_per_cycle === 0) {
+        const [targetCycle] = await tx
+          .select({ id: monthly_cycles.id, month_label: monthly_cycles.month_label })
+          .from(monthly_cycles)
+          .where(and(
+            eq(monthly_cycles.group_id, group_id),
+            eq(monthly_cycles.status, 'Open'),
+            eq(monthly_cycles.is_skip_month, false),
+            gt(monthly_cycles.month_number, cycle.month_number),
+            sql`NOT EXISTS (SELECT 1 FROM ${cycle_winners} cw WHERE cw.cycle_id = ${monthly_cycles.id})`,
+          ))
+          .orderBy(desc(monthly_cycles.month_number))
+          .limit(1);
 
-        // Waive any payment rows that already exist for that cycle. Final cycles are
-        // usually seeded lazily at close time — closeCycle honours is_skip_month then.
-        await tx.update(payments)
-          .set({ expected_amount: 0, paid_amount: 0, status: 'Waived', updated_at: new Date() })
-          .where(and(eq(payments.cycle_id, targetCycle.id), ne(payments.status, 'Paid')));
-      } else {
-        autoSkipUnavailable = true;
+        if (targetCycle) {
+          autoSkip = { cycle_id: targetCycle.id, month_label: targetCycle.month_label };
+
+          await tx.update(monthly_cycles)
+            .set({ is_skip_month: true, notes: `Payment-free month — saved by Double Chiti (${cycle.month_label})` })
+            .where(eq(monthly_cycles.id, targetCycle.id));
+
+          // Waive any payment rows that already exist for that cycle. Final cycles are
+          // usually seeded lazily at close time — closeCycle honours is_skip_month then.
+          await tx.update(payments)
+            .set({ expected_amount: 0, paid_amount: 0, status: 'Waived', updated_at: new Date() })
+            .where(and(eq(payments.cycle_id, targetCycle.id), ne(payments.status, 'Paid')));
+        } else {
+          autoSkipUnavailable = true;
+        }
       }
     }
   });
@@ -1129,7 +1158,7 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       .from(chit_groups).where(eq(chit_groups.id, group_id)).limit(1),
 
     db.select({ id: cycle_winners.id })
-      .from(cycle_winners).where(eq(cycle_winners.cycle_id, cycle_id)).limit(1),
+      .from(cycle_winners).where(eq(cycle_winners.cycle_id, cycle_id)),
   ]);
 
   const cycle = cycleRows[0];
@@ -1148,8 +1177,18 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       .join(', ');
     throw new AppError(409, 'PAYMENTS_OUTSTANDING', `Outstanding dues: ${list}`);
   }
-  if (!cycle.is_skip_month && winnerProbe.length === 0) {
-    throw new AppError(409, 'WINNER_NOT_RECORDED', 'Record the bid winner before closing this cycle.');
+  if (!cycle.is_skip_month) {
+    const group_for_wpc = groupRows[0];
+    const winners_per_cycle = group_for_wpc
+      ? Math.floor(Number(group_for_wpc.total_shares) / Number(group_for_wpc.total_months))
+      : 1;
+    if (winnerProbe.length === 0) {
+      throw new AppError(409, 'WINNER_NOT_RECORDED', 'Record the bid winner before closing this cycle.');
+    }
+    if (winnerProbe.length < winners_per_cycle) {
+      throw new AppError(409, 'STRUCTURAL_WINNERS_INCOMPLETE',
+        `This group requires ${winners_per_cycle} winner(s) per cycle — only ${winnerProbe.length} recorded.`);
+    }
   }
 
   const group = groupRows[0];
@@ -1195,13 +1234,13 @@ export async function closeCycle(userId: string, group_id: string, cycle_id: str
       const [basketRows] = await tx.select({ id: baskets.id, current_balance: baskets.current_balance, total_debited: baskets.total_debited })
         .from(baskets).where(eq(baskets.group_id, group_id)).limit(1);
 
-      const currentBalance  = Number(basketRows?.current_balance ?? 0);
-      const pool            = Number(group.pool_amount);
-      const commissionRate  = parseFloat(String(group.admin_commission_rate));
-      const adminCommission = Math.round(pool * commissionRate / 100);
-      // Members + basket must collectively cover pool_amount AND admin commission.
-      // Admin commission is settled in this cycle (last member auto-wins; no bid discount).
-      const total_needed    = pool + adminCommission;
+      const currentBalance    = Number(basketRows?.current_balance ?? 0);
+      const pool              = Number(group.pool_amount);
+      const commissionRate    = parseFloat(String(group.admin_commission_rate));
+      const adminCommission   = Math.round(pool * commissionRate / 100);
+      const winners_per_cycle = Math.floor(Number(group.total_shares) / Number(group.total_months));
+      // Members + basket must collectively cover pool_amount AND admin commission for each structural winner.
+      const total_needed      = winners_per_cycle * (pool + adminCommission);
 
       const activeMembers = (await tx
         .select({ user_id: memberships.user_id, share_count: memberships.share_count, wins_count: memberships.wins_count, name: users.name })

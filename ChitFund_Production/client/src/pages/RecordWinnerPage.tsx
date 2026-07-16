@@ -154,8 +154,8 @@ export default function RecordWinnerPage() {
 
       <div className="flex-1 overflow-y-auto pb-8 space-y-3 pt-3 px-3">
 
-        {/* Double Chiti eligibility banner */}
-        {eligibility && eligibility.double_chiti >= 1 && (
+        {/* Double Chiti eligibility banner — only when basket can fund EXTRA winners beyond structural */}
+        {eligibility && eligibility.eligible && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
             <div className="flex items-start gap-2">
               <span className="text-amber-500 text-base leading-none mt-0.5">★</span>
@@ -281,12 +281,11 @@ export default function RecordWinnerPage() {
                   <div className="relative">
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">₹</span>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       value={bidRupees}
                       onChange={e => setBidRupees(e.target.value)}
                       placeholder="16,000"
-                      min="1"
-                      step="1"
                       required
                       className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-maroon-500"
                     />
@@ -357,9 +356,9 @@ export default function RecordWinnerPage() {
                       {c.is_skip_month && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Skip</span>
                       )}
-                      {(c.winners?.length ?? 0) > 1 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
-                          {c.winners.length}× Chiti
+                      {(c.winners?.length ?? 0) > (group?.winners_per_cycle ?? 1) && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-medium">
+                          Double Chiti
                         </span>
                       )}
                     </div>

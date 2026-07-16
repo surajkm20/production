@@ -18,17 +18,21 @@ import { z } from 'zod';
 // is ambiguous in JS and would misfire in non-UTC timezones.
 const startMonthField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start_month must be a date in YYYY-MM-DD format');
 
-/** Validates the `POST /groups` body (name, money fields, shares, due day, optional rates/admin shares). */
+/** Validates the `POST /groups` body (name, money fields, shares, months, due day, optional rates/admin shares). */
 export const createGroupSchema = z.object({
   name:                   z.string().min(1).max(100),
   monthly_contribution:   z.number().int().positive(),
   total_shares:           z.number().int().positive(),
+  total_months:           z.number().int().positive(),
   start_month:            startMonthField,
   payment_due_day:        z.number().int().min(1).max(28, 'payment_due_day cannot exceed 28 — days 29-31 are not allowed'),
   admin_commission_rate:  z.number().min(0).max(100, 'admin_commission_rate cannot exceed 100').optional(),
   monthly_interest_rate:  z.number().min(0).max(99.99).optional(),
   admin_share_count:      z.number().int().min(0).optional(),
 }).refine(
+  (d) => d.total_shares >= d.total_months,
+  { message: 'total_shares must be greater than or equal to total_months', path: ['total_shares'] },
+).refine(
   (d) => d.admin_share_count == null || d.admin_share_count <= d.total_shares,
   { message: 'admin_share_count cannot exceed total_shares', path: ['admin_share_count'] },
 );

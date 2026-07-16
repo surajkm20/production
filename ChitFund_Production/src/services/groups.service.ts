@@ -131,6 +131,8 @@ async function fetchGroupDetail(userId: string, group_id: string) {
     monthly_contribution: row.monthly_contribution,
     total_shares:         row.total_shares,
     total_months:         row.total_months,
+    winners_per_cycle:    Math.floor(row.total_shares / row.total_months),
+    excess_per_cycle:     row.monthly_contribution * (row.total_shares % row.total_months),
     shares_filled:        Number(shares_filled ?? 0),
     people_count,
     start_month:           row.start_month,
@@ -168,8 +170,9 @@ async function fetchGroupDetail(userId: string, group_id: string) {
  * @param userId - The creating user, enrolled as the group admin
  * @param data - Group configuration
  * @param data.name - Group display name
- * @param data.monthly_contribution - Per-share monthly contribution in paise; with `total_shares` this fixes `pool_amount`
- * @param data.total_shares - Total shares, which also equals the number of months/cycles
+ * @param data.monthly_contribution - Per-share monthly contribution in paise
+ * @param data.total_shares - Total share slots across all members (>= total_months)
+ * @param data.total_months - Calendar duration of the chit cycle; pool_amount = monthly_contribution × total_months
  * @param data.start_month - First cycle month as an ISO date string
  * @param data.payment_due_day - Day of month payments are due
  * @param data.admin_commission_rate - Optional admin maintenance fee rate (percent)
@@ -184,6 +187,7 @@ export async function createGroup(
     name:                   string;
     monthly_contribution:   number;
     total_shares:           number;
+    total_months:           number;
     start_month:            string;
     payment_due_day:        number;
     admin_commission_rate?: number;
@@ -191,10 +195,9 @@ export async function createGroup(
     admin_share_count?:     number;
   },
 ) {
-  const { name, monthly_contribution, total_shares, start_month, payment_due_day, admin_commission_rate, monthly_interest_rate, admin_share_count } = data;
-  const pool_amount  = monthly_contribution * total_shares;
-  const total_months = total_shares;
-  const dueDayStr    = String(payment_due_day).padStart(2, '0');
+  const { name, monthly_contribution, total_shares, total_months, start_month, payment_due_day, admin_commission_rate, monthly_interest_rate, admin_share_count } = data;
+  const pool_amount = monthly_contribution * total_months;
+  const dueDayStr   = String(payment_due_day).padStart(2, '0');
 
   if (admin_share_count != null && admin_share_count > total_shares) {
     throw new AppError(400, 'INVALID_SHARE_COUNT', `admin_share_count (${admin_share_count}) cannot exceed total_shares (${total_shares}).`);
@@ -232,6 +235,9 @@ export async function createGroup(
     return newGroup;
   });
 
+  const winners_per_cycle = Math.floor(group.total_shares / group.total_months);
+  const excess_per_cycle  = group.monthly_contribution * (group.total_shares % group.total_months);
+
   return {
     group_id:             group.id,
     name:                 group.name,
@@ -240,6 +246,8 @@ export async function createGroup(
     monthly_contribution: group.monthly_contribution,
     total_shares:         group.total_shares,
     total_months:         group.total_months,
+    winners_per_cycle,
+    excess_per_cycle,
     start_month:           group.start_month,
     payment_due_day:       group.payment_due_day,
     admin_commission_rate: group.admin_commission_rate,

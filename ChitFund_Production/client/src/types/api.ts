@@ -128,6 +128,7 @@ export interface ChitiEligibility {
   unrealized: number
   total_basket: number
   pool_amount: number
+  winners_per_cycle: number
   double_chiti: number
   label: string
   eligible: boolean
@@ -142,6 +143,8 @@ export interface GroupDetail {
   monthly_contribution: number
   total_shares: number
   total_months: number
+  winners_per_cycle: number
+  excess_per_cycle: number
   shares_filled: number
   people_count: number
   start_month: string

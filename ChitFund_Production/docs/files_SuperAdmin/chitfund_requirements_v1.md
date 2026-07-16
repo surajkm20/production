@@ -87,11 +87,8 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - `monthly_interest_rate` — fixed monthly interest rate applied to all basket loans in this group (e.g. 5% means ₹5,000/month on ₹1L).
   - `admin_commission_rate` — percentage of the full pool amount that the admin retains as a foreman fee (e.g. 5% on a ₹1,00,000 pool = ₹5,000 to admin, regardless of the winning bid). Set at group creation; cannot be changed after cycle 1 starts. The commission is collected offline in cash and does not affect the basket.
   - `payment_due_day` — day of month (1–28) on which all payments are due every cycle. This covers both the monthly contribution and loan interest for members with active loans. Days 29–31 are not allowed (blocked at creation) to ensure the date is valid across all months including February.
-- **Invariant:** `pool_amount = total_months × monthly_contribution`. Validate on creation. (Note: total_shares and total_months are independent inputs — the pool a winner receives is determined by how long the cycle runs, not by how many shares exist.)
-- **Derived field:** `winners_per_cycle = floor(total_shares / total_months)` — how many winners are declared every month from the monthly collection alone. For 20/20 = 1. For 40/20 = 2. For 30/20 = floor(1.5) = 1.
-- **Excess per cycle:** `excess_per_cycle = monthly_contribution × (total_shares mod total_months)`. The fractional remainder of the monthly collection that cannot fund a full extra winner is credited to the basket each cycle. For exact-multiple groups (20/20, 40/20) excess = 0 and the basket grows only from bid discounts. For non-multiple groups (30/20) excess = 10 × monthly_contribution per cycle, which accumulates in the basket until Double Chiti becomes achievable.
-- **Constraint:** `total_shares ≥ total_months`. Every cycle must collect enough to pay at least one winner (i.e. monthly_collection ≥ pool_amount). Groups where `total_shares < total_months` are deferred — see §12 TD-2.
-- **Multi-share model:** a chit has `total_shares` slots. Each month `winners_per_cycle` slots are retired. A single person can hold multiple shares — see §4.3. So `total_shares ≥ unique_person_count`.
+- **Invariant:** total_shares × monthly_contribution should equal pool_amount. Validate on creation.
+- **Multi-share model:** a chit has `total_shares` slots (one cycle per share). A single person can hold multiple shares — see §4.3. So `total_shares ≥ unique_person_count`.
 
 ### 4.3 Membership
 - membership_id, group_id, user_id, role (Admin / Member), share_count (how many shares this person holds), requested_share_count (the share count the member asked for when submitting a join request; null for admin-added members), wins_count (default 0; how many times this person has won so far), joined_at, status (Pending / Active / Removed).
@@ -150,15 +147,9 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - `outstanding_interest` is always derived: `total_interest_accrued − total_interest_paid`.
 - Monthly interest accrual: each cycle adds `principal × monthly_interest_rate` to `total_interest_accrued` (e.g. 2% on ₹1,00,000 = ₹2,000 per cycle).
 - **Upfront deduction:** when a loan is disbursed, the first month's interest is deducted immediately. Borrower receives `principal − monthly_interest`; the deducted amount is credited to the basket as `INTEREST_ACCRUED` and added to `total_interest_accrued`.
-- **⚠️ v1 implementation note — interest model diverges from the upfront-deduction design above (intentional, confirmed 2026-06-14).** The deployed code does **not** deduct the first month's interest upfront and does **not** store `total_interest_accrued`. Instead:
-  - The **full principal** is disbursed to the borrower (basket is debited by the full `principal`; no `INTEREST_ACCRUED` credit at disbursement).
-  - `outstanding_interest` is **fully derived**, not stored: `outstanding_interest = max(0, cyclesElapsed × round(principal × monthly_interest_rate) − total_interest_paid)`, where `cyclesElapsed = max(0, currentActiveMonth − disbursement_month_number)`.
-  - Interest therefore starts accruing from the **cycle after** disbursement — there is **₹0 outstanding interest in the disbursement month**, and attempting to record an interest payment then returns `409 INTEREST_EXCEEDS_OUTSTANDING`.
-  - Only `disbursement_month_number`, `monthly_interest_rate`, `principal`, and `total_interest_paid` are stored on the loan row. The `total_interest_accrued` column described above does not exist in the deployed schema.
-  - This is the **intended** behavior for v1. Do **not** "fix" it back to the upfront-deduction model without an explicit decision and a migration of existing production loans.
 - **Repayment rule:** monthly interest payments are pure interest — they do not reduce the principal. The loan can only be closed by repaying the **full principal** in one lump sum. Partial principal repayments are not allowed.
 - **Eligibility to borrow:** member must have `wins_count < share_count` (at least one un-won share remaining) — hard block. If the member already has an active loan in this group, the disbursement proceeds but the API returns a warning in the response (`warnings` array).
-- **Max loan cap:** `min(basket_balance, (share_count − wins_count) × (pool_amount / total_months))`. The per-share value used is always `pool_amount / total_months` (= `monthly_contribution`), regardless of how many months remain in the cycle or how many total shares the group has. This keeps the per-share collateral consistent across all share/month ratios.
+- **Max loan cap:** `min(basket_balance, (share_count − wins_count) × (pool_amount / total_shares))`. The per-share value used is always the fixed total share value (`pool_amount / total_shares`), regardless of how many months remain in the cycle.
 - **Bidding exclusion:** a member with an active loan is excluded from the eligible-winners dropdown until the loan is fully repaid.
 - **Rule:** all loans must be fully repaid before the chit cycle can be closed.
 
@@ -167,10 +158,7 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 ## 5. Functional Requirements
 
 ### 5.1 Group management (Admin)
-- **F-1** Admin can create a new chit fund group with: name, monthly contribution, **total shares**, **total months**, start month, payment due day (1–28), and **admin commission rate** (percentage of winning bid retained by admin; e.g. 5%). `total_shares` and `total_months` are entered as independent values. Days 29–31 are rejected with a validation error. At creation the admin also selects their own share count — minimum 1, maximum `total_shares`. Defaults to 1 if not specified.
-  - **Derived at creation:** `pool_amount = monthly_contribution × total_months` (what each winning share receives). `winners_per_cycle = floor(total_shares / total_months)` (structural winners declared each month from collection). `excess_per_cycle = monthly_contribution × (total_shares mod total_months)` (fractional remainder credited to basket each cycle).
-  - **Validation:** `total_shares ≥ total_months`. Non-integer ratios (e.g. 30/20 = 1.5) are valid — the floor is taken for structural winners and the remainder flows to the basket. Groups where `total_shares < total_months` are rejected with `INVALID_SHARE_MONTH_RATIO` (deferred — see §12 TD-2.)
-  - **Pool invariant check:** `pool_amount = monthly_contribution × total_months`. Computed and stored automatically — admin does not supply it directly.
+- **F-1** Admin can create a new chit fund group with: name, total amount, monthly contribution, number of members, number of months, start month, payment due day (1–28), and **admin commission rate** (percentage of winning bid retained by admin; e.g. 5%). Days 29–31 are rejected with a validation error. At creation the admin also selects their own share count — minimum 1, maximum `total_shares`. Defaults to 1 if not specified.
 - **F-2** Admin can invite members via mobile number. If the user exists, they're added directly; if not, they get an SMS invite to download the app.
 - **F-2a** **Member self-join via invitation code.** A user who has the group's invitation code can submit a **join request** that includes their requested share count (minimum 1; cannot exceed the remaining unfilled shares). The request is created in `Pending` status and does not count toward `shares_filled` until approved. The admin sees all pending requests and can:
   - **Approve** — accept the requested share count as-is, activating the membership.
@@ -192,13 +180,11 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 
   **Computation:**
   ```
-  winners_per_cycle           = floor(total_shares / total_months)   (structural winners)
-  admin_commission_per_winner = pool_amount × admin_commission_rate / 100
-  total_needed                = winners_per_cycle × (pool_amount + admin_commission_per_winner)
-  basket_contribution         = min(basket.current_balance, total_needed)
-  remaining_to_collect        = max(0, total_needed − basket_contribution)
+  total_needed         = pool_amount + admin_commission_for_cycle
+  admin_commission_for_cycle = pool_amount × admin_commission_rate / 100
+  basket_contribution  = min(basket.current_balance, total_needed)
+  remaining_to_collect = max(0, total_needed − basket_contribution)
   ```
-  For groups where `winners_per_cycle = 1` this is identical to the previous formula. For `winners_per_cycle = 2` (e.g. 40/20), `total_needed` doubles to cover both structural winners and their commissions. Note: any Double Chiti extra winners (basket-funded, beyond the structural minimum) are voluntary and handled separately — they do not affect the payment seeding formula.
 
   **Per-member seeding:**
   - Each member's reduced expected_amount = `floor(remaining_to_collect × member.share_count / total_shares)`
@@ -229,23 +215,19 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
   - **One-time use:** the special share can only be used once per group. Tracked via `admin_withdrawal_used` on the admin's membership row. If already used, the withdrawal option is blocked with `WITHDRAWAL_ALREADY_USED`.
   - If the admin wins without selecting withdrawal (regular bid), the normal three-way split applies and the special share remains available for a later cycle.
   - Notification sent to all members: "Admin withdrew the full pool of ₹X."
-- **F-11b** **Double Chiti eligibility (display).** `X = winners_per_cycle + floor(total_basket / pool_amount)`. When `X > winners_per_cycle` (i.e., `floor(total_basket / pool_amount) ≥ 1`, meaning the basket can fund at least one extra winner beyond the structural minimum), the group is eligible for extra winners. The Record Winner screen displays an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` based on total X (X=2 → Double, X=3 → Triple, X=4 → Quadruple). The banner is hidden when `X = winners_per_cycle` (no basket-funded extras available).
-  - `winners_per_cycle = floor(total_shares / total_months)` — structural minimum winners every cycle, funded directly from monthly collection.
-  - For non-integer ratios (e.g. 30/20): `winners_per_cycle = 1`. The excess (10 × monthly_contribution) accumulates in the basket each cycle; once basket ≥ pool_amount the Double Chiti banner appears, making a 2nd winner possible. The user said it well: "only 1 person can take it in this scenario and the remaining goes to basket, and when the basket is big enough, Double Chiti comes."
+- **F-11b** **Double Chiti eligibility (display).** `X = floor(total_basket / pool_amount) + 1`. When X ≥ 2 (i.e., `total_basket >= pool_amount`), the group is eligible for Double Chiti. The Record Winner screen displays an eligibility banner: `"<GroupName> is eligible for Double/Triple/Quadruple Chiti"` (X=2/3/4 respectively). The banner is hidden when X < 2 (i.e., normal single-winner cycle).
   - `total_basket = realized + unrealized`
   - `realized = baskets.current_balance` (actual cash in basket)
   - `unrealized = SUM(active loan principals) + SUM(outstanding accrued interest per active loan)` — money the basket is owed but hasn't received yet
-  - `double_chiti` (= X) is always ≥ `winners_per_cycle`. For a 20/20 group: basket=0 → X=1; basket=pool → X=2 → banner. For a 40/20 group: basket=0 → X=2 → no banner (2 structural, no extra); basket=pool → X=3 → banner ("Triple Chiti"). For 30/20: basket=0 → X=1; basket accumulates from excess; basket≥pool → X=2 → banner ("Double Chiti").
+  - `double_chiti` is always ≥ 1; a value of 1 means a regular single-winner cycle. Threshold examples: basket = 0 → x=1; basket = pool → x=2; basket = 2×pool → x=3.
   - Exposed via `GET /groups/:group_id/chiti-eligibility` (admin + member).
-- **F-11c** **Multiple winners per cycle (structural + basket-funded).** Every cycle must have exactly `winners_per_cycle` structural winners recorded before the cycle can be closed. If the basket also supports extra winners (X > winners_per_cycle), admin can record up to X total winners. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
-  - **Structural winners (always required):** the first `winners_per_cycle` winner slots must be filled before a cycle can close, where `winners_per_cycle = floor(total_shares / total_months)`. For a 40/20 group every cycle requires exactly 2 winners minimum; for 30/20 and 20/20 exactly 1. Attempting to close a cycle with fewer than `winners_per_cycle` winners recorded returns `STRUCTURAL_WINNERS_INCOMPLETE`.
-  - **Extra basket-funded winners (optional):** if `floor(total_basket / pool_amount) ≥ 1`, admin may record additional winners (up to `X = winners_per_cycle + floor(total_basket / pool_amount)` total). These consume basket funds per the existing skip-month / Double Chiti mechanism.
+- **F-11c** **Multiple winners per cycle (Double Chiti recording).** For eligible cycles (X ≥ 2), admin can record up to X winners in the same cycle. Each winner is recorded separately via `POST .../record-winner` (same endpoint, same request shape). Rules:
   - Each winner has their own `bid_amount`, `admin_commission`, `basket_credit`, `winner_takeaway` computed independently using the same formulas as a regular single winner.
   - A member with multiple shares may win more than one slot within the same cycle, consuming one share per slot. They are excluded once `wins_count >= share_count` (`WINNER_INELIGIBLE` error).
-  - Total recorded winners per cycle is capped at `X` (= `double_chiti`) at the time of recording; further calls beyond that return `CHITI_SLOTS_FULL`.
+  - Total recorded winners per cycle is capped at `double_chiti` at the time of recording; further calls beyond that return `CHITI_SLOTS_FULL`.
   - Each winner occupies one "winner slot" numbered sequentially (`winner_number` 1, 2, 3…).
-  - The Record Winner screen always shows `winners_per_cycle` bid-entry blocks (structural, mandatory). Additional blocks for basket-funded extras appear when X > winners_per_cycle.
-  - Winners list on the cycle detail and history screens shows all recorded winners.
+  - The Record Winner screen shows X separate bid-entry blocks — one per slot — when the group is eligible. Admin fills in each winner and their bid independently.
+  - Winners list on the cycle detail and history screens shows all X winners (not just one).
 - **F-12** Admin can declare a cycle a **Skip Month** (before the cycle opens or while it's open, as long as no payments have been collected). In a skip-month cycle:
   - Members are not required to pay their contribution (their payment is auto-set to `Waived`).
   - The full pool amount is debited from the basket and paid to the winner.
@@ -342,7 +324,6 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 - **Final cycle basket is empty:** `basket_contribution = 0`, `remaining_to_collect = total_needed`. Each member pays their normal share plus the admin commission share. The basket is not debited (no transaction created).
 - **Residual paisa in final-cycle split:** `floor()` division may leave 1–(total_shares−1) paise unaccounted. This residual is added to the member with the most shares (or the first alphabetically on a share-count tie) so the total collected equals `remaining_to_collect` exactly.
 - **Invalid payment due day (29–31):** group creation is blocked if `payment_due_day` is 29, 30, or 31. Admin must choose a day between 1 and 28. The typical default is 10.
-- **Invalid share/month ratio:** group creation is blocked if `total_shares < total_months`. Non-integer ratios (e.g. 30 shares / 20 months = 1.5) are **valid** — `winners_per_cycle = floor(1.5) = 1` and the 0.5-share excess flows to the basket each cycle. Only the case where the monthly collection cannot fund even one winner (total_shares < total_months) is rejected. Error: `INVALID_SHARE_MONTH_RATIO`.
 - **Join request exceeds remaining capacity:** blocked at submission time. The user sees how many shares are still unfilled and must request ≤ that number.
 - **Admin approves with a share count override that exceeds remaining capacity:** blocked with a `SHARES_EXCEEDED` error; admin must enter a valid count.
 - **Duplicate join request:** if a user already has a `Pending` row for a group, submitting another join request for the same group is rejected. They must wait for the admin to act on the existing request.
@@ -374,25 +355,8 @@ There is no "super-admin" or platform-level admin in v1. Each group is independe
 | 18 | Admin share count at creation | Admin selects their own share count at group creation (min 1, max total_shares). Defaults to 1. Adjustable via the members screen before cycle 1 starts. |
 | 19 | Member self-join flow | Via invitation code: member submits a join request with a requested share count → admin approves / approves-with-change / rejects. No immediate self-add. Code is locked once cycle 1 starts. |
 | 20 | Admin withdrawal | Admin has ONE special share (counted within their regular share_count). Withdrawal is an explicit opt-in flag at record time (`is_admin_withdrawal: true`). One-time use per group, tracked via `admin_withdrawal_used` on the membership. Admin can still win other shares via normal bid. |
-| 21 | Final-cycle offset formula | `total_needed = winners_per_cycle × (pool_amount + admin_commission_per_winner)` where `admin_commission_per_winner = pool_amount × admin_commission_rate / 100`. Basket covers `min(basket_balance, total_needed)`. Admin commission is NOT waived — it is included in total_needed for each winner slot. Remaining collected from members proportional to share_count. Member with most shares absorbs residual paisa. If remaining ≤ 0, all payments are seeded at 0 and auto-Waived. Basket is debited by `basket_contribution = min(basket_balance, total_needed)` immediately at final-cycle payment seeding time. For `winners_per_cycle = 1` (20/20 groups), this is identical to the previous formula. |
-| 23 | Pool amount invariant | `pool_amount = monthly_contribution × total_months`. This is the prize each winning share receives. `total_shares` and `total_months` are independent inputs. `winners_per_cycle = floor(total_shares / total_months)` (structural winners per cycle). `excess_per_cycle = monthly_contribution × (total_shares mod total_months)` (credited to basket each cycle). Constraint: `total_shares ≥ total_months` only — non-integer ratios are valid. |
+| 21 | Final-cycle offset formula | `total_needed = pool_amount + admin_commission_for_cycle`. Basket covers `min(basket_balance, total_needed)`. Admin commission is NOT waived and NOT separate — it is included in total_needed. Remaining collected from members proportional to share_count. Member with most shares absorbs residual paisa. If remaining ≤ 0, all payments are seeded at 0 and auto-Waived. Basket is debited by `basket_contribution = min(basket_balance, total_needed)` immediately at final-cycle payment seeding time. |
 | 22 | SuperAdmin role | Platform-level role on `users.role` ('User' default, 'SuperAdmin' for platform owner). Powers the Admin Console at `admin.chitfund.app` (separate web app). Sees aggregates across all groups: growth, engagement, money flow, reliability. No UI to promote — done via direct DB update by the platform owner. |
-
----
-
-## 8.1 SuperAdmin — v1 implementation decisions (2026-06-14)
-
-These refine Locked Decision #22 for the actual v1 build. They are deliberate, pragmatic deviations from the "separate app / hardened session" target described in the API & wireframe docs; the target remains the Phase 2 direction.
-
-| # | Topic | v1 decision | Rationale / Phase 2 target |
-|---|---|---|---|
-| 22a | Console hosting | Served as a **guarded `/admin` route inside the existing PWA**, gated by `users.role = 'SuperAdmin'`. | Avoids standing up a second deploy now. Phase 2: split out to the separate `admin.chitfund.app` app. |
-| 22b | Promotion is additive | Promoting an existing user to SuperAdmin **does not touch `memberships`**. They keep every group, payment, winner, basket and loan exactly as before. `users.role` (platform) and `memberships.role` (per-group) are orthogonal. | — |
-| 22c | Landing / navigation ("two hats") | **Model A:** a promoted user lands on their normal **Home (My Groups)** on login. An **"Admin Console" entry point** (header/profile) — visible **only** to SuperAdmins — opens `/admin`. The console links back to "My Groups". No forced redirect. | Lets the same person run real groups *and* view platform analytics. Phase 2 separate-domain hosting changes only where the console lives, not this dual-hat model. |
-| 22d | Role exposure | The caller's `role` is returned on **`GET /me`** so the client can decide whether to render the Admin Console entry point and guard the `/admin` route. | — |
-| 22e | Session hardening | **Reuse the standard `/auth/login` + 15-min access token.** Gating is by `users.role` only. | Phase 2: stricter console session (5-min token, no remember-me, forced daily re-login) per wireframe Screen 12. |
-| 22f | Build order | Ship the **Money tab first** (fully computable from existing tables), then Growth, Engagement, and Reliability (last — mostly external monitoring data). | Each tab is one aggregation endpoint, built page-by-page. |
-| 22g | Read-only | The console is **strictly read-only**. It exposes no platform-level mutation; group edits still happen through the normal consumer pages. | — |
 
 ---
 
@@ -452,22 +416,6 @@ If a member has not paid their monthly contribution or loan interest by the cycl
 - Needs decisions on: when accrual starts (immediately after due date? after a grace period?), how it surfaces in the UI and reports.
 
 **This feature is deferred. Do not implement until the concept is fully specced.**
-
----
-
-### TD-2 Groups where total_shares < total_months (sparse auction pattern)
-
-When a group has fewer shares than months (e.g. 10 shares / 20 months), the monthly collection is less than `pool_amount`. The auction cannot be called every month — the group must accumulate contributions across multiple months until the running total reaches `pool_amount`, then a bid is called.
-
-**Concept outline (not designed yet):**
-- `winners_per_cycle` would be a fraction (e.g. 0.5 for 10/20) — not yet supported.
-- Monthly payment tracking still happens every calendar month (all 20 months).
-- Auctions occur every `total_months / total_shares` calendar months (every 2nd month for 10/20).
-- The cycle model needs to accommodate "accumulation months" (payments collected, no winner) vs "auction months" (winner declared).
-- `pool_amount = monthly_contribution × total_months` still holds — each winning share receives the same value as any other group.
-- Core design question: are cycles monthly tracking periods (20 of them, some without a winner) or winner-event periods (10 of them, each spanning 2 months)?
-
-**This pattern is deferred. Do not implement until the cycle model design question above is resolved and this section is fully specced.**
 
 ---
 

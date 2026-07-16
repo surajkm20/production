@@ -1,9 +1,12 @@
 // Drizzle schema definition for the chit_groups table.
 // Stores the top-level configuration of a chit fund group:
-// pool_amount, monthly_contribution, total_shares, start_month,
+// pool_amount, monthly_contribution, total_shares, total_months, start_month,
 // admin_commission_rate (% of winning bid retained by admin in cash),
 // interest rate bounds, invitation_code, and lifecycle status.
-// All money columns are BIGINT paise. pool_amount = monthly_contribution × total_shares enforced by DB check.
+// All money columns are BIGINT paise.
+// pool_amount = monthly_contribution × total_months (what each winning share receives).
+// total_shares and total_months are independent; constraint: total_shares >= total_months.
+// winners_per_cycle = floor(total_shares / total_months) — derived in app logic, not stored.
 
 import { pgTable, uuid, varchar, char, bigint, smallint, numeric, date, timestamp, check, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -31,8 +34,8 @@ export const chit_groups = pgTable('chit_groups', {
 }, (table) => [
   index('idx_groups_creator').on(table.created_by),
   index('idx_groups_status').on(table.status),
-  check('chk_pool_matches',   sql`${table.pool_amount} = ${table.monthly_contribution} * ${table.total_shares}`),
-  check('chk_months_shares',  sql`${table.total_months} > 0 AND ${table.total_shares} > 0 AND ${table.total_months} = ${table.total_shares}`),
+  check('chk_pool_matches',   sql`${table.pool_amount} = ${table.monthly_contribution} * ${table.total_months}`),
+  check('chk_months_shares',  sql`${table.total_months} > 0 AND ${table.total_shares} > 0 AND ${table.total_shares} >= ${table.total_months}`),
   check('chk_commission_rate',  sql`${table.admin_commission_rate} >= 0 AND ${table.admin_commission_rate} <= 100`),
   check('chk_interest_rate',    sql`${table.monthly_interest_rate} >= 0 AND ${table.monthly_interest_rate} <= 100`),
   check('chk_payment_due_day',  sql`${table.payment_due_day} >= 1 AND ${table.payment_due_day} <= 28`),

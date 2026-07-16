@@ -5,11 +5,11 @@ import { formatPaise } from '../lib/format'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-// Pure helper: given startMonth "2026-06" and 12 shares, returns "May 2027"
-function getEndMonthLabel(startValue: string, totalShares: number): string {
-  if (!startValue || totalShares < 1) return ''
+// Pure helper: given startMonth "2026-06" and 12 months, returns "May 2027"
+function getEndMonthLabel(startValue: string, months: number): string {
+  if (!startValue || months < 1) return ''
   const [y, m] = startValue.split('-').map(Number)
-  const end = new Date(y, m - 1 + totalShares - 1)
+  const end = new Date(y, m - 1 + months - 1)
   return `${MONTHS[end.getMonth()]} ${end.getFullYear()}`
 }
 
@@ -47,6 +47,7 @@ export default function CreateGroupPage() {
   const [name, setName] = useState('')
   const [contributionRupees, setContributionRupees] = useState('')
   const [totalShares, setTotalShares] = useState(10)
+  const [totalMonths, setTotalMonths] = useState(10)
   const [startMonth, setStartMonth] = useState('')
   const [paymentDueDay, setPaymentDueDay] = useState(10)
   const [commissionRate, setCommissionRate] = useState('')
@@ -63,14 +64,21 @@ export default function CreateGroupPage() {
 
   // Rupees → paise conversion: "10000" → 1000000 paise. || 0 guards against NaN when input is empty.
   // These are derived values — no useState needed, they recalculate on every render from the inputs above.
-  const contribution = Math.round(parseFloat(contributionRupees) * 100) || 0
-  const poolAmount   = contribution * totalShares    // total monthly pool in paise
-  const startLabel   = getStartMonthLabel(startMonth)
-  const endLabel     = getEndMonthLabel(startMonth, totalShares)
+  const contribution    = Math.round(parseFloat(contributionRupees) * 100) || 0
+  const poolAmount      = contribution * totalMonths   // pool_amount = contribution × total_months
+  const startLabel      = getStartMonthLabel(startMonth)
+  const endLabel        = getEndMonthLabel(startMonth, totalMonths)
+  const winners_per_cycle = totalMonths > 0 ? Math.floor(totalShares / totalMonths) : 0
+  const excess_per_cycle  = totalMonths > 0 ? contribution * (totalShares % totalMonths) : 0
+  const sharesMonthsError = totalShares < totalMonths
 
-  // Stepper helper: increment/decrement totalShares, minimum 2 (a chit needs at least 2 people)
+  // Stepper helpers: minimum 2 shares (a chit needs at least 2 people); minimum 1 month
   function adjustShares(delta: number) {
     setTotalShares(s => Math.max(2, s + delta))
+  }
+
+  function adjustMonths(delta: number) {
+    setTotalMonths(m => Math.max(1, m + delta))
   }
 
   function handleCommissionRateChange(val: string) {
@@ -117,6 +125,7 @@ export default function CreateGroupPage() {
         name: name.trim(),
         monthly_contribution: contribution,         // in paise
         total_shares: totalShares,
+        total_months: totalMonths,
         start_month: startMonth + '-01',            // browser month picker gives "YYYY-MM"; backend wants "YYYY-MM-DD"
         payment_due_day: paymentDueDay,
         admin_share_count: adminShareCount,
@@ -218,9 +227,46 @@ export default function CreateGroupPage() {
                 +
               </button>
               <p className="text-xs text-gray-400 flex-1">
-                {totalShares} shares = {totalShares} monthly cycles
+                Total slots members can hold
               </p>
             </div>
+          </div>
+
+          {/* Total months (duration) stepper */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Duration (months)</label>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => adjustMonths(-1)}
+                disabled={totalMonths <= 1}
+                className="w-10 h-10 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition text-lg font-medium"
+              >
+                −
+              </button>
+              <span className="text-2xl font-bold text-gray-900 w-8 text-center">{totalMonths}</span>
+              <button
+                type="button"
+                onClick={() => adjustMonths(1)}
+                className="w-10 h-10 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition text-lg font-medium"
+              >
+                +
+              </button>
+              <p className="text-xs text-gray-400 flex-1">
+                Chit runs for {totalMonths} {totalMonths === 1 ? 'month' : 'months'}
+              </p>
+            </div>
+            {/* Live winners-per-cycle hint */}
+            {sharesMonthsError ? (
+              <p className="text-xs text-red-500 mt-2">
+                Total shares cannot be less than duration — increase shares or reduce months.
+              </p>
+            ) : totalMonths > 0 && (
+              <p className="text-xs text-gray-400 mt-2">
+                {winners_per_cycle} {winners_per_cycle === 1 ? 'winner' : 'winners'} per cycle
+                {excess_per_cycle > 0 && ` · ${formatPaise(excess_per_cycle)} excess credited to basket each cycle`}
+              </p>
+            )}
           </div>
 
           {/* Admin's own share count in the chit */}
@@ -372,7 +418,13 @@ export default function CreateGroupPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-maroon-200">Total cycles</span>
-                  <span className="font-bold">{totalShares} months</span>
+                  <span className="font-bold">{totalMonths} months</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-maroon-200">Winners per cycle</span>
+                  <span className="font-bold">
+                    {sharesMonthsError ? '—' : `${winners_per_cycle}${excess_per_cycle > 0 ? ' + basket excess' : ''}`}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-maroon-200">Your share ({adminShareCount} {adminShareCount === 1 ? 'share' : 'shares'})</span>
@@ -410,7 +462,7 @@ export default function CreateGroupPage() {
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             <p className="text-xs text-amber-700 leading-relaxed">
-              After cycle 1 starts, contribution, total shares, and admin maintenance fee are locked. You can rename the group anytime.
+              After cycle 1 starts, contribution, total shares, duration, and admin maintenance fee are locked. You can rename the group anytime.
             </p>
           </div>
 

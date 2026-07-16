@@ -167,7 +167,7 @@ export default function CycleDetailPage() {
   const firstWinner    = cycle.winners?.[0] ?? null
   const winnerName     = firstWinner?.name ?? ''
   const hasWinner      = (cycle.winners?.length ?? 0) > 0
-  const isDoubleChiti       = (cycle.winners?.length ?? 0) > 1
+  const isDoubleChiti       = (cycle.winners?.length ?? 0) > (group?.winners_per_cycle ?? 1)
   const isCurrentCycle = group?.current_cycle?.cycle_id === cycleId
   const paidCount      = cycle.payments.filter(p => p.status === 'Paid').length
   const totalCount     = cycle.payments.length

@@ -266,12 +266,10 @@ Get current user's profile.
     "mobile_number": "+919876543210",
     "username": "suraj_k",
     "mobile_verified": true,
-    "role": "User",
     "created_at": "2026-04-01T08:00:00Z"
   }
 }
 ```
-- `role` — platform-level role: `"User"` (default) or `"SuperAdmin"`. The client uses it to decide whether to show the Admin Console entry point and to guard the `/admin` route. **Not** the per-group admin/member role (that lives on the membership).
 
 ---
 
@@ -342,7 +340,6 @@ Create a new group. The caller becomes admin and gets a membership with `share_c
   "name": "Sunrise Chits 2026",
   "monthly_contribution": 1000000,
   "total_shares": 10,
-  "total_months": 10,
   "start_month": "2026-05-01",
   "payment_due_day": 10,
   "admin_commission_rate": 5.00,
@@ -351,10 +348,9 @@ Create a new group. The caller becomes admin and gets a membership with `share_c
 }
 ```
 - `monthly_contribution` and amounts are in paise.
-- `total_shares` and `total_months` are independent required fields. `pool_amount` is derived server-side as `monthly_contribution × total_months`.
-- **Validation:** `total_shares ≥ total_months`. Non-integer ratios are valid (e.g. 30/20 → `winners_per_cycle = floor(1.5) = 1`, excess ₹50k/month flows to basket). Only `total_shares < total_months` is rejected with `INVALID_SHARE_MONTH_RATIO`.
+- `total_shares` = `total_months`.
 - `payment_due_day` must be between 1 and 28 (inclusive). Days 29–31 are rejected. This day is used to auto-compute `due_date` for every cycle in this group.
-- `admin_commission_rate` — percentage of the full pool amount the admin retains in cash per winner (e.g. `5.00` = 5%). Defaults to `0.00` if omitted. Locked once cycle 1 starts.
+- `admin_commission_rate` — percentage of the full pool amount the admin retains in cash (e.g. `5.00` = 5%). Defaults to `0.00` if omitted. Locked once cycle 1 starts.
 
 **Response 201**
 ```json
@@ -367,8 +363,6 @@ Create a new group. The caller becomes admin and gets a membership with `share_c
     "monthly_contribution": 1000000,
     "total_shares": 10,
     "total_months": 10,
-    "winners_per_cycle": 1,
-    "excess_per_cycle": 0,
     "start_month": "2026-05-01",
     "payment_due_day": 10,
     "admin_commission_rate": 5.00,
@@ -380,7 +374,7 @@ Create a new group. The caller becomes admin and gets a membership with `share_c
 ```
 - `cycle_status` is a virtual field: `PendingStart` until cycle 1 begins, then `InProgress`, then `Closed`.
 
-**Errors:** `INVALID_AMOUNT`, `INVALID_SHARE_COUNT`, `INVALID_START_MONTH`, `INVALID_PAYMENT_DUE_DAY`, `INVALID_COMMISSION_RATE`, `INVALID_SHARE_MONTH_RATIO`.
+**Errors:** `INVALID_AMOUNT`, `INVALID_SHARE_COUNT`, `INVALID_START_MONTH`, `INVALID_PAYMENT_DUE_DAY`, `INVALID_COMMISSION_RATE`.
 
 ---
 
@@ -434,8 +428,6 @@ Get full group detail.
     "monthly_contribution": 1000000,
     "total_shares": 10,
     "total_months": 10,
-    "winners_per_cycle": 1,
-    "excess_per_cycle": 0,
     "shares_filled": 10,
     "people_count": 5,
     "start_month": "2026-05-01",
@@ -810,26 +802,21 @@ Returns the group's current Double Chiti eligibility based on realized + unreali
 ```json
 {
   "data": {
-    "realized":         5420000,
-    "unrealized":       15000000,
-    "total_basket":     20420000,
-    "pool_amount":      10000000,
-    "winners_per_cycle": 1,
-    "double_chiti":     2,
-    "label":            "Double Chiti",
-    "eligible":         true
+    "realized":    5420000,
+    "unrealized":  15000000,
+    "total_basket": 20420000,
+    "pool_amount":  10000000,
+    "double_chiti": 2,
+    "label":       "Double Chiti",
+    "eligible":    true
   }
 }
 ```
 - `realized` = `baskets.current_balance` (actual cash).
 - `unrealized` = sum of active loan principals + sum of outstanding accrued interest across all active loans in the group.
-- `winners_per_cycle` = `floor(total_shares / total_months)` — structural minimum winners per cycle, funded from monthly collection.
-- `double_chiti` = `winners_per_cycle + floor(total_basket / pool_amount)`. Always ≥ `winners_per_cycle`.
-- `eligible` = `double_chiti > winners_per_cycle` (i.e., `floor(total_basket / pool_amount) ≥ 1`). `true` when the basket can fund at least one extra winner beyond the structural minimum.
-- `label` — based on total `double_chiti` value: `"Double Chiti"` (=2), `"Triple Chiti"` (=3), `"Quadruple Chiti"` (=4), `"${x}× Chiti"` for x≥5. Empty string when `eligible = false`.
-- **20/20**: `winners_per_cycle=1`. basket=0 → `double_chiti=1`, no banner. basket≥pool → `double_chiti=2`, banner "Double Chiti". Standard behavior.
-- **40/20**: `winners_per_cycle=2`. basket=0 → `double_chiti=2`, no banner (2 structural winners always happen, no extra). basket≥pool → `double_chiti=3`, banner "Triple Chiti".
-- **30/20**: `winners_per_cycle=1`. basket accumulates ₹50k/cycle from excess. Once basket≥pool → `double_chiti=2`, banner "Double Chiti". Then Double Chiti winner depletes basket; next cycle excess refills it.
+- `double_chiti` = `floor(total_basket / pool_amount) + 1`. Always ≥ 1. Value of 1 means normal single-winner cycle; 2+ means Double Chiti eligible.
+- `eligible` = `double_chiti >= 2`. `true` when `total_basket >= pool_amount`.
+- `label` — `"Double Chiti"` (x=2), `"Triple Chiti"` (x=3), `"Quadruple Chiti"` (x=4), `"${x}× Chiti"` for x≥5. Empty string when `double_chiti < 2`.
 
 ---
 
@@ -953,7 +940,7 @@ Edit a previously-recorded winner. Allowed within 24h of recording.
 ---
 
 ### POST `/groups/:group_id/cycles/:cycle_id/close` **[admin]**
-Close a cycle. Requires all payments settled (no `Unpaid` rows) and at least `winners_per_cycle` winners recorded (skipped for skip-month cycles). For groups with `winners_per_cycle = 1` this is unchanged. For groups with `winners_per_cycle = 2` (e.g. 40/20), exactly 2 structural winners must be recorded before the cycle can close.
+Close a cycle. Requires all payments settled (no `Unpaid` rows) and at least one winner recorded (skipped for skip-month cycles).
 
 **Response 200**
 ```json
@@ -969,7 +956,7 @@ Close a cycle. Requires all payments settled (no `Unpaid` rows) and at least `wi
 - `group_closed` — `true` when closing this cycle exhausted all member shares (every active member's `wins_count` reached `share_count`) **and** no active loans remain. When `true` the group's `status` is also set to `Closed` in the same operation. Clients should treat this as a terminal state and navigate away from the group dashboard.
 - If active loans are still outstanding when all shares are exhausted, `group_closed` is `false`; the admin must repay loans and then call `POST /groups/:group_id/close` manually.
 
-**Errors:** `PAYMENTS_OUTSTANDING`, `WINNER_NOT_RECORDED` (no winners at all), `STRUCTURAL_WINNERS_INCOMPLETE` (fewer than `winners_per_cycle` winners recorded).
+**Errors:** `PAYMENTS_OUTSTANDING`, `WINNER_NOT_RECORDED`.
 
 ---
 
@@ -1651,8 +1638,6 @@ Endpoints powering the SuperAdmin dashboard at `admin.chitfund.app`. **All endpo
 
 These are platform-wide aggregates (across all groups, all users). Different from `/groups/:group_id/analytics/*` which are scoped to a single group.
 
-> **v1 implementation note (2026-06-14).** In v1 these endpoints are mounted on the main API under `/v1/admin/analytics/*` (not a separate service) and consumed by a guarded `/admin` route inside the existing PWA — not the standalone `admin.chitfund.app` app. Gating is by `users.role = 'SuperAdmin'` via the `requireSuperAdmin` middleware, using the **standard 15-min access token** (no separate hardened console session yet). Build order: **Money tab first**, then Growth, Engagement, Reliability. See requirements §8.1.
-
 **Common query params** (apply to all four tabs):
 - `range`: `24h` | `7d` | `30d` | `90d` | `all` (default `30d`).
 - `granularity`: `hour` | `day` | `week` | `month` (server picks a sensible default based on range; client can override).
@@ -1792,7 +1777,6 @@ CSV export for any tab's primary table. `:tab` ∈ `growth | engagement | money 
 | `INVALID_MOBILE` | 400 | Mobile number not in E.164 format |
 | `INVALID_AMOUNT` | 400 | Amount negative, zero, or non-integer paise |
 | `INVALID_SHARE_COUNT` | 400 | share_count < 1 or sum exceeds total |
-| `INVALID_SHARE_MONTH_RATIO` | 400 | total_shares < total_months (non-integer ratios ≥ 1 are valid) |
 | `INVALID_START_MONTH` | 400 | Start month in the past |
 | `INVALID_PAYMENT_DUE_DAY` | 400 | payment_due_day not between 1 and 28 |
 | `INVALID_COMMISSION_RATE` | 400 | admin_commission_rate not between 0 and 100 |
@@ -1825,7 +1809,6 @@ CSV export for any tab's primary table. `:tab` ∈ `growth | engagement | money 
 | `SHARES_EXCEEDED` | 409 | Would push total over total_shares |
 | `WINS_EXCEED_SHARES` | 409 | Reducing share_count below wins_count |
 | `WINNER_INELIGIBLE` | 409 | wins_count >= share_count |
-| `STRUCTURAL_WINNERS_INCOMPLETE` | 409 | Cycle has fewer than winners_per_cycle winners; cannot close |
 | `NOT_ADMIN` | 400 | is_admin_withdrawal=true but winner is not the group admin |
 | `WITHDRAWAL_ALREADY_USED` | 409 | Admin has already used their special share in this group |
 | `CYCLE_ALREADY_RECORDED` | 409 | Use PATCH instead |

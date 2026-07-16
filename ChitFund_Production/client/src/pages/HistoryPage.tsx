@@ -23,9 +23,18 @@ function formatShortDate(iso: string) {
 
 // Each row is a button that navigates to CycleDetailPage.
 // Pending cycles are disabled (not yet started, no detail to show).
-// Payment-free cycles (saved by Double Chiti) are also non-clickable but styled in teal.
-function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPaymentFree?: boolean; onClick?: () => void }) {
-  const isPending = cycle.status === 'Pending'
+// Payment-free cycles (saved by Double Chiti) are non-clickable and teal-tinted.
+// The target cycle (the one accumulating extra winners toward becoming payment-free)
+// shows a small amber "1/2" progress chip indicating banked extra winners.
+function CycleRow({ cycle, isPaymentFree, bankedProgress, winnersPerCycle = 1, onClick }: {
+  cycle: CycleItem
+  isPaymentFree?: boolean
+  /** Progress toward the next payment-free month, e.g. { current: 1, needed: 2 } */
+  bankedProgress?: { current: number; needed: number }
+  winnersPerCycle?: number
+  onClick?: () => void
+}) {
+  const isPending  = cycle.status === 'Pending'
   const isDisabled = isPending || isPaymentFree
   const chip = isPaymentFree
     ? { label: 'Payment-Free', cls: 'bg-teal-100 text-teal-700' }
@@ -37,12 +46,18 @@ function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPayme
       onClick={isDisabled ? undefined : onClick}
       disabled={isDisabled}
       className={`w-full flex items-center gap-3 px-4 py-3.5 border-b border-gray-100 last:border-0 text-left transition ${
-        isDisabled ? 'opacity-50 cursor-default' : 'hover:bg-gray-50 active:bg-gray-100'
+        isPaymentFree
+          ? 'bg-teal-50/60 cursor-default'
+          : isPending
+            ? 'opacity-50 cursor-default'
+            : 'hover:bg-gray-50 active:bg-gray-100'
       }`}
     >
       {/* Left — month label + chip */}
       <div className="shrink-0 w-[72px]">
-        <p className="text-sm font-semibold text-gray-900 leading-tight">{cycle.month_label}</p>
+        <p className={`text-sm font-semibold leading-tight ${isPaymentFree ? 'text-teal-800' : 'text-gray-900'}`}>
+          {cycle.month_label}
+        </p>
         <span className={`inline-block mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${chip.cls}`}>
           {chip.label}
         </span>
@@ -57,25 +72,31 @@ function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPayme
           </>
         ) : isPending ? (
           <p className="text-xs text-gray-400">Opens {formatShortDate(cycle.due_date)}</p>
-        ) : (cycle.winners?.length ?? 0) > 1 ? (
-          /* Double Chiti: two winners */
-          <>
-            <p className="text-xs font-medium text-gray-800 truncate">{cycle.winners[0].name}</p>
-            <p className="text-[10px] text-gray-500 truncate">{cycle.winners[1].name}</p>
-            <span className="inline-block mt-0.5 text-[9px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-1.5 py-0.5">
-              2× Double Chiti
-            </span>
-          </>
-        ) : (cycle.winners?.length ?? 0) === 1 ? (
-          /* Single winner */
-          <>
-            <p className="text-xs font-medium text-gray-800 truncate">{cycle.winners[0].name}</p>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              {cycle.is_skip_month ? 'Skip month' : `Bid ${formatPaise(cycle.winners[0].bid_amount)}`}
-            </p>
-          </>
+        ) : (cycle.winners?.length ?? 0) > 0 ? (
+          <div className="space-y-0.5">
+            {cycle.winners.map((w, i) => {
+              const isExtra = i >= winnersPerCycle
+              return (
+                <div key={i} className="flex items-center gap-1.5 min-w-0">
+                  <p className="text-xs font-medium text-gray-700 truncate">{w.name}</p>
+                  {isExtra && (
+                    <span className="shrink-0 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5 leading-none">
+                      Extra
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         ) : (
-          <p className="text-xs text-gray-400">No winner yet</p>
+          <>
+            <p className="text-xs text-gray-400">No winner yet</p>
+            {bankedProgress && (
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                {bankedProgress.current}/{bankedProgress.needed} toward Payment-Free
+              </span>
+            )}
+          </>
         )}
       </div>
 
@@ -85,13 +106,6 @@ function CycleRow({ cycle, isPaymentFree, onClick }: { cycle: CycleItem; isPayme
           <p className="text-sm text-gray-300">—</p>
         ) : (
           <>
-            {(cycle.winners?.length ?? 0) > 0 && (
-              <p className="text-xs font-semibold text-gray-700 tabular-nums">
-                {cycle.winners.length > 1
-                  ? formatPaise(cycle.winners[0].winner_takeaway + cycle.winners[1].winner_takeaway)
-                  : formatPaise(cycle.winners[0].winner_takeaway)}
-              </p>
-            )}
             <p className={`text-xs font-semibold ${allPaid ? 'text-green-600' : 'text-red-500'}`}>
               {formatPaise(cycle.collected_amount)}
             </p>
@@ -191,6 +205,24 @@ export default function HistoryPage() {
 
   // A cycle is "payment-free" if and only if is_skip_month === true (set by the backend
   // when the admin declares a skip month). No client-side heuristic needed.
+
+  // Compute how many extra winners have been banked toward the NEXT payment-free month.
+  // Extra winner = any winner slot beyond winners_per_cycle in a single cycle.
+  // bankedExtra = totalExtraWinners % winnersPerCycle — resets to 0 each time a skip is freed.
+  // targetCycleId = the last open cycle with no winners (the one the backend would free next).
+  const winnersPerCycle = group?.winners_per_cycle ?? 1
+  const { bankedExtra, targetCycleId } = useMemo(() => {
+    const totalExtra = cycles.reduce((sum, c) => {
+      return sum + Math.max(0, (c.winners?.length ?? 0) - winnersPerCycle)
+    }, 0)
+    const banked = winnersPerCycle > 1 ? totalExtra % winnersPerCycle : 0
+    const target = banked > 0
+      ? [...cycles]
+          .filter(c => c.status === 'Open' && !c.is_skip_month && (c.winners?.length ?? 0) === 0)
+          .sort((a, b) => b.month_number - a.month_number)[0]?.cycle_id ?? null
+      : null
+    return { bankedExtra: banked, targetCycleId: target }
+  }, [cycles, winnersPerCycle])
 
   const cycle     = group?.current_cycle
   const monthNum  = cycle?.month_number ?? 0
@@ -302,7 +334,8 @@ export default function HistoryPage() {
                 key={cycle.cycle_id}
                 cycle={cycle}
                 isPaymentFree={cycle.is_skip_month}
-                // Pass role via navigate state so CycleDetailPage knows if admin actions should be shown
+                bankedProgress={cycle.cycle_id === targetCycleId ? { current: bankedExtra, needed: winnersPerCycle } : undefined}
+                winnersPerCycle={winnersPerCycle}
                 onClick={() => navigate(`/groups/${groupId}/history/${cycle.cycle_id}`, {
                   state: { role: group?.my_membership?.role ?? 'Member', groupName: group?.name }
                 })}

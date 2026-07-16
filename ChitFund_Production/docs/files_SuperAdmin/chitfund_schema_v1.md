@@ -139,8 +139,8 @@ CREATE TABLE chit_groups (
     invitation_code      VARCHAR(10) NOT NULL UNIQUE,   -- short alphanumeric, e.g. "CF7K2X9P"
     pool_amount          BIGINT NOT NULL,               -- in paise. = monthly_contribution × total_shares
     monthly_contribution BIGINT NOT NULL,               -- in paise. Per-share contribution.
-    total_months         SMALLINT NOT NULL,             -- calendar duration of the chit cycle
-    total_shares         SMALLINT NOT NULL,             -- total share slots (≥ total_months, integer multiple of total_months)
+    total_months         SMALLINT NOT NULL,             -- = total_shares (one cycle per share)
+    total_shares         SMALLINT NOT NULL,             -- total share slots in this group
     start_month          DATE NOT NULL,                 -- first day of the start month
     payment_due_day      SMALLINT NOT NULL DEFAULT 10,         -- day of month (1-28) when contributions + loan interest are due
     admin_commission_rate NUMERIC(4,2) NOT NULL DEFAULT 0.00,  -- % of full pool_amount retained by admin in cash (e.g. 5.00 = 5%)
@@ -154,12 +154,9 @@ CREATE TABLE chit_groups (
     closed_at            TIMESTAMPTZ,
 
     CONSTRAINT chk_pool_matches
-        CHECK (pool_amount = monthly_contribution * total_months),
+        CHECK (pool_amount = monthly_contribution * total_shares),
     CONSTRAINT chk_months_shares
-        CHECK (total_months > 0 AND total_shares > 0
-               AND total_shares >= total_months),
-               -- Non-integer ratios (e.g. 30/20) are valid; winners_per_cycle = floor(total_shares/total_months)
-               -- and the remainder flows to basket as excess_per_cycle. Only total_shares < total_months is rejected.
+        CHECK (total_months > 0 AND total_shares > 0 AND total_months = total_shares),
     CONSTRAINT chk_interest_range
         CHECK (interest_rate_min >= 0 AND interest_rate_max >= interest_rate_min),
     CONSTRAINT chk_commission_rate
@@ -174,14 +171,11 @@ CREATE INDEX idx_groups_invite ON chit_groups(invitation_code);
 ```
 
 **Notes:**
-- **Share model:** A chit has `total_shares` slots. Each share contributes `monthly_contribution` per month. **A single person can hold multiple shares**, so `total_shares ≥ unique_people_count`. Example: 20-share chit with 5 people where Ramesh holds 4, Priya holds 6, others hold varying counts.
+- **Share model:** A chit has `total_shares` slots (= `total_months`, one cycle per share). Each share contributes `monthly_contribution` per month. **A single person can hold multiple shares**, so `total_shares ≥ unique_people_count`. Example: 10-share chit with 5 people where Ramesh holds 2, Priya holds 3, others hold 1 each.
 - **Invariants:**
-  - `pool_amount = monthly_contribution × total_months` — the prize each winning share receives, determined by cycle duration not share count.
-  - `total_shares ≥ total_months` — enforced by `chk_months_shares`. Non-integer ratios are valid.
-  - `winners_per_cycle = floor(total_shares / total_months)` — structural winners per cycle (app-derived, not stored). For 20/20 = 1, for 40/20 = 2, for 30/20 = 1.
-  - `excess_per_cycle = monthly_contribution × (total_shares mod total_months)` — fractional remainder credited to basket each cycle (app logic, not a stored column).
+  - `pool_amount = monthly_contribution × total_shares`
+  - `total_months = total_shares` (one cycle per share)
   - `SUM(memberships.share_count WHERE active) = total_shares` (enforced in app code, not DB, since memberships are added incrementally)
-- **Groups where `total_shares < total_months`** (e.g. 10 shares / 20 months) are **not yet supported** — rejected by `chk_months_shares`. See requirements §12 TD-2.
 - Money in paise as `BIGINT`. ₹1 crore = 1,00,00,00,000 paise — well within `BIGINT` range.
 - `payment_due_day` — day of month on which both the monthly contribution and loan interest are due for every cycle. Capped at 28 (DB constraint) so the date is valid even in February. Days 29–31 are rejected in app code before the row is inserted. Typical value is 10. When cycles are pre-created at group start, each cycle's `due_date` is computed as `payment_due_day` of that cycle's calendar month.
 - `admin_commission_rate` — percentage of the full pool amount the admin retains in cash (e.g. 5.00 = 5%). Set at group creation. Locked once cycle 1 starts (enforced in app code). A 0.00 value means no commission. Admin commission per cycle = `pool_amount × admin_commission_rate/100` (offline cash). Basket credit = `bid_amount − admin_commission`.
@@ -649,10 +643,7 @@ CREATE TRIGGER trg_loans_updated_at BEFORE UPDATE ON loans
 
 ## Worked example (sanity check)
 
-Group: 10 shares total, ₹10,000/month per share, 10 monthly cycles.
-- `pool_amount = monthly_contribution × total_months = ₹10,000 × 10 = ₹1,00,000`. Stored as paise: pool = 10,000,000.
-- `winners_per_cycle = floor(10 / 10) = 1` (one structural winner per month).
-- `excess_per_cycle = ₹10,000 × (10 mod 10) = ₹0`. Basket grows only from bid discounts. Standard model.
+Group: 10 shares total, ₹10,000/month per share, 10 monthly cycles. Pool = ₹1,00,000/month. Stored as paise: pool = 10,000,000.
 
 **5 people in this group:**
 
@@ -712,34 +703,6 @@ Group: 10 shares total, ₹10,000/month per share, 10 monthly cycles.
 - 5 `CLOSURE_SPLIT` ledger rows, one per person.
 
 This walks through validates: pool/contribution math, `share_count` semantics, `wins_count` eligibility, ascending-bid basket arithmetic (including commission split), skip-month gate, proportional closure split. ✅
-
----
-
-### Worked example — 30 shares / 20 months (non-integer ratio)
-
-Group: 30 shares total, ₹5,000/month per share, 20 monthly cycles.
-- `pool_amount = ₹5,000 × 20 = ₹1,00,000`.
-- `winners_per_cycle = floor(30 / 20) = floor(1.5) = 1` (one structural winner per month).
-- `excess_per_cycle = ₹5,000 × (30 mod 20) = ₹5,000 × 10 = ₹50,000` credited to basket each cycle.
-- Monthly collection = 30 × ₹5,000 = ₹1,50,000. Winner gets ₹1,00,000 (−bid). Remaining ₹50,000 → basket.
-- After cycle 1: basket ≥ ₹50,000. After cycle 2: basket ≥ ₹1,00,000 → Double Chiti eligible (2nd winner can bid). ✅
-
-### Worked example — 40 shares / 20 months (multi-winner group)
-
-Group: 40 shares total, ₹5,000/month per share, 20 monthly cycles.
-- `pool_amount = ₹5,000 × 20 = ₹1,00,000` (what each winning share receives). Stored as paise: 10,000,000.
-- `winners_per_cycle = floor(40 / 20) = 2` (two structural winners declared every month).
-- `excess_per_cycle = ₹5,000 × (40 mod 20) = ₹5,000 × 0 = ₹0`. No excess; basket grows only from bid discounts of both winners.
-- Monthly collection = 40 × ₹5,000 = ₹2,00,000. Monthly payout = 2 × ₹1,00,000 = ₹2,00,000. ✓ Balanced.
-- `admin_commission_rate = 5%`. Commission per winner = ₹1,00,000 × 5% = ₹5,000.
-
-**Month 1:** Two winners declared. Winner A bids ₹10,000; Winner B bids ₹12,000.
-- Winner A: admin_commission = ₹5,000, basket_credit = ₹5,000, winner_takeaway = ₹90,000.
-- Winner B: admin_commission = ₹5,000, basket_credit = ₹7,000, winner_takeaway = ₹88,000.
-- Total basket credits: ₹12,000. Admin collects 2 × ₹5,000 = ₹10,000 offline in cash.
-- `wins_count` increments by 1 for both Winner A and Winner B.
-
-**Closure split:** `basket_balance × member.share_count / total_shares` — proportional to shares, same formula as before. ✅
 
 ---
 

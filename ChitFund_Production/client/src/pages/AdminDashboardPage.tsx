@@ -573,6 +573,16 @@ export default function AdminDashboardPage() {
               <ActionButton icon="🔔" label="Remind defaulters" onClick={handleRemindDefaulters} loading={reminding} />
               <ActionButton icon="🧺" label="Basket & loans" onClick={() => navigate(`/groups/${groupId}/basket`)} />
             </div>
+            <button
+              onClick={() => navigate(`/groups/${groupId}/members`)}
+              className="w-full mt-2 flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-gray-100 text-gray-700 hover:bg-maroon-50 hover:border-maroon-200 transition"
+            >
+              <span className="text-lg">👥</span>
+              <span className="flex-1 text-[11px] font-medium text-left">Members</span>
+              <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
             {remindMsg && (
               <p className="text-xs text-center mt-2 text-maroon-600 font-medium">{remindMsg}</p>
             )}

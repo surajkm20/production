@@ -81,7 +81,7 @@ Plus per-user aggregates:
 
 **Layout, top to bottom:**
 1. **Header bar** — back arrow, info icon (group settings), three-dot menu (rename, transfer admin, close group, rotate invitation code).
-2. **Group header block** — group name + Admin badge. Subtitle: "5 people · 10 shares · ₹10,000/share · Pool ₹1,00,000 · 1 winner/month". For groups with `winners_per_cycle > 1`, the "N winners/month" suffix is highlighted in purple to make the multi-winner nature immediately visible. Progress bar showing month X of N (where N = total_months).
+2. **Group header block** — group name + Admin badge. Subtitle: "5 people · 10 shares · ₹10,000/share · Pool ₹1,00,000". Progress bar showing month X of N.
 3. **Current month panel** (gray background, sets it apart):
    - Heading: "Current month — Apr 2026".
    - Status pill: `Open · Due Apr 28` or `Closed`.
@@ -256,12 +256,9 @@ Available cycles: list of past + current cycle_ids and labels for the selector.
 
 **Layout, top to bottom:**
 1. **Header bar** — back, "Record month outcome", cycle label (e.g., "Apr 2026") on right.
-2. **(When basket-eligible) Extra winner banner** — amber/gold card shown only when `double_chiti > winners_per_cycle` (basket can fund at least one extra winner beyond the structural minimum). Example: `"SunRise group is eligible for Triple Chiti"`. Sub-text: `"Total basket ₹2,04,200 · Pool ₹1,00,000 · 1 extra winner available this cycle"`. Hidden when `double_chiti = winners_per_cycle` (no basket-funded extras).
+2. **(When eligible) Double Chiti eligibility banner** — amber/gold card shown at the top when `double_chiti ≥ 2`. Example: `"SunRise group is eligible for Double Chiti"`. Sub-text: `"Total basket ₹2,04,200 · Pool ₹1,00,000 · 2 winners this cycle"`. Hidden when `double_chiti < 2`.
 3. **Outcome toggle** — two cards side-by-side: "Regular month" (default selected) vs "Skip month". Selecting "Skip month" reshapes the form below.
-4. **Winner slots** — the form always shows `winners_per_cycle` numbered bid-entry blocks (structural, mandatory). If `double_chiti > winners_per_cycle`, additional optional blocks are shown for basket-funded extra winners. Each block has its own winner picker + bid amount input + math preview. Admin can fill them in any order.
-   - **Structural blocks** (first `winners_per_cycle` slots): labeled "Winner 1", "Winner 2" etc. Must all be filled before the cycle can be closed. Save button remains disabled until all structural blocks are complete.
-   - **Extra blocks** (if basket eligible): labeled "Extra winner 1" etc. Optional — admin can save structural winners first and add extras separately.
-   - When `winners_per_cycle = 1` and no basket extras: single block with no numbering — identical to original UX.
+4. **(Regular month — Double Chiti eligible) Winner slots** — when `double_chiti ≥ 2`, the form shows X numbered bid-entry blocks stacked vertically, e.g. "Winner 1", "Winner 2". Each block has its own winner picker + bid amount input + math preview. Admin can fill them in any order. Blocks not yet filled show dimmed placeholder text. When `double_chiti = 1`, only a single block (no numbering) is shown — the original UX.
 5. **Winner picker (per block)** — dropdown labeled "Winner (eligible members)". Shows only members where `wins_count < share_count` AND not already picked in another block this cycle. Subtitle: "7 of 10 still eligible · 3 already won". Each option shows the person's avatar, name, and remaining wins. The admin's own name appears with a "(you)" suffix.
 6. **(When admin selects themselves) Admin withdrawal toggle (per block)** — a toggle labeled "Use special share (admin withdrawal)". When ON: bid input is hidden and the withdrawal math preview is shown. Disabled with a note if already used.
 7. **(Regular month — withdrawal OFF) Winning bid amount (per block)** — currency input. Helper text: "The amount the winner is leaving for the basket. Highest bid won."
@@ -289,8 +286,7 @@ Eligible winners list:
 - For each membership: { user_id, name, share_count, wins_count, is_eligible, role, admin_withdrawal_used }
 
 Double Chiti eligibility:
-- GET /groups/:group_id/chiti-eligibility → { double_chiti, winners_per_cycle, label, eligible, total_basket, realized, unrealized }
-- `winners_per_cycle` determines how many structural blocks to show. `double_chiti - winners_per_cycle` determines how many optional extra blocks to show.
+- GET /groups/:group_id/chiti-eligibility → { double_chiti, label, eligible, total_basket, realized, unrealized }
 
 Basket state:
 - current_balance (for skip-month gating and running basket preview)
@@ -299,11 +295,10 @@ Basket state:
 **Actions:**
 - Toggle between Regular / Skip month → reshapes form.
 - Type bid amount in any block → math preview for that block updates client-side. Running basket balance updates across all blocks.
-- Save structural winners (first `winners_per_cycle` blocks, all required) → `POST .../record-winner` once per filled block, sequentially.
-- Save extra winners (optional, when basket eligible) → same endpoint, same shape.
+- Save (Regular bid, any winner including admin without toggle) → `POST .../record-winner` once per filled block, sequentially.
 - Save (Admin withdrawal, toggle ON) → same endpoint with `{winner_user_id: <admin-id>, bid_amount: 0, is_admin_withdrawal: true, notes}`.
 - Save (Skip) → `POST /groups/:group_id/cycles/:cycle_id/declare-skip-month` with `{winner_user_id, notes}`.
-- After all structural saves → redirect to admin dashboard (cycle can now be closed). Extra-winner blocks can be filled before or after closing payments.
+- After all saves → redirect to admin dashboard.
 
 **API endpoints used:**
 - `GET /groups/:group_id/chiti-eligibility` — Double Chiti banner + slot count.
@@ -432,26 +427,23 @@ Ledger entries (paginated, filter by type and/or cycle_id; member response is au
 1. **Header bar** — close (X), "Create new group".
 2. **Group name** — text input.
 3. **Contribution per share, per month** — currency input. Helper: "A person who holds 2 shares would pay ₹20,000 every month."
-4. **Total shares in the chit** — number stepper (− N +). Info banner explains: "Total shares = total member-slots. You can have fewer people if some hold multiple shares (e.g. 5 people with 2 shares each = 10 shares)."
-5. **Total months (duration)** — number stepper (− N +). Info banner: "How many calendar months the chit runs." Inline error shown only when `total_shares < total_months`: "Total shares must be at least equal to total months."
-6. **Winners per cycle** — read-only computed field, displayed inline below the two steppers. Shows `floor(total_shares / total_months)` structural winners + any basket-funded extras note. Examples: 20/20 → "1 winner/month". 40/20 → "2 winners/month". 30/20 → "1 winner/month + excess ₹50,000/month flows to basket → Double Chiti available from month 3." Updates live as either stepper changes. Shown in purple when structural winners > 1 or when excess > 0.
-7. **Your shares in this chit** — number stepper (− N +). Min 1, max `total_shares`. Defaults to 1. Updates dynamically — if the admin later reduces total shares below the selected value, this clamps down automatically. Helper: "You'll pay ₹[contribution × N]/mo." (live, updates as either stepper changes).
-8. **Start month** — month picker. Helper: "Chit will run May 2026 — Dec 2027" (computed from start_month + total_months).
-9. **Admin commission rate** — percentage input. Default 0%. Helper: "Your cut from each winner's pool. Example: 5% on a ₹1,00,000 pool = ₹5,000 per winner, collected offline in cash. Visible to all members. Locked once cycle 1 starts."
-10. **Loan interest range** — two number inputs (Min % / Max %). Defaults 2% and 5%. Helper: "Per-loan rate is set when you disburse a loan, within this range."
-11. **Group summary panel** (purple, live-updating preview):
-    - Pool per winner: ₹1,00,000 (computed = contribution × total_months).
-    - Winners per month: N (computed = total_shares / total_months).
-    - Total cycles: N months (= total_months).
-    - "Your share (N shares): ₹[contribution × N]/mo" — N is the value from stepper 7, updates live.
-    - Invitation code: "CF7K2X9P" (auto-generated post-create, in monospace font).
-12. **Warning banner** — "After cycle 1 starts, contribution, total shares, total months, and admin commission are locked. You can still rename the group anytime."
-13. **Action bar** — Cancel / Create group (filled primary; disabled while the share/month ratio is invalid).
+4. **Total shares in the chit** — number stepper (− N +). Info banner explains: "10 shares = 10 monthly cycles. You can have fewer than 10 people if some hold multiple shares (e.g. 5 people with 2 shares each)."
+5. **Your shares in this chit** — number stepper (− N +). Min 1, max `total_shares`. Defaults to 1. Updates dynamically — if the admin later reduces total shares below the selected value, this clamps down automatically. Helper: "You'll pay ₹[contribution × N]/mo." (live, updates as either stepper changes).
+6. **Start month** — month picker. Helper: "Chit will run May 2026 — Feb 2027".
+7. **Admin commission rate** — percentage input. Default 0%. Helper: "Your cut from each month's pool. Example: 5% on a ₹1,00,000 pool = ₹5,000 to you, regardless of the winning bid. Visible to all members. Locked once cycle 1 starts."
+8. **Loan interest range** — two number inputs (Min % / Max %). Defaults 2% and 5%. Helper: "Per-loan rate is set when you disburse a loan, within this range."
+9. **Group summary panel** (purple, live-updating preview):
+   - Pool per month: ₹1,00,000 (computed = contribution × shares).
+   - Total cycles: 10 months.
+   - "Your share (N shares): ₹[contribution × N]/mo" — N is the value from stepper 5, updates live.
+   - Invitation code: "CF7K2X9P" (auto-generated post-create, in monospace font).
+10. **Warning banner** — "After cycle 1 starts, contribution, total shares, and admin commission are locked. You can still rename the group anytime."
+11. **Action bar** — Cancel / Create group (filled primary).
 
 **Data needed:** None on entry. After create, response provides:
 ```
 - group_id, name, invitation_code
-- pool_amount, monthly_contribution, total_shares, total_months, winners_per_cycle
+- pool_amount, monthly_contribution, total_shares, total_months
 - start_month
 - admin_commission_rate
 - interest_rate_min, interest_rate_max
@@ -461,10 +453,9 @@ Ledger entries (paginated, filter by type and/or cycle_id; member response is au
 
 **Actions:**
 - Type in inputs → live update of the summary panel.
-- Adjust total shares OR total months stepper → recompute winners_per_cycle and excess_per_cycle live; show inline error only if total_shares < total_months.
 - Adjust total shares stepper → clamp admin share count if it now exceeds total shares.
 - Cancel → back to home.
-- Create group → `POST /groups` with full payload including `total_months`, `total_shares`, and `admin_share_count`. On success, redirects to screen 8 (Add members) so admin can fill remaining shares.
+- Create group → `POST /groups` with full payload including `admin_share_count`. On success, redirects to screen 8 (Add members) so admin can fill remaining shares.
 
 **API endpoints used:**
 - `POST /groups`.
@@ -810,8 +801,6 @@ Audit log entries (loaded lazily when section expanded):
 - **Separate web app** at `admin.chitfund.app` — not part of the consumer mobile app bundle. Desktop / laptop first; the screen assumes wide horizontal space.
 - Logged into via the same `/auth/login` endpoint as the main app. After login, server checks `role`; if not `SuperAdmin`, login is rejected from this domain.
 - Stricter session: shorter access-token expiry (5 min vs the regular 15), no "remember me," forced re-login on day rollover.
-
-> **v1 implementation note (2026-06-14).** The above describes the Phase 2 target. **In v1 the console ships as a guarded `/admin` route inside the existing PWA** (not a separate domain), using the standard `/auth/login` + 15-min token. A promoted user who also runs real groups lands on their normal **Home (My Groups)** and reaches the console via an **"Admin Console" entry point** shown only when `GET /me` returns `role = 'SuperAdmin'` (landing **Model A**). The console links back to "My Groups". Tabs are built in order: **Money → Growth → Engagement → Reliability**. See requirements §8.1.
 
 **Why separate, not in-app:**
 1. **Security surface.** SuperAdmin can see every group's money. Separate URL = smaller blast radius if any other account is ever compromised.
