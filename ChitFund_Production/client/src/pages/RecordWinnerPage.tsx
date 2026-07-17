@@ -187,7 +187,7 @@ export default function RecordWinnerPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-800 truncate">{w.name ?? '—'}</p>
                     <p className="text-xs text-gray-400">
-                      {w.is_admin_withdrawal ? 'Admin withdrawal' : `Bid ${formatPaise(w.bid_amount)} · Takes ${formatPaise(w.winner_takeaway)}`}
+                      {w.is_admin_withdrawal ? 'Admin withdrawal' : `Bid ${formatPaise(w.bid_amount ?? 0)} · Takes ${formatPaise(w.winner_takeaway)}`}
                     </p>
                   </div>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium shrink-0">
@@ -380,7 +380,7 @@ export default function RecordWinnerPage() {
                           <div className="text-right shrink-0">
                             <p className="text-xs text-gray-400">Left behind</p>
                             <p className="text-sm font-bold text-gray-800">
-                              {c.is_skip_month ? '—' : formatPaise(w.bid_amount)}
+                              {c.is_skip_month ? '—' : formatPaise(w.bid_amount ?? 0)}
                             </p>
                           </div>
                         </div>
@@ -389,7 +389,7 @@ export default function RecordWinnerPage() {
                           <div className="mt-2 grid grid-cols-2 gap-2">
                             <div className="bg-gray-50 rounded-lg px-3 py-2">
                               <p className="text-[10px] text-gray-400 mb-0.5">Bid (to basket)</p>
-                              <p className="text-xs font-bold text-gray-700">{formatPaise(w.bid_amount)}</p>
+                              <p className="text-xs font-bold text-gray-700">{formatPaise(w.bid_amount ?? 0)}</p>
                             </div>
                             <div className="bg-maroon-50 rounded-lg px-3 py-2">
                               <p className="text-[10px] text-maroon-400 mb-0.5">Winner received</p>
