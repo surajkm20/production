@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
-import { formatPaise, initials } from '../lib/format'
+import { formatPaise, initials, titleCase } from '../lib/format'
+import MemberSelect from '../components/MemberSelect'
 import type { GroupDetail, CycleItem, Member, ChitiEligibility } from '../types/api'
 
 export default function RecordWinnerPage() {
@@ -185,7 +186,7 @@ export default function RecordWinnerPage() {
                     {initials(w.name ?? '?')}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{w.name ?? '—'}</p>
+                    <p className="text-sm font-semibold text-gray-800 truncate">{w.name ? titleCase(w.name) : '—'}</p>
                     <p className="text-xs text-gray-400">
                       {w.is_admin_withdrawal ? 'Admin withdrawal' : `Bid ${formatPaise(w.bid_amount ?? 0)} · Takes ${formatPaise(w.winner_takeaway)}`}
                     </p>
@@ -222,22 +223,15 @@ export default function RecordWinnerPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
 
-              {/* Winner dropdown — shows all eligible members (wins_count < share_count) */}
+              {/* Winner picker — searchable, shows all eligible members (wins_count < share_count) */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Winner</label>
-                <select
+                <MemberSelect
+                  members={eligibleMembers}
                   value={winnerId}
-                  onChange={e => { setWinnerId(e.target.value); setIsAdminWithdrawal(false); setBidRupees('') }}
-                  required
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-maroon-500"
-                >
-                  <option value="">Select eligible member</option>
-                  {eligibleMembers.map(m => (
-                    <option key={m.user_id} value={m.user_id}>
-                      {m.name} ({m.wins_count}/{m.share_count} wins)
-                    </option>
-                  ))}
-                </select>
+                  onChange={id => { setWinnerId(id); setIsAdminWithdrawal(false); setBidRupees('') }}
+                  placeholder="Search eligible member…"
+                />
                 {eligibleMembers.length === 0 && (
                   <p className="text-xs text-amber-600 mt-1">No eligible members — all shares have been won.</p>
                 )}
@@ -372,7 +366,7 @@ export default function RecordWinnerPage() {
                             {initials(w.name ?? '?')}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-800 truncate">{w.name ?? '—'}</p>
+                            <p className="text-sm font-semibold text-gray-800 truncate">{w.name ? titleCase(w.name) : '—'}</p>
                             {(c.winners?.length ?? 0) > 1 && (
                               <p className="text-[10px] text-gray-400">Winner #{w.winner_number}</p>
                             )}
